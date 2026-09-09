@@ -80,7 +80,12 @@ reference/       Curated screenshots + Lua/opcode reference text
 area-52/         Area-52 "Free-Pick" realm-flavour specifics (see its README)
 contrib/         Tools contributed by others, adapted (see each README)
   AscensionRedirect/            WinDivert packet redirect + Frida auth-send probe
+  CoADataComparison/            Read-only CA/community comparison + synthetic tests
 ```
+
+[`contrib/CoADataComparison`](contrib/CoADataComparison/README.md) compares
+locally supplied CA and community exports by identifiers and source hashes.
+It is an optional research tool, not a server component or a client-data bundle.
 
 ## Requirements
 
