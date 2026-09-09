@@ -51,7 +51,8 @@ def lua_block(src, key):
 def load_edges():
     if not os.path.exists(SV):
         raise SystemExit("missing %s" % SV)
-    src = io.open(SV, encoding="utf-8", errors="replace").read()
+    with io.open(SV, encoding="utf-8", errors="replace") as f:
+        src = f.read()
     block = lua_block(src, "edges")
     edges = {}
     for m in re.finditer(r'\["(\d+)"\] = \{(.*?)\n\t\t\}', block, re.S):
@@ -92,14 +93,16 @@ def validate(edges, rows):
     ok &= recip == 0
 
     if not rows:
-        print("entries.csv missing -- skipping the direction / boundary checks")
-        return ok
+        print("entries.csv missing or empty -- cannot validate direction / boundary checks")
+        return False
 
     dy = collections.Counter()
     cross = 0
     for a, vs in edges.items():
         ra = rows.get(a)
         if not ra:
+            print("missing source in entries.csv: %d" % a)
+            ok = False
             continue
         for b in vs:
             rb = rows.get(b)
@@ -129,7 +132,7 @@ def main():
     ok = validate(edges, load_entries())
     if "--check" in sys.argv[1:]:
         print("check only -- nothing written")
-    else:
+    elif ok:
         with io.open(OUT, "w", encoding="utf-8") as f:
             json.dump({str(k): edges[k] for k in sorted(edges)}, f,
                       indent=0, sort_keys=True)
