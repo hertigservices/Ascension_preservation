@@ -8,7 +8,9 @@ An optional research instrument, **not part of the runnable server stack**. It c
 |---|---|
 | `compare_ca.py` | Standard-library command-line comparator |
 | `test_compare_ca.py` | Synthetic fixtures and automated tests; no client install required |
-| `CONTRIBUTION-PROPOSAL.md` | Scope, initial coverage findings, source attribution and review limits |
+| `CONTRIBUTION-PROPOSAL.md` | Scope, coverage findings, source attribution and review limits |
+| `data/comparison-ids.json` | Identifier lists from one verified comparison (no description text) |
+| `data/README.md` | How to read those lists |
 
 ## Inputs
 

@@ -30,7 +30,7 @@ Source references:
 | Unmapped or ambiguous community references | 43 |
 | Dangling community node references | 8 |
 
-These were independently recomputed during the initial audit. The new tool must reproduce them before release; its test and real-corpus receipts are recorded separately.
+These were independently recomputed during the initial audit and are shipped as identifier lists in `data/comparison-ids.json` (no Hub/client wording).
 
 ## Interpretation boundaries
 
