@@ -23,13 +23,45 @@ Build output stays in ignored `build/`. `verify-build.py` inspects PE32 architec
 
 Optional real authserver checks use an existing disposable local test account. Close its game client first, set `AUTHGATE_TEST_USER` and `AUTHGATE_TEST_PASSWORD` in your current shell, and run `.\test.bat --live-gate`. Clear those environment variables afterward. Tests do not create accounts or alter game databases directly; real authentication updates that account's normal session state.
 
-## Install on the original client
+## Set up (build detection + shim fallback)
 
-Stop the Ascension client. Pass its **real directory**, resolving any hub alias/junction yourself:
+`setup.ps1` is the recommended entry point. It detects your client build and does the safe
+thing automatically:
+
+```powershell
+.\setup.ps1 -ClientRoot 'C:\YourAscensionClient' -Mode coa
+```
+
+1. It hashes `Ascension.exe` and the genuine extension and runs `tools/find-offsets.py`
+   (read-only). The login RVA is re-derived by name via the `DefaultServerLogin` binding, so an
+   **exe that has only drifted** (same extension) is still handled; the auth-object offsets are
+   trusted only when the extension's SHA-256 matches a known profile in `profiles/`.
+2. **Compatible** → it installs AuthGate, writing the verified/derived offsets to
+   `<ClientRoot>\authgate.profile` (the DLL reads it at load; absent means the compiled
+   archive-build defaults, and the login prologue is verified before hooking either way — a
+   wrong profile fails closed and changes nothing).
+3. **Not compatible** → it will not patch a guess. The extension is VMProtect-obfuscated, so
+   unknown auth-object offsets cannot be safely re-derived. Instead it states the trade-offs and,
+   with your explicit approval (an interactive prompt, or `-ShimFallback` non-interactively),
+   routes you to the **build-agnostic shim** — which leaves `Extensions.dll` unchanged. The shim's
+   limitations are stated before you approve: it is permissive (no per-account password check), it
+   runs as a separate process, and it reads the session key via `ReadProcessMemory` (same-integrity
+   launch required). See [`docs/HOW-THE-REDIRECT-WORKS.md`](../../docs/HOW-THE-REDIRECT-WORKS.md).
+
+To add support for a new build, run `tools/find-offsets.py` against it; if it reports
+`COMPATIBLE` it emits a profile you can drop into `profiles/` (and contribute back).
+
+## Install on the original client (direct)
+
+`setup.ps1` calls this for you; use it directly only for the exact supported build. Stop the
+Ascension client. Pass its **real directory**, resolving any hub alias/junction yourself:
 
 ```powershell
 .\install-client.ps1 -ClientRoot 'C:\YourAscensionClient'
 ```
+
+(`-Profile <profile.json>` accepts an exe-drifted build whose extension is unchanged; it is
+rejected for any other extension.)
 
 The installer validates the exact supported executable and genuine extension, renames the genuine DLL to `Extensions_orig.dll`, and creates the reviewed proxy as `Extensions.dll`. It rejects an unexpected existing proxy or backup rather than overwriting it. The genuine extension remains intact and is chain-loaded for the existing UI. The installer never touches `Data`. An unsuccessful initial copy restores the genuine filename.
 

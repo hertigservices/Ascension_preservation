@@ -16,6 +16,14 @@ static int g_coa = 1;
 static int g_ready = 0;
 #define RVA_AUTHOBJ_SLOT 0x00bdbc04
 #define OFF_LOGIN_K 0x120
+#define GATE_LOGIN_RVA 0xD8A30
+/* Runtime offsets default to the compiled (archive-build) values. An optional
+ * authgate.profile beside this DLL overrides them for an exe-drifted build whose
+ * extension is unchanged (see load_profile + tools/find-offsets.py). The login
+ * prologue is still verified before hooking, so a wrong profile fails closed. */
+static DWORD g_login_rva    = GATE_LOGIN_RVA;
+static DWORD g_authobj_slot = RVA_AUTHOBJ_SLOT;
+static DWORD g_off_login_k  = OFF_LOGIN_K;
 #define PROD_B0 51
 #define PROD_B1 210
 #define PROD_B2 230
@@ -273,8 +281,8 @@ static int as_read_login_K(unsigned char K[32])
     HMODULE eo = GetModuleHandleA("Extensions_orig.dll");
     DWORD obj = 0;
     if (!eo) return 0;
-    if (!kr_read_u32((BYTE *)eo + RVA_AUTHOBJ_SLOT, &obj) || !obj) return 0;
-    return kr_read_bytes((const void *)(obj + OFF_LOGIN_K), K, 32) && !kr_all_zero(K, 32);
+    if (!kr_read_u32((BYTE *)eo + g_authobj_slot, &obj) || !obj) return 0;
+    return kr_read_bytes((const void *)(obj + g_off_login_k), K, 32) && !kr_all_zero(K, 32);
 }
 
 static int as_hmac_sha256(const unsigned char *key, ULONG keylen,
@@ -320,8 +328,8 @@ static int as_build_challenge(unsigned char out[119])
 /* ---- PATH 1 credential GATE: capture login(user,pass) @ RVA 0xD8A30 and validate
  * it with a real SRP6 login to the authserver, WITHOUT leaving the client's custom
  * (bypass) path. VALID -> call the original login (custom auth proceeds to char-select
- * via the in-process AUTHSRV); REJECTED/UNREACHABLE -> block. */
-#define GATE_LOGIN_RVA 0xD8A30
+ * via the in-process AUTHSRV); REJECTED/UNREACHABLE -> block. Login RVA is g_login_rva
+ * (compiled default GATE_LOGIN_RVA, overridable by authgate.profile). */
 #define GATE_AUTH_IP   0x0100007Fu     /* 127.0.0.1 authserver (TODO: realmList IP for LAN) */
 typedef int (__cdecl *gate_login_t)(const char *, const char *);
 static gate_login_t g_orig_login;
@@ -344,7 +352,7 @@ static int __cdecl gate_my_login(const char *user, const char *pass)
 }
 static void gate_install(void)
 {
-    BYTE *t = (BYTE *)GetModuleHandleA(NULL) + GATE_LOGIN_RVA;
+    BYTE *t = (BYTE *)GetModuleHandleA(NULL) + g_login_rva;
     BYTE *tr; DWORD o; char b[96]; unsigned char sv[32];
     if (!srp6_selftest(sv)) { aslog("[gate] SRP6 self-test FAIL\r\n"); return; }
     aslog("[gate] SRP6 self-test PASS\r\n");
@@ -567,6 +575,64 @@ static DWORD WINAPI authsrv_thread(LPVOID unused)
     }
 }
 
+/* Parse an unsigned value: "0x.." hex or decimal. Advances nothing; bounded by NUL. */
+static DWORD prof_num(const char *s)
+{
+    DWORD v = 0; int hex = 0;
+    while (*s == ' ' || *s == '\t') s++;
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { hex = 1; s += 2; }
+    for (; *s; s++) {
+        char c = *s; DWORD d;
+        if (c >= '0' && c <= '9') d = (DWORD)(c - '0');
+        else if (hex && c >= 'a' && c <= 'f') d = (DWORD)(c - 'a' + 10);
+        else if (hex && c >= 'A' && c <= 'F') d = (DWORD)(c - 'A' + 10);
+        else break;
+        v = v * (hex ? 16 : 10) + d;
+    }
+    return v;
+}
+
+/* Find "key" in buf (distinct keys only), skip to '=', return its value via prof_num.
+ * Returns 1 on hit. buf is NUL-terminated. */
+static int prof_get(const char *buf, const char *key, DWORD *out)
+{
+    int kl = lstrlenA(key);
+    const char *p = buf;
+    for (; *p; p++) {
+        int i = 0;
+        while (i < kl && p[i] && p[i] == key[i]) i++;
+        if (i == kl) {
+            const char *q = p + kl;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q == '=') { *out = prof_num(q + 1); return 1; }
+        }
+    }
+    return 0;
+}
+
+/* Optional runtime offset override for an exe-drifted build (see find-offsets.py).
+ * Reads "authgate.profile" (key=value lines) beside this DLL; absent -> compiled
+ * defaults. The login prologue check in gate_install remains the fail-closed guard. */
+static void load_profile(void)
+{
+    char path[MAX_PATH], buf[1024], b[128]; HANDLE f; DWORD n = 0, v;
+    if (lstrlenA(g_dir) + (int)sizeof("authgate.profile") > MAX_PATH) return;
+    lstrcpynA(path, g_dir, MAX_PATH); lstrcatA(path, "authgate.profile");
+    f = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE) {
+        aslog("[startup] no authgate.profile; using compiled offsets\r\n"); return;
+    }
+    if (!ReadFile(f, buf, sizeof(buf) - 1, &n, NULL)) n = 0;
+    CloseHandle(f); buf[n] = 0;
+    if (prof_get(buf, "login_rva", &v))        g_login_rva = v;
+    if (prof_get(buf, "authobj_slot_rva", &v)) g_authobj_slot = v;
+    if (prof_get(buf, "off_login_k", &v))      g_off_login_k = v;
+    wsprintfA(b, "[startup] profile applied: login_rva=0x%X slot=0x%X off_k=0x%X\r\n",
+              g_login_rva, g_authobj_slot, g_off_login_k);
+    aslog(b);
+}
+
 /* Initialize the status log before any startup routine can use it. */
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
 {
@@ -599,6 +665,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
         g_ready = 1;
         aslog("=== AuthGate CLEAN: status logging only; no packet/key capture ===\r\n");
+        load_profile();   /* optional per-build offset override; else compiled defaults */
         cli = GetModuleHandleA(NULL);
         o_CreateFileA = (CreateFileA_t)hook_iat(cli, "kernel32.dll", "CreateFileA", (void *)my_CreateFileA);
         o_CreateFileW = (CreateFileW_t)hook_iat(cli, "kernel32.dll", "CreateFileW", (void *)my_CreateFileW);
