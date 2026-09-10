@@ -31,6 +31,8 @@ directions and are reassembled per verb.
 | `RESET\ttalents` / `RESET\tall` | `RESULT\tRESET\tOK`, then `STATE` |
 | `CLASS\t<classByte>[\t<archetypeUUID>]` | `RESULT\tCLASS\tOK` or `ERR` (`unknown-class`, `already-chosen`, `carrier-mismatch`, `bad-archetype`), then `STATE`. Accepted once, while the character has no CA rows; the stock class the character was created with must carry the same power bar (`ascension_ca_class.power_type`). With an archetype, its build entries are learned as far as level and budget allow, and the rest on every level-up. |
 
+| `INSPECT\t<name>` | `INSPECT\t<name>\t<classByte>\t<specId>\t<level>\t<entry:rank,...>` for an online character, or `RESULT\tINSPECT\tERR\tnot-found` |
+
 `STATE` is `STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<chosen>\t<entry:rank,...>`;
 `chosen` = 0 until `CLASS` has been accepted (the addon pack then consults the glue mailbox).
 

@@ -60,6 +60,36 @@ C_VanityCollection.GetItem = C_VanityCollection.GetItem or function() return nil
 C_VanityCollection.GetItemByLearnedSpell = C_VanityCollection.GetItemByLearnedSpell or function() return nil end
 C_VanityCollection.GetOwnerByContentItem = C_VanityCollection.GetOwnerByContentItem or function() return nil end
 C_VanityCollection.GetSeasonalShowcaseItems = C_VanityCollection.GetSeasonalShowcaseItems or function() return {} end
+-- Hero Architect (Ascension_BuildCreator) natives that are out of scope for the P5 browse /
+-- import path: the build EDITOR (C_BuildEditor publishes builds to Ascension's service),
+-- WildCard mode and Mystic Enchant lookups. Every call answers "no" / nothing so the addon
+-- loads and its read-only paths work; the editor UI stays visibly inert.
+local function inertNamespace(name, overrides)
+    local ns = _G[name] or {}
+    _G[name] = ns
+    setmetatable(ns, { __index = function(_, key)
+        local fn = function() return nil end
+        rawset(ns, key, fn)
+        return fn
+    end })
+    for k, v in pairs(overrides or {}) do ns[k] = v end
+    return ns
+end
+inertNamespace("C_BuildEditor", {
+    GetPendingBuild = function() return nil end,
+    CanPublishBuild = function() return false, "ASC_PREVIEW_READ_ONLY" end,
+    GetEssenceForLevel = function(level)
+        local ae, te = ASC.Data.GetBudget(ASC.Config and ASC.Config.classByte or 28, level or 80)
+        return ae or 0, te or 0
+    end,
+    GetSpellByID = function() return nil end,
+})
+inertNamespace("C_Wildcard", { CanUseRapidRolling = function() return false end })
+inertNamespace("C_MysticEnchant", { GetEnchantInfoBySpell = function() return nil end })
+-- Ascension native: GetMaxLevel() (the realm's level cap; Hero Architect sizes its level slider by it)
+if not GetMaxLevel then
+    function GetMaxLevel() return MAX_PLAYER_LEVEL or 80 end
+end
 -- Ascension native: IsPassiveSpellID(spellID); stock IsPassiveSpell accepts a spell id too.
 if not IsPassiveSpellID then
     function IsPassiveSpellID(spellID) return IsPassiveSpell(spellID) end
@@ -172,6 +202,13 @@ local function OpenCharacterAdvancement()
     return ok
 end
 Stock.OpenCharacterAdvancement = OpenCharacterAdvancement
+function Stock.OpenHeroArchitect()
+    if not Collections then Collections_LoadUI() end
+    if not Collections then Stock.Log("Collections frame is not loaded") return false end
+    local ok, err = pcall(Collections.GoToTab, Collections, Collections.Tabs.HeroArchitect)
+    if not ok then Stock.Log("GoToTab(HeroArchitect) failed: " .. tostring(err)) end
+    return ok
+end
 if not ToggleCollections then
     function ToggleCollections()
         if Collections and Collections:IsShown() then HideUIPanel(Collections) return end
@@ -210,7 +247,22 @@ SlashCmdList.ASCERRORS = function()
     DEFAULT_CHAT_FRAME:AddMessage(#AscensionShimDB.errors .. " error(s) recorded")
 end
 SLASH_ASCCA1 = "/ca"
-SlashCmdList.ASCCA = function() OpenCharacterAdvancement() end
+SlashCmdList.ASCCA = function(msg)
+    local verb, arg = string.match(msg or "", "^%s*(%S*)%s*(.-)%s*$")
+    if verb == "inspect" and arg ~= "" and ASC.Live and ASC.Live.Inspect then
+        local ok, why = ASC.Live.Inspect(arg, function(info, reason)
+            if not info then DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Ascension:|r inspect " .. arg .. " failed (" .. tostring(reason) .. ")") return end
+            local n = 0
+            for _ in pairs(info.known) do n = n + 1 end
+            local spec = info.spec ~= 0 and C_ClassInfo.GetSpecInfoByID(info.spec)
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff66ccffAscension:|r %s is a level %d %s (%s), %d advancement entries known",
+                info.name, info.level, tostring(info.class), spec and spec.Name or "no specialization", n))
+        end)
+        if not ok then DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Ascension:|r " .. tostring(why)) end
+        return
+    end
+    OpenCharacterAdvancement()
+end
 ----------------------------------------------------------------------------------------
 -- 8. Development probe: a few seconds after entering the world, report any visible frame
 --    that has the keyboard enabled (such a frame swallows every key, chat included), then

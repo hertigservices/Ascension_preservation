@@ -45,6 +45,8 @@
 #include "GameTime.h"
 #include "SpellMgr.h"
 #include "DBCStructure.h"
+#include "ObjectAccessor.h"
+#include "ObjectMgr.h"
 
 #include <algorithm>
 #include <cctype>
@@ -706,6 +708,34 @@ namespace AscensionCA
         SendState(player, st);
     }
 
+    // INSPECT\t<name>: another online character's advancement, the way Ascension's inspect
+    // showed a stranger's build. Answers from the module cache (players online have one).
+    //     -> INSPECT\t<name>\t<classByte>\t<specId>\t<level>\t<entry:rank,...>
+    //     -> RESULT\tINSPECT\tERR\tnot-found\t0
+    void HandleInspect(Player* player, std::string name)
+    {
+        if (!normalizePlayerName(name))
+        {
+            Send(player, "RESULT\tINSPECT\tERR\tbad-name\t0");
+            return;
+        }
+        Player* target = ObjectAccessor::FindPlayerByName(name, true);
+        if (!target)
+        {
+            Send(player, "RESULT\tINSPECT\tERR\tnot-found\t0");
+            return;
+        }
+        auto it = players.find(target->GetGUID().GetCounter());
+        if (it == players.end())
+        {
+            Send(player, "RESULT\tINSPECT\tERR\tnot-found\t0");
+            return;
+        }
+        PlayerState const& other = it->second;
+        SendLong(player, "INSPECT", target->GetName() + "\t" + std::to_string(other.classByte) + "\t" + std::to_string(other.specId)
+            + "\t" + std::to_string(target->GetLevel()) + "\t" + EncodeKnown(other));
+    }
+
     void HandleReset(Player* player, PlayerState& st, std::string const& what)
     {
         std::map<uint32, uint8> keep;
@@ -748,6 +778,7 @@ namespace AscensionCA
         if (verb == "SPEC") { HandleSpec(player, st, args.size() > 1 ? static_cast<uint32>(std::strtoul(args[1].c_str(), nullptr, 10)) : 0); return; }
         if (verb == "RESET") { HandleReset(player, st, args.size() > 1 ? args[1] : "talents"); return; }
         if (verb == "CLASS") { HandleClass(player, st, args); return; }
+        if (verb == "INSPECT") { HandleInspect(player, args.size() > 1 ? args[1] : ""); return; }
         Send(player, "ERROR\tunknown\t" + verb);
     }
 

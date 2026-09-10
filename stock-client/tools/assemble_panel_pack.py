@@ -69,6 +69,8 @@ MANIFEST = [
     "SharedXML/SharedTemplates.xml",
     "SharedXML/SharedPanelTemplates.xml",
     "SharedXML/UIDropDownMenu.xml",
+    "SharedXML/ScrollableDropDown.xml",
+    "SharedXML/FilterDropDown.xml",
     "FrameXML/UIPanelTemplates.lua",
     "FrameXML/UIPanelTemplates.xml",
     "FrameXML/Util/C_Player.lua",
@@ -92,7 +94,7 @@ MANIFEST = [
 ]
 # Whole directories copied so XML <Script>/<Include> references resolve (relative paths).
 DIRS = ["SharedXML/TypeExtensions", "SharedXML/TabSystem", "SharedXML/Scroll", "FrameXML/CharacterAdvancement"]
-ADDONS = ["AscensionResources", "Ascension_Collections", "Ascension_TalentUI", "Ascension_CoATalents"]
+ADDONS = ["AscensionResources", "Ascension_Collections", "Ascension_TalentUI", "Ascension_CoATalents", "Ascension_BuildCreator"]
 HERE = os.path.dirname(os.path.abspath(__file__))
 GLUE = os.path.join(HERE, "..", "client", "Interface", "AddOns", "!AscensionShim", "compat", "zz_StockShim.lua")
 
@@ -257,7 +259,7 @@ def main():
     head = [l for l in lines if l.startswith("##")]
     core_files = [l for l in lines if l and not l.startswith("##") and l.strip().lower() != "bootstrap.lua"]
     toc = head + ["## SavedVariablesPerCharacter: AscensionShimDB", ""] + core_files
-    toc += ["", "# --- Ascension SharedXML/FrameXML compat (verbatim, FrameXML.toc order) ---", "compat\\aa_StockPrelude.lua"]
+    toc += ["", "# --- Ascension SharedXML/FrameXML compat (verbatim, FrameXML.toc order) ---", "compat\\aa_StockPrelude.lua", "compat\\ab_CVar.lua"]
     toc += ["compat\\" + rel.replace("/", "\\") for rel in MANIFEST if rel not in missing]
     # ours, from the overlay: Ascension-only definitions sliced out of files we do not copy whole
     toc += ["compat\\FrameXML\\GameTooltipExtras.lua"]

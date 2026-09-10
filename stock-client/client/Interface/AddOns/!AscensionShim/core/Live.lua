@@ -16,6 +16,7 @@ local Preview = ASC.Preview
 local state = { connected = false, classByte = nil, level = 0, spec = 0, ae = 0, te = 0, known = {}, pending = {} }
 Live.State = state
 local preview = {} -- the preview functions we replace, kept for fallback
+local inspectCallbacks = {} -- pending Live.Inspect callbacks, answered in order
 
 local function log(text) if ASC.Stock and ASC.Stock.Log then ASC.Stock.Log("live: " .. text) end end
 local function fire(event, ...) ASC.Events.Fire(event, ...) end
@@ -218,6 +219,56 @@ function api.IsAbilityID(id) local e = entry(id) return e ~= nil and e.Type == "
 function api.IsTalentAbilityID() return false end
 function api.GetAbilityEssenceCost(spell) local e = CA.GetEntryBySpellID(spell) return (e and isClassTab(e)) and 1 or 0 end
 function api.GetTalentEssenceCost(spell) local e = CA.GetEntryBySpellID(spell) return (e and not isClassTab(e)) and 1 or 0 end
+function api.IsKnownSpellID(spell)
+    local e = CA.GetEntryBySpellID(spell)
+    if not e then return false end
+    local rank = state.known[e.ID] or 0
+    for i = 1, rank do if e.Spells[i] == spell then return true end end
+    return false
+end
+function api.IsTalentSpellID(spell) local e = CA.GetEntryBySpellID(spell) return e ~= nil and e.Type == "Talent" end
+-- Hero Architect import: stage a recovered build (its Spells list) as the pending set; the
+-- panel's Save Changes then uploads it like any other pending build.
+local function importSpells(spells)
+    if not state.connected then return false, "ASC_OFFLINE" end
+    local staged, skipped = {}, 0
+    for _, s in ipairs(spells or {}) do
+        local spellID = type(s) == "table" and (s.Spell or s.spell or s.SpellID) or s
+        local e = spellID and CA.GetEntryBySpellID(spellID)
+        if e then
+            local rank = 0
+            for i, id in ipairs(e.Spells) do if id == spellID then rank = i end end
+            if rank > (staged[e.ID] or 0) then staged[e.ID] = rank end
+        else
+            skipped = skipped + 1
+        end
+    end
+    state.pending = copy(state.known)
+    local added = 0
+    for id, rank in pairs(staged) do
+        local e = entry(id)
+        if e and (isClassTab(e) or inActiveSpec(e)) then
+            local cur = state.pending[id] or 0
+            while cur < rank and api.CanAddByEntryID(id, 1) do
+                state.pending[id] = cur + 1
+                cur = cur + 1
+                added = added + 1
+            end
+        end
+    end
+    log("import: " .. added .. " rank(s) staged, " .. skipped .. " spell(s) not in this class's trees")
+    fire("CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED")
+    return true, added
+end
+function api.ImportPendingBuild(build)
+    if type(build) ~= "table" then return false, "no-build" end
+    return importSpells(build.Spells or build.spells or build.entries)
+end
+function api.ImportPendingBuildID(id)
+    local build = C_BuildCreator and C_BuildCreator.GetBuild and C_BuildCreator.GetBuild(id)
+    if not build then return false, "unknown-build" end
+    return api.ImportPendingBuild(build)
+end
 
 function Live.Install()
     if Live.installed then return end
@@ -303,11 +354,36 @@ T.On("RESULT", function(body)
         fire("CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT", ok, reason, tonumber(id))
     elseif verb == "RESET" then
         fire("CHARACTER_ADVANCEMENT_PURGE_TALENTS_RESULT", ok, reason)
+    elseif verb == "INSPECT" and not ok then
+        local cb = table.remove(inspectCallbacks, 1)
+        if cb then cb(nil, reason) end
     end
     if not ok then
         log(verb .. " refused: " .. tostring(reason) .. " " .. tostring(id))
         if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Character Advancement:|r " .. verb .. " refused (" .. tostring(reason) .. ")") end
     end
+end)
+
+-- INSPECT\t<name>\t<classByte>\t<specId>\t<level>\t<entry:rank,...>: another character's
+-- advancement. Live.Inspect(name, callback) delivers { name, classByte, class, spec, level,
+-- known } to the callback; the CoA panel has no inspect view, so /ca inspect <name> prints it.
+function Live.Inspect(name, callback)
+    if not state.connected then return false, "ASC_OFFLINE" end
+    inspectCallbacks[#inspectCallbacks + 1] = callback
+    T.Send("INSPECT", name)
+    return true
+end
+T.On("INSPECT", function(body)
+    local name, classByte, spec, level, list = string.match(body, "^([^\t]*)\t(%d+)\t(%d+)\t(%d+)\t?(.*)$")
+    if not name then log("bad INSPECT: " .. string.sub(body, 1, 60)) return end
+    local info = { name = name, classByte = tonumber(classByte), spec = tonumber(spec), level = tonumber(level), known = parseSet(list) }
+    local dataset = ASC.Config and ASC.Data.Datasets[ASC.Config.dataset]
+    for _, row in ipairs(dataset and dataset.tables and dataset.tables.classIdentities or {}) do
+        if row.ID == info.classByte then info.class = row.Name end
+    end
+    local cb = table.remove(inspectCallbacks, 1)
+    if cb then cb(info) end
+    if ASC.Events.IsCustom("CHARACTER_ADVANCEMENT_INSPECT_RESULT") then fire("CHARACTER_ADVANCEMENT_INSPECT_RESULT", info) end
 end)
 
 T.On("ERROR", function(body) log("server error: " .. tostring(body)) end)
