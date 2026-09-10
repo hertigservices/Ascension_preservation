@@ -12,3 +12,6 @@ __pycache__/
 *.mpq
 *.dbc
 *.DBC
+
+# shipped with provenance (server/dbc-overrides/README.md): the four override DBCs patch-Y.MPQ is built from
+!server/dbc-overrides/*.dbc
