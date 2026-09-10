@@ -359,6 +359,77 @@ local more = {
     RE_QUALITY_EPIC_NAME = "Epic", RE_QUALITY_LEGENDARY_NAME = "Legendary", RE_QUALITY_ARTIFACT_NAME = "Artifact", RE_QUALITY_HEIRLOOM_NAME = "Heirloom",
 }
 for k, v in pairs(more) do if _G[k] == nil then _G[k] = v end end
+-- P7 (2026-09-10): strings the Skill Cards, Vanity and Wardrobe panels read (Extensions.dll
+-- supplied them on Ascension; no GlobalStrings capture exists, so the wording is ours) plus the
+-- item class / subclass names that later clients ship as globals and 3.3.5 does not.
+local p7 = {
+    -- item classes and subclasses (3.3.5 exposes these only through GetAuctionItemSubClasses)
+    ITEM_CLASS_0 = "Consumable", ITEM_CLASS_15 = "Miscellaneous", ITEM_QUALITY7_SHORT = "Heirloom", INVTYPE_HANDS = "Hands",
+    ITEM_SUBCLASS_2_0 = "One-Handed Axes", ITEM_SUBCLASS_2_1 = "Two-Handed Axes", ITEM_SUBCLASS_2_2 = "Bows", ITEM_SUBCLASS_2_3 = "Guns",
+    ITEM_SUBCLASS_2_4 = "One-Handed Maces", ITEM_SUBCLASS_2_5 = "Two-Handed Maces", ITEM_SUBCLASS_2_6 = "Polearms",
+    ITEM_SUBCLASS_2_7 = "One-Handed Swords", ITEM_SUBCLASS_2_8 = "Two-Handed Swords", ITEM_SUBCLASS_2_10 = "Staves",
+    ITEM_SUBCLASS_2_13 = "Fist Weapons", ITEM_SUBCLASS_2_14 = "Miscellaneous", ITEM_SUBCLASS_2_15 = "Daggers", ITEM_SUBCLASS_2_16 = "Thrown",
+    ITEM_SUBCLASS_2_17 = "Spears", ITEM_SUBCLASS_2_18 = "Crossbows", ITEM_SUBCLASS_2_19 = "Wands", ITEM_SUBCLASS_2_20 = "Fishing Poles",
+    ITEM_SUBCLASS_4_1 = "Cloth", ITEM_SUBCLASS_4_2 = "Leather", ITEM_SUBCLASS_4_3 = "Mail", ITEM_SUBCLASS_4_4 = "Plate", ITEM_SUBCLASS_4_6 = "Shields",
+    -- Vanity store
+    APPEARANCES = "Appearances", APPEARANCE_TYPE_ITEM_SET = "Item Sets", AZZAR_FAIRE = "Azzar Faire", BACKPACKS = "Backpacks",
+    CONVENIENCE_ITEMS = "Convenience Items", COSMETIC_PETS = "Pet Cosmetics", TAMED_PETS = "Tamed Pets", TOYS = "Toys", WEAPONS = "Weapons",
+    ILLUSIONS = "Illusions", SPELL_EFFECTS = "Spell Effects", SPELL_INCARNATIONS = "Incarnations", SPELL_VISUALS = "Spell Visuals",
+    SEASONAL = "Seasonal", PURCHASABLE = "Purchasable", MANASTORM = "Manastorm", ON_SALE = "On Sale", NEW_CAPS = "NEW", SUMMON_PET = "Summon Pet",
+    COSMETICPETWHISTLESLOT = "Whistle", COSMETICPETSTONESLOT = "Summoning Stone", COSMETICPETVELLUMSLOT = "Vellum",
+    COSMETICPETWARHORNSLOT = "Warhorn", COSMETICPETLODESTONESLOT = "Lodestone",
+    VANITY_ITEM_COLLECTION = "Vanity Collection", VANITY_DELIVER = "Deliver", VANITY_PURCHASE = "Purchase",
+    VANITY_WELCOME = "Vanity Collection", VANITY_WELCOME_SUBTEXT = "Browse the recovered catalogue. Purchases and delivery are not available on this realm.",
+    VISIT_SEASONAL_COLLECTION_TO_UNLOCK = "Visit the seasonal collection to unlock this item.",
+    ITEM_ALSO_AVAILABLE_ON_AUCTIONHOUSE = "Also available on the auction house.", PREVIEW_ITEMS = "Preview", PREVIEW_ITEMS_TOOLTIP = "Preview the item's contents.",
+    -- Wardrobe (the type tabs read _G[appearanceType], so these keys are looked up dynamically)
+    APPEARANCE_TYPE_NONE = "None", APPEARANCE_TYPE_ITEM = "Items", APPEARANCE_TYPE_OUTFIT = "Outfits",
+    APPEARANCE_TYPE_ILLUSION = "Illusions", APPEARANCE_TYPE_INCARNATION = "Incarnations", APPEARANCE_TYPE_MOUNT = "Mounts",
+    APPEARANCE_TYPE_COMPANION = "Companions", APPEARANCE_TYPE_TOY = "Toys", APPEARANCE_TYPE_COSMETIC = "Cosmetics",
+    APPEARANCE_TYPE_COSMETIC_PET = "Pet Cosmetics", APPEARANCE_TYPE_SPELL_VISUAL = "Spell Visuals",
+    APPEARANCE_WARDROBE = "Wardrobe", CLEAR_INVALID_APPEARANCES = "Clear invalid appearances", SAVE_OUTFIT = "Save Outfit", NEW_OUTFIT = "New Outfit",
+    ENABLE_TRANSMOG = "Show appearances", ENABLE_TRANSMOG_TOOLTIP = "Show other players' item appearances.",
+    DISABLE_TRANSMOG = "Hide appearances", DISABLE_TRANSMOG_TOOLTIP = "Hide other players' item appearances.",
+    ENABLE_SPELLVISUAL_TRANSMOG = "Show spell visuals", ENABLE_SPELLVISUAL_TRANSMOG_TOOLTIP = "Show other players' spell visual appearances.",
+    DISABLE_SPELLVISUAL_TRANSMOG = "Hide spell visuals", DISABLE_SPELLVISUAL_TRANSMOG_TOOLTIP = "Hide other players' spell visual appearances.",
+    ORDER_BY_ALPHABETICAL_AZ = "Name (A-Z)", ORDER_BY_ALPHABETICAL_ZA = "Name (Z-A)", ORDER_BY_APPEARANCE_ID_ASC = "Oldest first",
+    ORDER_BY_APPEARANCE_ID_DESC = "Newest first", ORDER_BY_OLDEST_COLLECTION = "Collected first", ORDER_BY_RECENT_COLLECTION = "Recently collected",
+    TRANSMOG_COLLECTED = "Collected", TRANSMOG_NOT_COLLECTED = "Not collected", TRANSMOGRIFIED_HEADER = "Transmogrified to %s",
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_KNOWN = "You have collected this appearance.", TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = "You have not collected this appearance.",
+    TRANSMOG_SHARES_APPEARANCE_TOOLTIP = "Shared by:", TRANSMOG_AVAILABLE_ON_BAZAAR = "Available at the Ethereal Bazaar", TRANSMOG_AVAILABLE_ON_WEB = "Available on the webstore",
+    TIP_APPEARANCE_AVAILABLE_ON_BAZAAR = "This appearance is sold at the Ethereal Bazaar.", TIP_APPEARANCE_AVAILABLE_ON_WEB_STORE = "This appearance is sold on the webstore.",
+    TIP_VIEW_FULL_ITEM_SET = "View the full item set", FILTER_QUALITY_ARTIFACT = "Artifact", FILTER_QUALITY_TOOLTIP = "Filter by quality", REPLACE = "Replace",
+    -- FrameXML\HelpTips.lua (the help-tip registry the Vanity store's help plate needs); tip wording is ours
+    TUTORIAL_REWARD_PENDING = "Tutorial reward pending", NEW_TUTORIAL_TIP = "New tip", CA_WCMR_SEARCH_HELP_TEXT = "Search your abilities here.",
+    FORCED_PRIMARY_STAT_HELP_TIP = "Your primary stat is chosen by your specialization.", HELP_TIP_NEW_SPELL_RANK_TEXT = "A new rank is available.",
+    HELP_TIP_UNSPENT_ESSENCE_TEXT = "You have unspent essence.", HELP_TIP_UNSPENT_ESSENCE_CUSTOM_CLASS_TEXT = "You have unspent essence.",
+    HELP_TIP_UNSPENT_ESSENCE_DEFAULT_CLASS_TEXT = "You have unspent essence.", SPELL_HINT_LEARN_HOTKEYS1 = "Drag an ability to your action bar.",
+    SPELL_HINT_LEARN_HOTKEYS2 = "Press its key to use it.", SPELL_HINT_LEARN_HOTKEYS3 = "Open the spellbook with P.",
+    TIP_HARDCAST_EQUIP_STAFF = "Equip a staff to cast.", TIP_LAYER_PICKER = "Change layers here.", TIP_QUEST_FRAME_ACCEPT = "Accept the quest.",
+    TIP_QUEST_FRAME_COMPLETE = "Complete the quest.", TIP_QUEST_FRAME_SELECT = "Select a quest.", TIP_QUEST_LOG_OPEN = "Open your quest log with L.",
+    TIP_QUEST_LOG_TRACK = "Track a quest.", TIP_QUEST_POI_GO_TO = "Go to the quest area.", TIP_SHOW_MINIMAP_MAIL = "You have mail.",
+    TIP_SPELLBOOK_OPEN = "Open your spellbook with P.", TIP_UNANSWERED_PLAYER_POLL_QUESTIONS = "You have unanswered poll questions.",
+    TIP_UNSPENT_ABILITY_ESSENCE = "You have unspent Ability Essence.", TIP_UNSPENT_TALENT_ESSENCE = "You have unspent Talent Essence.",
+    TIP_USE_ABILITIES = "Use your abilities.", TIP_WARDROBE_CHANGE_TRANSMOG = "Change your appearance in the Wardrobe.",
+    TIP_WATCH_FRAME_PING = "Your tracked quest updated.",
+    -- Skill Cards
+    SKILL_CARD_ABILITY_CARDS = "Ability Cards", SKILL_CARD_TALENT_CARDS = "Talent Cards", SKILL_CARD_LUCKY_CARDS = "Lucky Cards", SKILL_CARD_BOOSTERS_TAB = "Boosters",
+    STARTERS_SKILLCARDS = "Starter Cards", STARTERS_SKILLCARDS_TOOLTIP = "Cards that can be active from level 1.",
+    KNOWN_SKILLCARDS = "Collected", KNOWN_SKILLCARDS_TOOLTIP = "Show only collected cards.",
+    SKILL_CARD_NORMAL_COLLECTION = "Normal", SKILL_CARD_GOLDEN_COLLECTION = "Golden", TALENT_CARD_NORMAL_COLLECTION = "Normal Talent Cards",
+    TALENT_CARD_GOLDEN_COLLECTION = "Golden Talent Cards", LUCKY_CARD_NORMAL_COLLECTION = "Normal Lucky Cards", LUCKY_CARD_GOLDEN_COLLECTION = "Golden Lucky Cards",
+    SKILL_CARD_NOTHING_FOUND = "No cards found.", SKILL_CARD_NO_BOOSTERS = "You have no boosters to open.",
+    SKILL_CARDS_FILTER_HELP = "Filter and search your collection here.", UNLOCK_GOLDEN_CARDS_TITLE = "Golden Cards", UNLOCKED = "Unlocked",
+    SKILLCARD_UNLOCK_MSG = "New Skill Card unlocked: %s", SKILLCARD_STATISTICS_BOOSTERS_TOTAL = "Boosters opened: %d",
+    SKILLCARD_STATISTICS_REVEALED_TOTAL = "Cards revealed: %d", SKILLCARD_STATISTICS_DUPLICATES_TOTAL = "Duplicates: %d",
+    SKILL_CARD_PURCHASE_TALENT = "Talent Booster", SKILL_CARD_PURCHASE_TALENT_TEXT = "Purchase a talent card booster.",
+    SKILL_CARD_PURCHASE_GOLDEN_TALENT = "Golden Talent Booster", SKILL_CARD_PURCHASE_GOLDEN_TALENT_TEXT = "Purchase a golden talent card booster.",
+    SKILL_CARD_PURCHASE_COST_INCREASE = "The cost increases with each purchase.", PURCHASE_TALENT_CARD_TOTAL = "Total: %s",
+    PURCHASE_TALENT_CARD_TOTAL_GOLDEN = "Total: %s", FREE_BOOSTER_PROGRESS = "Free booster progress", FREE_BOOSTER_PROGRESS_TOOLTIP = "Progress towards a free booster.",
+    CHOOSE_SKILLCARD_TO_REPLACE = "Choose a card to replace.", SET_SKILL_CARD_NOT_COLLECTED = "You have not collected that card.",
+    SET_SKILL_CARD_ENTRY_ALREADY_ACTIVATED = "That card is already active.", STARTER_SKILL_CARD_ON_NEXT_ROLL = "Applies on your next roll.",
+}
+for k, v in pairs(p7) do if _G[k] == nil then _G[k] = v end end
 -- CoA primary stats, in C_PrimaryStat.internalIds order (FrameXML\Util\C_PrimaryStat.lua):
 -- 1149 Strength, 1150 Agility, 1151 Intellect, 1152 Spirit, (Stamina reserved), 18149 Duality.
 local primaryStats = { "Strength", "Agility", "Intellect", "Spirit", "Stamina", "Duality", "Primary stat 7" }

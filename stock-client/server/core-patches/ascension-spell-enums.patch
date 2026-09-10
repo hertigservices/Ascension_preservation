@@ -1,0 +1,544 @@
+diff --git a/src/server/shared/SharedDefines.h b/src/server/shared/SharedDefines.h
+index 8b6dacc..ee9e57b 100644
+--- a/src/server/shared/SharedDefines.h
++++ b/src/server/shared/SharedDefines.h
+@@ -928,7 +928,25 @@ enum SpellEffects
+     SPELL_EFFECT_TALENT_SPEC_SELECT                 = 162,
+     SPELL_EFFECT_163                                = 163,
+     SPELL_EFFECT_REMOVE_AURA                        = 164,
+-    TOTAL_SPELL_EFFECTS                             = 165
++    // ASCENSION_SPELL_ENUM_WIDENING: Ascension's Spell.dbc uses these ids; lifted from jealous-sound/azerothcore-wotlk-coa (2026-09-10).
++    // Named ids have handlers in SpellEffects.cpp; every other id in the range loads and runs EffectNULL.
++    SPELL_EFFECT_ASCENSION_FIRST                    = 165,
++    SPELL_EFFECT_ASCENSION_MODIFY_COOLDOWN          = 165,
++    SPELL_EFFECT_ASCENSION_RESTORE_BASE_MANA_PCT    = 166,
++    SPELL_EFFECT_ASCENSION_SPREAD_AURA              = 169,
++    SPELL_EFFECT_ASCENSION_SPREAD_AURA_2            = 170,
++    SPELL_EFFECT_ASCENSION_REFRESH_AURA             = 173,
++    SPELL_EFFECT_ASCENSION_MODIFY_AURA_STACKS       = 175,
++    SPELL_EFFECT_ASCENSION_MODIFY_AURA_STACKS_2     = 176,
++    SPELL_EFFECT_ASCENSION_MODIFY_AURA_DURATION     = 177,
++    SPELL_EFFECT_ASCENSION_RESTORE_BASE_HEALTH_PCT  = 181,
++    SPELL_EFFECT_ASCENSION_TRIGGER_SPELL_DELAYED    = 183,
++    SPELL_EFFECT_ASCENSION_TRIGGER_RANDOM_SPELL     = 184,
++    SPELL_EFFECT_ASCENSION_RESTORE_SPELL_CHARGES    = 187,
++    SPELL_EFFECT_ASCENSION_APPLY_AURA_TO_SUMMONS    = 190,
++    SPELL_EFFECT_ASCENSION_RESET_COOLDOWN           = 195,
++    SPELL_EFFECT_ASCENSION_LAST                     = 198,
++    TOTAL_SPELL_EFFECTS                             = 199
+ };
+ 
+ // EnumUtils: DESCRIBE THIS
+diff --git a/src/server/game/Spells/Auras/SpellAuraDefines.h b/src/server/game/Spells/Auras/SpellAuraDefines.h
+index 94b5650..3b6c901 100644
+--- a/src/server/game/Spells/Auras/SpellAuraDefines.h
++++ b/src/server/game/Spells/Auras/SpellAuraDefines.h
+@@ -377,7 +377,23 @@ enum AuraType
+     SPELL_AURA_PREVENT_RESURRECTION                         = 314,
+     SPELL_AURA_UNDERWATER_WALKING                           = 315,
+     SPELL_AURA_PERIODIC_HASTE                               = 316,
+-    TOTAL_AURAS                                             = 317
++    // ASCENSION_SPELL_ENUM_WIDENING: Ascension's Spell.dbc uses these ids; lifted from jealous-sound/azerothcore-wotlk-coa (2026-09-10).
++    // Named ids are the ones his fork gave a mechanic; on this core every id in the range is
++    // loaded and handled by HandleNoImmediateEffect except 333 and 344 (see SpellAuraEffects.cpp).
++    SPELL_AURA_ASCENSION_MOD_ABSORB_AMOUNT_PCT              = 317,
++    SPELL_AURA_ASCENSION_MOD_HEALING_RECEIVED_PCT           = 319,
++    SPELL_AURA_ASCENSION_MOD_STAT_FROM_STAT                 = 327,
++    SPELL_AURA_ASCENSION_MOD_MAX_MANA_FROM_STAT             = 328,
++    SPELL_AURA_ASCENSION_MOD_CRIT_CHANCE_AGAINST_TARGET     = 330,
++    SPELL_AURA_ASCENSION_MOD_HIT_CHANCE_ALL_PCT             = 333,
++    SPELL_AURA_ASCENSION_MOD_IGNORE_ARMOR_PCT               = 338,
++    SPELL_AURA_ASCENSION_MOD_ATTACK_POWER_FLAT              = 344,
++    SPELL_AURA_ASCENSION_MOD_SPELL_POWER_FLAT               = 345,
++    SPELL_AURA_ASCENSION_MOD_CRIT_CHANCE                    = 350,
++    SPELL_AURA_ASCENSION_MOD_INSTANT_MANA_COST_PCT          = 357,
++    SPELL_AURA_ASCENSION_MOD_HEALING_DONE_VERSUS_AURASTATE  = 360,
++    SPELL_AURA_ASCENSION_LAST                               = 366,
++    TOTAL_AURAS                                             = 367
+ };
+ 
+ enum AuraObjectType
+diff --git a/src/server/game/Spells/SpellEffects.cpp b/src/server/game/Spells/SpellEffects.cpp
+index 207bdd5..f7aed51 100644
+--- a/src/server/game/Spells/SpellEffects.cpp
++++ b/src/server/game/Spells/SpellEffects.cpp
+@@ -234,6 +234,40 @@ pEffect SpellEffects[TOTAL_SPELL_EFFECTS] =
+     &Spell::EffectActivateSpec,                             //162 SPELL_EFFECT_TALENT_SPEC_SELECT       activate primary/secondary spec
+     &Spell::EffectNULL,                                     //163 unused
+     &Spell::EffectRemoveAura,                               //164 SPELL_EFFECT_REMOVE_AURA
++    &Spell::EffectAscensionModifyCooldown,                 //165 SPELL_EFFECT_ASCENSION_MODIFY_COOLDOWN
++    &Spell::EffectAscensionRestoreBaseManaPct,             //166 SPELL_EFFECT_ASCENSION_RESTORE_BASE_MANA_PCT
++    &Spell::EffectNULL,                                    //167 unknown Ascension effect
++    &Spell::EffectNULL,                                    //168 unknown Ascension effect
++    &Spell::EffectNULL,                                    //169 SPELL_EFFECT_ASCENSION_SPREAD_AURA
++    &Spell::EffectNULL,                                    //170 SPELL_EFFECT_ASCENSION_SPREAD_AURA_2
++    &Spell::EffectNULL,                                    //171 unknown Ascension effect
++    &Spell::EffectNULL,                                    //172 unknown Ascension effect
++    &Spell::EffectAscensionRefreshAura,                    //173 SPELL_EFFECT_ASCENSION_REFRESH_AURA
++    &Spell::EffectNULL,                                    //174 unknown Ascension effect
++    &Spell::EffectAscensionModifyAuraStacks,               //175 SPELL_EFFECT_ASCENSION_MODIFY_AURA_STACKS
++    &Spell::EffectAscensionModifyAuraStacksBySpell,        //176 SPELL_EFFECT_ASCENSION_MODIFY_AURA_STACKS_2
++    &Spell::EffectAscensionModifyAuraDuration,             //177 SPELL_EFFECT_ASCENSION_MODIFY_AURA_DURATION
++    &Spell::EffectNULL,                                    //178 unknown Ascension effect
++    &Spell::EffectNULL,                                    //179 unknown Ascension effect
++    &Spell::EffectNULL,                                    //180 unknown Ascension effect
++    &Spell::EffectAscensionRestoreBaseHealthPct,           //181 SPELL_EFFECT_ASCENSION_RESTORE_BASE_HEALTH_PCT
++    &Spell::EffectNULL,                                    //182 unknown Ascension effect
++    &Spell::EffectAscensionTriggerSpellDelayed,            //183 SPELL_EFFECT_ASCENSION_TRIGGER_SPELL_DELAYED
++    &Spell::EffectNULL,                                    //184 SPELL_EFFECT_ASCENSION_TRIGGER_RANDOM_SPELL
++    &Spell::EffectNULL,                                    //185 unknown Ascension effect
++    &Spell::EffectNULL,                                    //186 unknown Ascension effect
++    &Spell::EffectNULL,                                    //187 SPELL_EFFECT_ASCENSION_RESTORE_SPELL_CHARGES (needs a charge system; not lifted)
++    &Spell::EffectNULL,                                    //188 unknown Ascension effect
++    &Spell::EffectNULL,                                    //189 unknown Ascension effect
++    &Spell::EffectNULL,                                    //190 SPELL_EFFECT_ASCENSION_APPLY_AURA_TO_SUMMONS (his fork maps it to EffectApplyAreaAura; not lifted)
++    &Spell::EffectNULL,                                    //191 unknown Ascension effect
++    &Spell::EffectNULL,                                    //192 unknown Ascension effect
++    &Spell::EffectNULL,                                    //193 unknown Ascension effect
++    &Spell::EffectNULL,                                    //194 unknown Ascension effect
++    &Spell::EffectAscensionResetCooldown,                  //195 SPELL_EFFECT_ASCENSION_RESET_COOLDOWN
++    &Spell::EffectNULL,                                    //196 unknown Ascension effect
++    &Spell::EffectNULL,                                    //197 unknown Ascension effect
++    &Spell::EffectNULL,                                    //198 unknown Ascension effect
+ };
+ 
+ void Spell::EffectNULL(SpellEffIndex /*effIndex*/)
+@@ -246,6 +280,249 @@ void Spell::EffectUnused(SpellEffIndex /*effIndex*/)
+     // NOT USED BY ANY SPELL OR USELESS OR IMPLEMENTED IN DIFFERENT WAY IN TRINITY
+ }
+ 
++// ASCENSION_SPELL_ENUM_WIDENING
++// Class-agnostic handlers lifted from jealous-sound/azerothcore-wotlk-coa SpellEffects.cpp; the
++// per-class special cases of his versions (Thunder Ward, Earthshaping, spell charges) are omitted.
++namespace
++{
++void ResetAscensionCooldown(Player* player, uint32 spellId, bool resetCategory)
++{
++    if (!player || !spellId)
++        return;
++
++    player->RemoveSpellCooldown(spellId, true);
++
++    if (resetCategory)
++        if (SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId))
++            if (uint32 category = spellInfo->GetCategory())
++                player->RemoveCategoryCooldown(category);
++}
++
++void ModifyAscensionCooldown(Player* player, uint32 spellId, int32 delta, bool resetCategory)
++{
++    if (!player || !spellId)
++        return;
++
++    // A zero delta is Ascension's reset sentinel; MiscValueB asks for the shared category too.
++    if (!delta)
++    {
++        ResetAscensionCooldown(player, spellId, resetCategory);
++        return;
++    }
++
++    if (delta < 0)
++    {
++        uint32 remaining = player->GetSpellCooldownDelay(spellId);
++        uint64 reduction = uint64(-int64(delta));
++        if (!remaining || reduction >= remaining)
++        {
++            ResetAscensionCooldown(player, spellId, resetCategory);
++            return;
++        }
++    }
++
++    player->ModifySpellCooldown(spellId, delta);
++}
++
++void ModifyAscensionAuraStacks(Unit* caster, Unit* target, uint32 auraSpellId, int32 delta)
++{
++    if (!caster || !target || !auraSpellId || !delta)
++        return;
++
++    if (Aura* aura = target->GetAura(auraSpellId))
++    {
++        aura->ModStackAmount(delta);
++        return;
++    }
++
++    if (delta < 0)
++        return;
++
++    if (Aura* aura = caster->AddAura(auraSpellId, target))
++        if (delta > 1)
++            aura->ModStackAmount(delta - 1);
++}
++}
++
++void Spell::EffectAscensionModifyCooldown(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    Player* player = target ? target->ToPlayer() : nullptr;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    ModifyAscensionCooldown(player, effect.MiscValue, damage, effect.MiscValueB != 0);
++}
++
++void Spell::EffectAscensionRestoreBaseManaPct(SpellEffIndex /*effIndex*/)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    if (!unitTarget || !unitTarget->IsAlive() || damage <= 0)
++        return;
++
++    if (unitTarget->HasUnitState(UNIT_STATE_ISOLATED))
++    {
++        m_caster->SendSpellDamageImmune(unitTarget, GetSpellInfo()->Id);
++        return;
++    }
++
++    if (unitTarget->IsPlayer() && !unitTarget->HasActivePowerType(POWER_MANA) &&
++        !m_spellInfo->HasAttribute(SPELL_ATTR7_ONLY_IN_SPELLBOOK_UNTIL_LEARNED))
++        return;
++
++    uint32 baseMana = unitTarget->GetCreateMana();
++    if (!baseMana)
++        return;
++
++    uint32 gain = CalculatePct(baseMana, damage);
++    m_caster->EnergizeBySpell(unitTarget, m_spellInfo->Id, gain, POWER_MANA);
++}
++
++void Spell::EffectAscensionRefreshAura(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    if (!target || !effect.MiscValue)
++        return;
++
++    Aura* aura = target->GetAura(effect.MiscValue);
++    if (!aura)
++        return;
++
++    // A value of one is the DBC representation of a zero-base-point effect: a plain refresh.
++    // MiscValueB selects additive extension instead of an absolute duration.
++    if (damage <= 1 && !effect.MiscValueB)
++    {
++        aura->RefreshDuration();
++        return;
++    }
++
++    int32 duration = effect.MiscValueB ? aura->GetDuration() + damage : damage;
++    if (duration <= 0)
++    {
++        aura->Remove();
++        return;
++    }
++
++    if (duration > aura->GetMaxDuration())
++        aura->SetMaxDuration(duration);
++    aura->SetDuration(duration);
++}
++
++void Spell::EffectAscensionModifyAuraStacks(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    ModifyAscensionAuraStacks(m_caster, target, effect.TriggerSpell, effect.MiscValue);
++}
++
++void Spell::EffectAscensionModifyAuraStacksBySpell(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    ModifyAscensionAuraStacks(m_caster, target, effect.MiscValue, damage);
++}
++
++void Spell::EffectAscensionModifyAuraDuration(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    if (!target || !effect.MiscValue)
++        return;
++
++    if (Aura* aura = target->GetAura(effect.MiscValue))
++    {
++        int32 duration = aura->GetDuration() + damage;
++        if (duration <= 0)
++            aura->Remove();
++        else
++            aura->SetDuration(duration);
++    }
++}
++
++void Spell::EffectAscensionRestoreBaseHealthPct(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_LAUNCH_TARGET)
++        return;
++
++    if (!unitTarget || !unitTarget->IsAlive() || damage <= 0 || !m_originalCaster)
++        return;
++
++    uint32 heal = CalculatePct(unitTarget->GetCreateHealth(), damage);
++    heal = m_originalCaster->SpellHealingBonusDone(unitTarget, m_spellInfo, heal, HEAL, effIndex);
++    m_damageBeforeTakenMods -= heal;
++    heal = unitTarget->SpellHealingBonusTaken(m_originalCaster, m_spellInfo, heal, HEAL);
++    m_damage -= heal;
++}
++
++void Spell::EffectAscensionTriggerSpellDelayed(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_LAUNCH_TARGET &&
++        effectHandleMode != SPELL_EFFECT_HANDLE_LAUNCH)
++        return;
++
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    SpellInfo const* triggeredSpell = sSpellMgr->GetSpellInfo(effect.TriggerSpell);
++    if (!triggeredSpell)
++        return;
++
++    Unit* target = nullptr;
++    if (effectHandleMode == SPELL_EFFECT_HANDLE_LAUNCH_TARGET)
++    {
++        if (!triggeredSpell->NeedsToBeTriggeredByCaster(m_spellInfo, effIndex))
++            return;
++        target = unitTarget;
++    }
++    else
++    {
++        if (triggeredSpell->NeedsToBeTriggeredByCaster(m_spellInfo, effIndex) &&
++            (effect.GetProvidedTargetMask() & TARGET_FLAG_UNIT_MASK))
++            return;
++        target = m_targets.GetUnitTarget();
++    }
++
++    if (!target)
++        target = m_caster;
++
++    ObjectGuid targetGuid = target->GetGUID();
++    uint32 triggeredSpellId = triggeredSpell->Id;
++    Milliseconds delay(std::max<int32>(1, damage));
++    Unit* caster = m_caster;
++    caster->m_Events.AddEventAtOffset(
++        [caster, targetGuid, triggeredSpellId]()
++        {
++            if (Unit* delayedTarget = ObjectAccessor::GetUnit(*caster, targetGuid))
++                caster->CastSpell(delayedTarget, triggeredSpellId, true);
++        },
++        delay);
++}
++
++void Spell::EffectAscensionResetCooldown(SpellEffIndex effIndex)
++{
++    if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
++        return;
++
++    Unit* target = unitTarget ? unitTarget : m_caster;
++    Player* player = target ? target->ToPlayer() : nullptr;
++    SpellEffectInfo const& effect = m_spellInfo->Effects[effIndex];
++    ResetAscensionCooldown(player, effect.MiscValue, effect.MiscValueB != 0);
++}
++
+ void Spell::EffectResurrectNew(SpellEffIndex effIndex)
+ {
+     if (effectHandleMode != SPELL_EFFECT_HANDLE_HIT_TARGET)
+diff --git a/src/server/game/Spells/Spell.h b/src/server/game/Spells/Spell.h
+index 233b2cb..8f4392a 100644
+--- a/src/server/game/Spells/Spell.h
++++ b/src/server/game/Spells/Spell.h
+@@ -304,6 +304,16 @@ public:
+ 
+     void EffectNULL(SpellEffIndex effIndex);
+     void EffectUnused(SpellEffIndex effIndex);
++    // ASCENSION_SPELL_ENUM_WIDENING
++    void EffectAscensionModifyCooldown(SpellEffIndex effIndex);
++    void EffectAscensionRestoreBaseManaPct(SpellEffIndex effIndex);
++    void EffectAscensionRefreshAura(SpellEffIndex effIndex);
++    void EffectAscensionModifyAuraStacks(SpellEffIndex effIndex);
++    void EffectAscensionModifyAuraStacksBySpell(SpellEffIndex effIndex);
++    void EffectAscensionModifyAuraDuration(SpellEffIndex effIndex);
++    void EffectAscensionRestoreBaseHealthPct(SpellEffIndex effIndex);
++    void EffectAscensionTriggerSpellDelayed(SpellEffIndex effIndex);
++    void EffectAscensionResetCooldown(SpellEffIndex effIndex);
+     void EffectDistract(SpellEffIndex effIndex);
+     void EffectPull(SpellEffIndex effIndex);
+     void EffectSchoolDMG(SpellEffIndex effIndex);
+diff --git a/src/server/game/Spells/Spell.cpp b/src/server/game/Spells/Spell.cpp
+index 0e25dff..328006d 100644
+--- a/src/server/game/Spells/Spell.cpp
++++ b/src/server/game/Spells/Spell.cpp
+@@ -5655,7 +5655,11 @@ void Spell::HandleEffects(Unit* pUnitTarget, Item* pItemTarget, GameObject* pGOT
+ 
+     if (!preventDefault && eff < TOTAL_SPELL_EFFECTS)
+     {
+-        (this->*SpellEffects[eff])((SpellEffIndex)i);
++        // ASCENSION_SPELL_ENUM_WIDENING: an unfilled table slot falls back to EffectNULL instead of a null member call
++        pEffect handler = SpellEffects[eff];
++        if (!handler)
++            handler = &Spell::EffectNULL;
++        (this->*handler)((SpellEffIndex)i);
+     }
+ }
+ 
+diff --git a/src/server/game/Spells/Auras/SpellAuraEffects.cpp b/src/server/game/Spells/Auras/SpellAuraEffects.cpp
+index 8a4b34d..4784331 100644
+--- a/src/server/game/Spells/Auras/SpellAuraEffects.cpp
++++ b/src/server/game/Spells/Auras/SpellAuraEffects.cpp
+@@ -379,6 +379,56 @@ pAuraEffectHandler AuraEffectHandler[TOTAL_AURAS] =
+     &AuraEffect::HandlePreventResurrection,                       //314 SPELL_AURA_PREVENT_RESURRECTION todo
+     &AuraEffect::HandleNoImmediateEffect,                         //315 SPELL_AURA_UNDERWATER_WALKING todo
+     &AuraEffect::HandleNoImmediateEffect,                         //316 SPELL_AURA_PERIODIC_HASTE implemented in AuraEffect::CalculatePeriodic
++    &AuraEffect::HandleNoImmediateEffect,                           //317 SPELL_AURA_ASCENSION_MOD_ABSORB_AMOUNT_PCT (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //318 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //319 SPELL_AURA_ASCENSION_MOD_HEALING_RECEIVED_PCT (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //320 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //321 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //322 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //323 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //324 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //325 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //326 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //327 SPELL_AURA_ASCENSION_MOD_STAT_FROM_STAT (needs StatSystem changes; not lifted)
++    &AuraEffect::HandleNoImmediateEffect,                           //328 SPELL_AURA_ASCENSION_MOD_MAX_MANA_FROM_STAT (needs StatSystem changes; not lifted)
++    &AuraEffect::HandleNoImmediateEffect,                           //329 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //330 SPELL_AURA_ASCENSION_MOD_CRIT_CHANCE_AGAINST_TARGET (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //331 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //332 unknown Ascension aura
++    &AuraEffect::HandleAscensionModHitChanceAll,                    //333 SPELL_AURA_ASCENSION_MOD_HIT_CHANCE_ALL_PCT
++    &AuraEffect::HandleNoImmediateEffect,                           //334 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //335 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //336 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //337 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //338 SPELL_AURA_ASCENSION_MOD_IGNORE_ARMOR_PCT (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //339 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //340 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //341 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //342 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //343 unknown Ascension aura
++    &AuraEffect::HandleAscensionModAttackPowerFlat,                 //344 SPELL_AURA_ASCENSION_MOD_ATTACK_POWER_FLAT
++    &AuraEffect::HandleNoImmediateEffect,                           //345 SPELL_AURA_ASCENSION_MOD_SPELL_POWER_FLAT (needs StatSystem changes; not lifted)
++    &AuraEffect::HandleNoImmediateEffect,                           //346 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //347 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //348 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //349 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //350 SPELL_AURA_ASCENSION_MOD_CRIT_CHANCE (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //351 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //352 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //353 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //354 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //355 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //356 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //357 SPELL_AURA_ASCENSION_MOD_INSTANT_MANA_COST_PCT (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //358 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //359 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //360 SPELL_AURA_ASCENSION_MOD_HEALING_DONE_VERSUS_AURASTATE (no mechanic on this core)
++    &AuraEffect::HandleNoImmediateEffect,                           //361 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //362 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //363 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //364 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //365 unknown Ascension aura
++    &AuraEffect::HandleNoImmediateEffect,                           //366 unknown Ascension aura
+ };
+ 
+ AuraEffect::AuraEffect(Aura* base, uint8 effIndex, int32* baseAmount, Unit* caster):
+@@ -790,7 +840,11 @@ void AuraEffect::HandleEffect(AuraApplication* aurApp, uint8 mode, bool apply)
+     if ((apply && aurApp->GetRemoveMode()) || prevented)
+         return;
+ 
+-    (*this.*AuraEffectHandler [GetAuraType()])(aurApp, mode, apply);
++    // ASCENSION_SPELL_ENUM_WIDENING: an unfilled table slot falls back to HandleNoImmediateEffect instead of a null member call
++    pAuraEffectHandler handler = AuraEffectHandler[GetAuraType()];
++    if (!handler)
++        handler = &AuraEffect::HandleNoImmediateEffect;
++    (*this.*handler)(aurApp, mode, apply);
+ 
+     // check if script events have removed the aura or if default effect prevention was requested
+     if (apply && aurApp->GetRemoveMode())
+@@ -7076,3 +7130,16 @@ int32 AuraEffect::GetTotalTicks() const
+ 
+     return totalTicks;
+ }
++
++// ASCENSION_SPELL_ENUM_WIDENING
++void AuraEffect::HandleAscensionModHitChanceAll(AuraApplication const* aurApp, uint8 mode, bool apply) const
++{
++    HandleModHitChance(aurApp, mode, apply);
++    HandleModSpellHitChance(aurApp, mode, apply);
++}
++
++void AuraEffect::HandleAscensionModAttackPowerFlat(AuraApplication const* aurApp, uint8 mode, bool apply) const
++{
++    HandleAuraModAttackPower(aurApp, mode, apply);
++    HandleAuraModRangedAttackPower(aurApp, mode, apply);
++}
+diff --git a/src/server/game/Spells/Auras/SpellAuraEffects.h b/src/server/game/Spells/Auras/SpellAuraEffects.h
+index 5acdedd..39360f0 100644
+--- a/src/server/game/Spells/Auras/SpellAuraEffects.h
++++ b/src/server/game/Spells/Auras/SpellAuraEffects.h
+@@ -250,6 +250,9 @@ public:
+     void HandleModSpellDamagePercentFromAttackPower(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+     void HandleModSpellHealingPercentFromAttackPower(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+     void HandleModHealingDone(AuraApplication const* aurApp, uint8 mode, bool apply) const;
++    // ASCENSION_SPELL_ENUM_WIDENING
++    void HandleAscensionModHitChanceAll(AuraApplication const* aurApp, uint8 mode, bool apply) const;
++    void HandleAscensionModAttackPowerFlat(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+     void HandleModTotalPercentStat(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+     void HandleAuraModResistenceOfStatPercent(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+     void HandleAuraModExpertise(AuraApplication const* aurApp, uint8 mode, bool apply) const;
+diff --git a/src/server/game/Spells/SpellInfo.cpp b/src/server/game/Spells/SpellInfo.cpp
+index 3494dc9..cad1f65 100644
+--- a/src/server/game/Spells/SpellInfo.cpp
++++ b/src/server/game/Spells/SpellInfo.cpp
+@@ -781,6 +781,41 @@ std::array<SpellEffectInfo::StaticData, TOTAL_SPELL_EFFECTS> SpellEffectInfo::_d
+     {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 162 SPELL_EFFECT_TALENT_SPEC_SELECT
+     {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 163 SPELL_EFFECT_163
+     {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 164 SPELL_EFFECT_REMOVE_AURA
++    // ASCENSION_SPELL_ENUM_WIDENING
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 165 Ascension
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 166 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 167 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 168 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 169 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 170 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 171 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 172 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 173 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 174 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 175 Ascension
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 176 Ascension
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 177 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 178 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 179 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 180 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 181 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 182 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 183 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 184 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 185 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 186 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 187 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 188 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 189 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 190 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 191 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 192 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 193 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 194 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_EXPLICIT, TARGET_OBJECT_TYPE_UNIT}, // 195 Ascension
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 196 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 197 unknown Ascension effect
++    {EFFECT_IMPLICIT_TARGET_NONE,     TARGET_OBJECT_TYPE_NONE}, // 198 unknown Ascension effect
+ } };
+ 
+ SpellInfo::SpellInfo(SpellEntry const* spellEntry)

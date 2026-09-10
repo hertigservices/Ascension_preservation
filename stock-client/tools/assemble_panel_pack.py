@@ -56,6 +56,7 @@ MANIFEST = [
     "SharedXML/Util/FunctionUtil.lua",
     "SharedXML/Util/TimeUtil.lua",
     "SharedXML/Util/C_Flipbook.lua",
+    "SharedXML/Util/ModelMixin.lua",
     "SharedXML/Util/EventUtil.lua",
     "SharedXML/Util/FrameUtil.lua",
     "SharedXML/Util/PixelUtil.lua",
@@ -67,6 +68,8 @@ MANIFEST = [
     "SharedXML/Scroll/Scroll.xml",
     "SharedXML/AnimationTemplates.xml",
     "SharedXML/HelpTip.xml",
+    "SharedXML/HelpPlate.xml",
+    "FrameXML/HelpTips.lua",
     "SharedXML/LayoutFrame.xml",
     "SharedXML/SharedTemplates.xml",
     "SharedXML/SharedPanelTemplates.xml",
@@ -88,6 +91,7 @@ MANIFEST = [
     "FrameXML/Util/BuildCreatorUtil.lua",
     "FrameXML/Util/TokenUtil.lua",
     "FrameXML/Util/VanityCollectionUtil.lua",
+    "FrameXML/Util/AppearanceUtil.lua",
     "FrameXML/Util/TalentUtil.lua",
     "FrameXML/CurrencyBar.xml",
     "FrameXML/IconSelectorFrame.xml",
@@ -98,6 +102,7 @@ MANIFEST = [
     "SharedXML/Util/HyperlinkUtil.lua",
     "SharedXML/Util/AccessibilityUtil.lua",
     "FrameXML/Data/Items.lua",
+    "FrameXML/Objects/AsyncCallbackHandler.lua",
     "FrameXML/Objects/Item.lua",
     "FrameXML/Util/DraftUtil.lua",
     "FrameXML/SpellListItem.xml",
@@ -106,11 +111,19 @@ MANIFEST = [
     "FrameXML/Util/EnchantCollectionUtil.lua",
     "FrameXML/Util/MysticEnchantManagerUtil.lua",
     "AddOns/AscensionUI/Shared/IconSelector.lua",
+    # P7 (2026-09-10): Skill Cards (Hero / Draft / WildCard panel) and the Wardrobe's extra-action buttons
+    "FrameXML/Util/ActionBarUtil.lua",
+    "FrameXML/Util/SkillCardsUtil.lua",
+    "FrameXML/QuickKeybind.xml",
+    "FrameXML/ExtraActionBar.xml",
 ]
 # Whole directories copied so XML <Script>/<Include> references resolve (relative paths).
 DIRS = ["SharedXML/TypeExtensions", "SharedXML/TabSystem", "SharedXML/Scroll", "FrameXML/CharacterAdvancement"]
+LOAD_ON_DEMAND = {"Ascension_SkillCards"}
 ADDONS = ["AscensionResources", "Ascension_Collections", "Ascension_TalentUI", "Ascension_CoATalents", "Ascension_BuildCreator",
-          "Ascension_CharacterAdvancement", "Ascension_EnchantCollection"]
+          "Ascension_CharacterAdvancement", "Ascension_EnchantCollection",
+          # P7 (2026-09-10): the original Skill Cards, Vanity and Wardrobe panels, over the shim's read-only data
+          "Ascension_SkillCards", "Ascension_VanityCollection", "Ascension_AppearanceUI"]
 # (relative path under compat/, exact text before, text after) - see client/PATCHES.md
 TEXT_PATCHES = [
     # The Util is FrameXML on Ascension, so issecure() holds when it writes WTF\MysticEnchantSaved.wtf.
@@ -315,11 +328,15 @@ def main():
                 bom = raw.startswith(b"\xef\xbb\xbf")
                 text = raw[3:].decode("utf-8", "replace") if bom else raw.decode("utf-8", "replace")
                 lines = []
+                has_lod = any(l.lower().startswith("## loadondemand:") for l in text.splitlines())
                 for line in text.splitlines():
                     if line.lower().startswith("## dependencies:"):
                         deps = [d.strip() for d in line.split(":", 1)[1].split(",") if d.strip() and d.strip() != "AscensionUI"]
                         line = "## Dependencies: " + ", ".join(deps) if deps else "## X-Dependencies-Removed: AscensionUI"
                     lines.append(line)
+                    if name in LOAD_ON_DEMAND and not has_lod and line.lower().startswith("## interface:"):
+                        lines.append("## LoadOnDemand: 1")
+                        lines.append("## X-LoadOnDemand-Added: stock-client port (loaded by SkillCards_LoadUI, never at startup)")
                 with open(toc, "wb") as f:
                     f.write((b"\xef\xbb\xbf" if bom else b"") + ("\n".join(lines) + "\n").encode("utf-8"))
         else:

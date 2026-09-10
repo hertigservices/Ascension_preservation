@@ -15,7 +15,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=ROOT/'client/Interface/AddOns/!AscensionShim'
 
 
-def build(data_root,dataset,class_byte,level,output,catalogue=None,enchants=None):
+def build(data_root,dataset,class_byte,level,output,catalogue=None,enchants=None,collections=None):
     data_root=Path(data_root).resolve()
     allowed=(ROOT/'build').resolve()
     output=Path(output).resolve()
@@ -31,12 +31,12 @@ def build(data_root,dataset,class_byte,level,output,catalogue=None,enchants=None
     if not 1<=level<=80:raise ValueError('preview level must be 1..80')
     config={'dataset':dataset,'classByte':class_byte,'level':level,'readOnly':True}
     texts={}; source_hashes={}
-    for name in ('core/Namespaces.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','core/Enchants.lua','api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','api/C_MysticEnchant.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'):
+    for name in ('core/Namespaces.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','core/Enchants.lua','core/Collections.lua','api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','api/C_MysticEnchant.lua','api/C_VanityCollection.lua','api/C_Appearance.lua','api/C_SkillCard.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'):
         raw=(SOURCE/name).read_bytes()
         source_hashes[name]=hashlib.sha256(raw).hexdigest()
         texts[name]=raw.decode('utf-8-sig')
     texts['Config.lua']='-- Generated explicit offline-preview selection.\nASC.Config='+gen.lua(config)+'\n'
-    order=['core/Namespaces.lua','Config.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','core/Enchants.lua']
+    order=['core/Namespaces.lua','Config.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','core/Enchants.lua','core/Collections.lua']
     for relative in (base/'load-order.txt').read_text(encoding='utf-8-sig').splitlines():
         path=(base/relative).resolve()
         if not path.is_relative_to(base):raise ValueError('dataset path escapes source')
@@ -75,8 +75,23 @@ def build(data_root,dataset,class_byte,level,output,catalogue=None,enchants=None
             target='enchant-data/'+relative.removeprefix('lua/')
             texts[target]=raw.decode('utf-8-sig');order.append(target)
         source_hashes['enchants-generation.json']=hashlib.sha256((enchants/'generation.json').read_bytes()).hexdigest()
+    if collections is not None:
+        collections=Path(collections).resolve()
+        collection_manifest=json.loads((collections/'generation.json').read_text(encoding='utf-8-sig'))
+        config['collectionCatalogue']=collection_manifest['metadata']['key']
+        config['vanityCount']=collection_manifest['metadata']['vanityCount']
+        config['appearanceCount']=collection_manifest['metadata']['appearanceCount']
+        for relative in (collections/'load-order.txt').read_text(encoding='utf-8-sig').splitlines():
+            path=(collections/relative).resolve()
+            if not path.is_relative_to(collections):raise ValueError('collection path escapes source')
+            raw=path.read_bytes()
+            if hashlib.sha256(raw).hexdigest()!=collection_manifest['outputs'].get(relative):
+                raise ValueError('collection source hash differs: '+relative)
+            target='collection-data/'+relative.removeprefix('lua/')
+            texts[target]=raw.decode('utf-8-sig');order.append(target)
+        source_hashes['collections-generation.json']=hashlib.sha256((collections/'generation.json').read_bytes()).hexdigest()
     texts['Config.lua']='-- Generated explicit offline-preview selection.\nASC.Config='+gen.lua(config)+'\n'
-    order.extend(('api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','api/C_MysticEnchant.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'))
+    order.extend(('api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','api/C_MysticEnchant.lua','api/C_VanityCollection.lua','api/C_Appearance.lua','api/C_SkillCard.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'))
     texts['!AscensionShim.toc']='''## Interface: 30300
 ## Title: Ascension Stock Client Preview
 ## Notes: Data and API core preview; server learning is disabled.
@@ -98,7 +113,8 @@ def main():
     parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--catalogue',type=Path,help='Explicit generated community catalogue; no activation is enabled')
     parser.add_argument('--enchants',type=Path,help='Generated Mystic Enchant catalogue (tools/gen_enchant_data.py output)')
+    parser.add_argument('--collections',type=Path,help='Generated Vanity / Wardrobe catalogues (tools/gen_collection_data.py output)')
     args=parser.parse_args()
-    print('Built:',build(args.data,args.dataset,args.class_byte,args.level,args.out,args.catalogue,args.enchants))
+    print('Built:',build(args.data,args.dataset,args.class_byte,args.level,args.out,args.catalogue,args.enchants,args.collections))
 
 if __name__=='__main__':main()

@@ -320,6 +320,166 @@ for _, name in ipairs({ "GetDraftModePickSpellAtIndex", "GetHandOfFatePickSpellA
     if not _G[name] then _G[name] = function() return nil end end
 end
 if not HasPrestigedOnce then function HasPrestigedOnce() return false end end
+-- P7 (2026-09-10): natives the Skill Cards, Vanity and Wardrobe panels read. None of these
+-- systems has a server on the port, so the answers are "nothing" rather than invented data.
+C_ExtraActionButton = C_ExtraActionButton or {}
+if not C_ExtraActionButton.GetNumExtraActionButtons then function C_ExtraActionButton.GetNumExtraActionButtons() return 0 end end
+if not C_ExtraActionButton.GetExtraActionButtonAtIndex then function C_ExtraActionButton.GetExtraActionButtonAtIndex() return nil end end
+if not C_ExtraActionButton.GetExtraActionButtonInfo then function C_ExtraActionButton.GetExtraActionButtonInfo() return nil end end
+C_Gossip = C_Gossip or {}
+if not C_Gossip.RedirectNPC then function C_Gossip.RedirectNPC() end end -- SkillCards.lua redirects an NPC's gossip to its frame
+dprint = dprint or function() end                                        -- Ascension's debug print (GlueParent.lua: dprint = nop)
+if not GetAscensionDonationPoints then function GetAscensionDonationPoints() return 0 end end
+-- Item natives Ascension added (the Wardrobe, the Vanity store and the Skill Cards booster scan
+-- call them); each is answered from the stock item cache, then from the collection catalogue.
+if not GetItemInfoFromHyperlink then
+    function GetItemInfoFromHyperlink(link) return tonumber(string.match(tostring(link or ""), "item:(%d+)")) end
+end
+if not GetInstantItemLink then
+    function GetInstantItemLink(itemID)
+        local _, link = GetItemInfo(itemID)
+        return link or ("item:" .. tostring(itemID))
+    end
+end
+if not TryCacheItem then function TryCacheItem(itemID) return GetItemInfo(itemID) ~= nil end end
+if not GetInventoryItemTrueID then function GetInventoryItemTrueID(unit, slot) return GetInventoryItemID(unit, slot) end end
+if not SetModelApplyComponents then function SetModelApplyComponents() end end
+if not GetScaledCursorPosition then
+    function GetScaledCursorPosition(frame)
+        local x, y = GetCursorPosition()
+        local scale = frame and frame.GetEffectiveScale and frame:GetEffectiveScale() or UIParent:GetEffectiveScale()
+        return x / scale, y / scale
+    end
+end
+do
+    -- GetItemInfo's equip-location string -> Ascension's numeric inventory type (ItemTemplate.InventoryType)
+    local INV_INDEX = { INVTYPE_HEAD = 1, INVTYPE_NECK = 2, INVTYPE_SHOULDER = 3, INVTYPE_BODY = 4, INVTYPE_CHEST = 5, INVTYPE_WAIST = 6,
+        INVTYPE_LEGS = 7, INVTYPE_FEET = 8, INVTYPE_WRIST = 9, INVTYPE_HAND = 10, INVTYPE_FINGER = 11, INVTYPE_TRINKET = 12,
+        INVTYPE_WEAPON = 13, INVTYPE_SHIELD = 14, INVTYPE_RANGED = 15, INVTYPE_CLOAK = 16, INVTYPE_2HWEAPON = 17, INVTYPE_BAG = 18,
+        INVTYPE_TABARD = 19, INVTYPE_ROBE = 20, INVTYPE_WEAPONMAINHAND = 21, INVTYPE_WEAPONOFFHAND = 22, INVTYPE_HOLDABLE = 23,
+        INVTYPE_AMMO = 24, INVTYPE_THROWN = 25, INVTYPE_RANGEDRIGHT = 26, INVTYPE_QUIVER = 27, INVTYPE_RELIC = 28 }
+    local function record(itemID)
+        local C = ASC.Collections
+        return C and C.AppearanceRecordForItem and C.AppearanceRecordForItem(itemID) or nil
+    end
+    if not GetItemInventoryType then
+        function GetItemInventoryType(itemID)
+            local equipLoc = select(9, GetItemInfo(itemID))
+            if equipLoc and equipLoc ~= "" then return INV_INDEX[equipLoc] or 0 end
+            local r = record(tonumber(itemID))
+            return r and r.inv or 0
+        end
+    end
+    if not GetItemIconInstant then
+        function GetItemIconInstant(itemID)
+            local texture = select(10, GetItemInfo(itemID))
+            if texture then return (string.gsub(texture, "^[Ii]nterface\\[Ii]cons\\", "")) end
+            local r = record(tonumber(itemID))
+            return r and r.icon or nil
+        end
+    end
+    if not GetInventorySlotInfoByID then
+        local names = { "HeadSlot", "NeckSlot", "ShoulderSlot", "ShirtSlot", "ChestSlot", "WaistSlot", "LegsSlot", "FeetSlot", "WristSlot",
+                        "HandsSlot", "Finger0Slot", "Finger1Slot", "Trinket0Slot", "Trinket1Slot", "BackSlot", "MainHandSlot",
+                        "SecondaryHandSlot", "RangedSlot", "TabardSlot", "AmmoSlot" }
+        local byID
+        function GetInventorySlotInfoByID(slotID)
+            if not byID then
+                byID = {}
+                for _, name in ipairs(names) do
+                    local id, texture = GetInventorySlotInfo(name)
+                    if id then byID[id] = { name, texture } end
+                end
+            end
+            local info = byID[slotID]
+            if not info then return nil end
+            return info[1], info[2]
+        end
+    end
+end
+-- debug-only item natives (the Wardrobe's ID tooltip lines, ItemMixin extras): nothing to answer on 3.3.5
+if not GetItemClassID then function GetItemClassID() return nil end end
+if not GetItemSubClassID then function GetItemSubClassID() return nil end end
+if not GetItemTemplate then function GetItemTemplate() return nil end end
+if not GetItemFlavorText then function GetItemFlavorText() return nil end end
+if not GetItemPvEPower then function GetItemPvEPower() return 0 end end
+if not GetItemPvPPower then function GetItemPvPPower() return 0 end end
+if not IsSeasonalCollectionUnlocked then function IsSeasonalCollectionUnlocked() return false end end
+if not OpenAscensionURL then function OpenAscensionURL(path) Stock.Log("OpenAscensionURL(" .. tostring(path) .. "): no web shop on this port") end end
+-- Ascension's asynchronous item/quest/creature cache service (FrameXML\Objects\AsyncCallbackHandler.lua):
+-- TryCache* asks the server for a record and a *_CACHE_REQUEST_SUCCESS event follows. On 3.3.5
+-- GetItemInfo() on an unknown id is itself the request and no event exists, so the shim asks,
+-- then polls the item cache for a few seconds and fires the event through the custom event bus.
+ASC.Events.Define({ "ITEM_CACHE_REQUEST_SUCCESS", "QUEST_CACHE_REQUEST_SUCCESS", "CREATURE_CACHE_REQUEST_SUCCESS" })
+C_AssetQueryService = C_AssetQueryService or {}
+if not C_AssetQueryService.TryCacheItem then
+    local pending = {}
+    local function fire(itemID)
+        pending[itemID] = nil
+        ASC.Events.Fire("ITEM_CACHE_REQUEST_SUCCESS", itemID)
+        -- and straight into the item listener (FrameXML\Objects\AsyncCallbackHandler.lua), the way
+        -- its own ITEM_CACHE_REQUEST_SUCCESS handler would: the Wardrobe's model cells wait on it
+        local listener = ItemQueryListener
+        if listener and listener.FireCallbacks then pcall(listener.FireCallbacks, listener, itemID) end
+    end
+    function C_AssetQueryService.TryCacheItem(itemID)
+        itemID = tonumber(itemID)
+        if not itemID then return false end
+        if GetItemInfo(itemID) then
+            C_Timer.After(0, function() fire(itemID) end)
+            return true
+        end
+        if not pending[itemID] then
+            pending[itemID] = 0
+            local function poll()
+                if not pending[itemID] then return end
+                if GetItemInfo(itemID) then return fire(itemID) end
+                pending[itemID] = pending[itemID] + 1
+                if pending[itemID] < 20 then C_Timer.After(0.5, poll) else pending[itemID] = nil end
+            end
+            C_Timer.After(0.5, poll)
+        end
+        return true
+    end
+end
+if not C_AssetQueryService.TryCacheQuest then function C_AssetQueryService.TryCacheQuest() return false end end
+if not C_AssetQueryService.TryCacheCreature then function C_AssetQueryService.TryCacheCreature() return false end end
+if not C_UICamera then
+    C_UICamera = setmetatable({}, { __index = function(t, k)
+        local f = function() return nil end
+        rawset(t, k, f)
+        return f
+    end })
+end
+-- Ascension extended the DressUpModel widget (the Wardrobe's models): SetDisplayInfo takes a
+-- "loaded" callback, and a dozen camera / sequence / drag methods exist only there. The stock
+-- widget shares one method table per widget type, so the extensions are added to it once:
+-- the callback runs immediately, the rest are no-ops (the model simply keeps its default view).
+do
+    local ok, probe = pcall(CreateFrame, "DressUpModel", nil, UIParent)
+    local mt = ok and probe and getmetatable(probe)
+    local methods = mt and rawget(mt, "__index")
+    if type(methods) == "table" then
+        for _, name in ipairs({ "FreezeSequence", "PlaySequence", "StopSequence", "ApplyUICamera", "TryOnTransmogGear",
+                                "SetSpellVisual", "SetCreatureDisplay", "SetEnableDragRotation", "SetEnableScrollZoom",
+                                "SetEnableDragMove", "SetDragScale", "SetMinMaxDistance", "SetMaxPosOffset", "ShowRanged",
+                                "ShowMelee", "SetSpell" }) do
+            if not methods[name] then methods[name] = function() end end
+        end
+        if methods.SetDisplayInfo and not methods.ASC_SetDisplayInfoWrapped then
+            local original = methods.SetDisplayInfo
+            methods.SetDisplayInfo = function(self, displayID, callback, ...)
+                local result = original(self, displayID, ...)
+                if type(callback) == "function" then callback() end
+                return result
+            end
+            methods.ASC_SetDisplayInfoWrapped = true
+        end
+    else
+        Stock.Log("DressUpModel method table not reachable; the Wardrobe models will lack Ascension's extensions")
+    end
+    if probe then probe:Hide() end
+end
 C_Aura = C_Aura or {}
 if not C_Aura.UnitHasAura then
     function C_Aura.UnitHasAura(unit, spellID)
@@ -505,12 +665,20 @@ local function placeholderPanel(name, title, icon, body)
         return true
     end
 end
-VanityCollection_LoadUI = VanityCollection_LoadUI or placeholderPanel("StoreCollectionFrame", VANITY or "Vanity", "Interface\\icons\\INV_Chest_Awakening",
-    "No vanity catalogue was recovered from Ascension: the collection data was empty (0 bytes) in every capture this port is built from.\n\n"
-    .. "The original Ascension_VanityCollection addon is preserved in the repository and will be wired in here if the data is ever found.")
-AppearanceUI_LoadUI = AppearanceUI_LoadUI or placeholderPanel("AppearanceWardrobeFrame", WARDROBE or "Wardrobe", "Interface\\Icons\\inv_arcane_orb",
-    "No transmogrification catalogue was recovered from Ascension: the wardrobe data was empty (0 bytes) in every capture this port is built from.\n\n"
-    .. "The original Ascension_AppearanceUI addon is preserved in the repository and will be wired in here if the data is ever found.")
+-- P7 (2026-09-10): the catalogues came from the CoA repack's VanityCollection / Appearances /
+-- ItemAppearances DBCs (tools/gen_collection_data.py, packed with --collections). When the pack
+-- carries them the ORIGINAL addons load over the shim's read-only C_VanityCollection /
+-- C_Appearance* (api/); a pack built without them keeps the honest placeholder.
+local hasVanity = ASC.Collections and ASC.Collections.HasVanity and ASC.Collections.HasVanity()
+local hasAppearances = ASC.Collections and ASC.Collections.HasAppearances and ASC.Collections.HasAppearances()
+VanityCollection_LoadUI = VanityCollection_LoadUI or (hasVanity and loader("Ascension_VanityCollection"))
+    or placeholderPanel("StoreCollectionFrame", VANITY or "Vanity", "Interface\\icons\\INV_Chest_Awakening",
+    "This pack was built without the vanity catalogue (tools/gen_collection_data.py, build_addon_pack.py --collections).\n\n"
+    .. "The original Ascension_VanityCollection addon loads here when the catalogue is present.")
+AppearanceUI_LoadUI = AppearanceUI_LoadUI or (hasAppearances and loader("Ascension_AppearanceUI"))
+    or placeholderPanel("AppearanceWardrobeFrame", WARDROBE or "Wardrobe", "Interface\\Icons\\inv_arcane_orb",
+    "This pack was built without the appearance catalogue (tools/gen_collection_data.py, build_addon_pack.py --collections).\n\n"
+    .. "The original Ascension_AppearanceUI addon loads here when the catalogue is present.")
 -- Ascension_Collections is LoadOnDemand; Ascension's UIParent loads it on first use.
 Collections_LoadUI = Collections_LoadUI or loader("Ascension_Collections")
 -- Collections decides its tab set (CoA talent panel vs the classic Hero panel, Mystic Enchants
@@ -554,6 +722,25 @@ function Stock.OpenHeroArchitect() return openTab("HeroArchitect") end
 function Stock.OpenMysticEnchants() return openTab("MysticEnchants") end
 function Stock.OpenVanity() return openTab("Vanity") end
 function Stock.OpenWardrobe() return openTab("Wardrobe") end
+-- Ascension builds the Skill Cards tab for Hero characters and shows it only in the Draft and
+-- WildCard game modes (Collections.lua OnShow); the port has neither mode, so the tab is shown
+-- on request. The panel is Ascension's own over an empty collection (api/C_SkillCard.lua).
+function Stock.OpenSkillCards()
+    whenConnected(function()
+        if not Collections then Collections_LoadUI() end
+        if not Collections then Stock.Log("Collections frame is not loaded") return false end
+        local id = Collections.Tabs.SkillCards
+        if not id then Stock.Log("no Skill Cards tab: Ascension builds it for Hero (Free-Pick) characters only") return false end
+        local ok, err = pcall(Collections.GoToTab, Collections, id)
+        if not ok then Stock.Log("GoToTab(SkillCards) failed: " .. tostring(err)) return false end
+        C_Timer.After(0, function()
+            if Collections.ShowTabID then pcall(Collections.ShowTabID, Collections, id) end
+            pcall(Collections.GoToTab, Collections, id)
+        end)
+        return true
+    end)
+    return true
+end
 if not ToggleCollections then
     function ToggleCollections()
         if Collections and Collections:IsShown() then HideUIPanel(Collections) return end
@@ -598,6 +785,7 @@ SlashCmdList.ASCCA = function(msg)
     if verb == "architect" or verb == "builds" then return Stock.OpenHeroArchitect() end
     if verb == "vanity" then return Stock.OpenVanity() end
     if verb == "wardrobe" then return Stock.OpenWardrobe() end
+    if verb == "skillcards" or verb == "cards" then return Stock.OpenSkillCards() end
     if verb == "inspect" and arg ~= "" and ASC.Live and ASC.Live.Inspect then
         local ok, why = ASC.Live.Inspect(arg, function(info, reason)
             if not info then DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Ascension:|r inspect " .. arg .. " failed (" .. tostring(reason) .. ")") return end

@@ -111,6 +111,22 @@ The live harvest contains three realm/mode variants, not duplicate interchangeab
 
 One generation emits normalized JSON, split Lua chunks, SQL staging tables, and integrity/provenance manifests from the same in-memory records. Datasets have separate composite keys in SQL. SQL is generated only, never applied automatically. Keep unresolved edge targets and opaque `<table>` fields in the gap report; rendering may omit an unavailable relationship, while gameplay must fail closed for rules it cannot establish. Recompute class/tab counts from the selected data rather than forcing the older 42/153 estimate.
 
+### 4.2 Collection catalogues (2026-09-10)
+
+The Vanity and Wardrobe panels have no capture behind them: every Ascension client capture
+carries the `Transmogrification*.json` files at 0 bytes. Their data exists only as three DBCs
+that `Extensions.dll` reads natively and that surfaced in jealous-sound's public CoA server
+repack (`VanityCollection.dbc`, `Appearances.dbc`, `ItemAppearances.dbc`, dated 2026-08-25).
+`tools/gen_collection_data.py` turns them into `data/collections` (Lua chunks under
+`collection-data/` in the pack, 15 MB; `catalogue.json` with per-column provenance). The
+generator joins the item ids against an `item_template` export for names, qualities, inventory
+types and, through `ItemDisplayInfo.dbc`, icons; what the DBCs lack is absent or marked as ours
+(vanity artwork, seasonal / bazaar prices, Ascension's labels for the non-slot appearance
+categories, ownership). The ORIGINAL addons render over read-only shim APIs (`api/C_VanityCollection.lua`,
+`api/C_Appearance.lua`); every action that would need a server (purchase, delivery, applying an
+appearance, outfits) answers false and logs why. Skill Cards (`api/C_SkillCard.lua`) follow the
+same rule with the one capture there is: slot counts and an empty collection.
+
 ## 5. Proposed wire protocol (module <-> shim; not implemented beyond HELLO/PING)
 
 All lines are tab-separated, prefix `ASC`. Client sends `ASC\tCMD\t<verb>[\t<arg>...]` as a
