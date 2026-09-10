@@ -6,6 +6,10 @@ repository**; they are recorded because the evidence each one leaves behind poin
 component, and because anyone who forked `server/ascension_bridge.py` before
 2026-09-09 still has them (the send timeout: forks before 2026-09-10).
 
+Issues 8–11 were found by **maribela** while deploying to a Linux host and a
+second machine; 8 and 9 are Wine/LAN-only, 10 and 11 affect every deployment and
+are fixed in forks from 2026-09-10 onward.
+
 ## Why a bridge exception looks like a server bug
 
 `ascension_bridge.py` runs two pumps: client→core on the main thread, core→client
@@ -438,3 +442,101 @@ crypt must be re-keyed from a fresh `CMSG_AUTH_SESSION`).
 **Fix.** None needed once issue 6 is fixed. If it recurs after any other drop:
 restart the client and log in again. The shim reads the session key from client
 memory at connect time, so a fresh login is the recovery path.
+
+---
+
+## 8. Under Wine, the client logs in to the **real** Ascension servers
+
+**Symptom.** `proxy_auth.log` contains
+
+```
+[startup] auth redirect hook FAILED
+```
+
+and the client reaches a live login screen instead of your local realm. On
+Windows the same install works.
+
+**Wrong conclusion.** "The DLL did not load" or "the profile offsets are wrong."
+Neither: the DLL is running — it wrote that line — and offsets are not involved.
+
+**Actual cause.** Two independent misses, both specific to Wine.
+`install_inline_hook()` only patches a Microsoft hotpatch prologue
+(`8B FF 55 8B EC`); Wine's `ws2_32` is GCC-built (`55 89 E5 ...`) and the hook
+correctly declines rather than corrupting it. The name-based fallback
+`hook_iat()` then finds nothing either, because Wine's loader presents every
+`ws2_32` `OriginalFirstThunk` entry with `IMAGE_ORDINAL_FLAG` set even though the
+file's imports are by name.
+
+**Fix.** In this repository. `hook_iat_addr()` matches the resolved address from
+`GetProcAddress` instead of the import name, which works for either import form.
+A successful start now logs `[startup] local auth redirects installed`. See
+[LAN-AND-LINUX.md](LAN-AND-LINUX.md).
+
+---
+
+## 9. ERROR #132 a few seconds after the world draws, on a LAN realm
+
+**Symptom.** Login succeeds, the realm list shows your realm, character select
+works, the world loads and draws — and then the client dies with ERROR #132.
+Everything is identical on a single box.
+
+**Wrong conclusion.** "The world server crashed the client", "the bridge sent a
+malformed packet", or "the map data is bad". The world server is fine; the client
+kills itself.
+
+**Actual cause.** `Extensions.dll` checks the world endpoint against a 91-entry
+allow-list in `.rdata`. Its only local entries are `127.0.0.1:8085`, `:8087` and
+`:8088`. A LAN address is not in it, so the guard records "not found" and the
+client tears down shortly after the world is up — late enough to look like a
+world-side fault.
+
+**Fix.** Set `allow_remote_world = 1` in `authgate.cfg`, which forces the guard
+result to zero with a four-byte same-length patch, verified against the original
+bytes before it is written. The realm address must also actually be reachable:
+`ASC_BRIDGE_HOST=0.0.0.0` on the server is the other half. Full write-up and the
+security trade-off in [LAN-AND-LINUX.md](LAN-AND-LINUX.md).
+
+---
+
+## 10. Every Blood Elf character creation is refused as a hacking attempt
+
+**Symptom.** In the worldserver log:
+
+```
+Player::Create: Possible hacking-attempt: Account N tried creating a character
+named 'X' with an invalid race/class pair (10/1) - refusing to do so.
+```
+
+Only race 10. Every other race creates normally.
+
+**Wrong conclusion.** "The client sent a corrupt race byte" or "the bridge
+mangled `CMSG_CHAR_CREATE`."
+
+**Actual cause.** The bridge rewrites a class the core cannot build to a carrier
+class, and the carrier was a **fixed** `ASC_FALLBACK_CLASS` (1, Warrior) for
+every race. Blood Elf has no Warrior, so the pair the core received was genuinely
+invalid — the core's complaint is accurate, it is just about a class the player
+never chose.
+
+**Fix.** In this repository. `carrier_class_for(race)` chooses from the classes
+that race can legally be (Blood Elf gets 2, Paladin). See
+[COA-CAPABLE-CORE.md](COA-CAPABLE-CORE.md).
+
+---
+
+## 11. "The UI says Cultist but I have Paladin spells"
+
+**Symptom.** A character's portrait and class label disagree with its spellbook.
+The character was created after an earlier creation attempt with the **same name**
+failed.
+
+**Wrong conclusion.** "The CA identity projection is broken."
+
+**Actual cause.** `coa_state` maps character *name* to chosen CoA class, and the
+mapping used to be written when `CMSG_CHAR_CREATE` was **sent**, not when it
+succeeded. A refused creation therefore left the name mapped forever, and the
+next character to reuse that name inherited a class it does not have.
+
+**Fix.** In this repository. The choice is staged on the session and committed
+only on `CHAR_CREATE_SUCCESS`; a refusal logs the mapping it declined to record.
+An already-poisoned entry must be removed from `coa_state` by hand.

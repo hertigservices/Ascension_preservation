@@ -1,12 +1,26 @@
 # AscensionAuthGate — reviewed local bridge adaptation
 
-Credit to **FirstOni** for the original AscensionAuthGate design and implementation. This preservation adaptation removes diagnostic capture and hardens the credential gate. It targets the original Ascension build 12340 client with the local Ascension bridge on **127.0.0.1:8088**, backed by AzerothCore on 8086. It does not require the legacy `shim3799.py`.
+Credit to **FirstOni** for the original AscensionAuthGate design and implementation, and to **maribela** for Linux/Wine support and LAN deployment. This preservation adaptation removes diagnostic capture and hardens the credential gate. It targets the original Ascension build 12340 client with the local Ascension bridge on **127.0.0.1:8088**, backed by AzerothCore on 8086. It does not require the legacy `shim3799.py`.
 
 ## Verified behavior
 
 On 2026-09-09, the reviewed source built without compiler warnings and passed **59 isolated checks**, plus **two real local authserver checks**: wrong password rejected and correct password accepted with the server's SRP proof verified. The original client then reached the world through the bridge with the shim stopped. The user reported their existing original-client character was **working flawlessly**. The separate test client was removed only after that confirmation; its shared Data junction was unlinked without traversing its target.
 
 This is for one trusted Windows machine, one Ascension client at a time, and the exact executable/extension hashes enforced by the installer. Other WoW clients and other realm databases are outside its scope. Read [SECURITY-REVIEW.md](SECURITY-REVIEW.md) for what was reviewed and the remaining boundaries.
+
+## Optional deployment config (`authgate.cfg`)
+
+The defaults above are compiled in and need no configuration file. To run the client under **Wine**, or on a **different machine** than the server, copy `authgate.cfg.example` to `authgate.cfg` beside `Extensions.dll`:
+
+| Key | Effect | Default |
+|---|---|---|
+| `auth_ip` | authserver the gate validates against (port is always 3724), and the one non-loopback address the SRP6 gate may speak to | `127.0.0.1` |
+| `realm` | address handed to the client in the realm list | `127.0.0.1:8088` |
+| `allow_remote_world` | neutralise the client's world-endpoint allow-list, needed for any non-loopback realm | off |
+
+Only the first 511 bytes are read, everything after `=` is the value (no inline comments), and an unparsable key keeps the compiled default. Accepted values are echoed to `proxy_auth.log` as `[cfg]` lines. This file is deliberately **not** `authgate.profile`: the profile holds generated code offsets and is rewritten by the installer, while this holds hand-edited deployment values that must survive a reinstall. It is gitignored; only the `.example` ships.
+
+Read [`docs/LAN-AND-LINUX.md`](../../docs/LAN-AND-LINUX.md) before using any of it — a LAN deployment moves the trust boundary this package was reviewed against, and the guide states exactly how far.
 
 ## Build and verify
 

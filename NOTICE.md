@@ -55,6 +55,8 @@ captures and logs. Do not re-introduce real credentials or captures.
 Provided as-is, for preservation and personal/offline use, without warranty of
 any kind.
 
-## AuthGate contribution
+## Outside contributions
 
 The original AscensionAuthGate contribution is credited to **FirstOni**. See [its third-party notice](contrib/AscensionAuthGate/THIRD-PARTY-NOTICE.md) for the supplied package provenance and license boundary; the repository's original-work MIT grant must not be assumed to relicense that pre-existing contribution.
+
+Linux/Wine support, LAN deployment and the CoA-capable-core class handling are credited to **maribela** (2026-09-10). See [LAN-AND-LINUX.md](docs/LAN-AND-LINUX.md) and [COA-CAPABLE-CORE.md](docs/COA-CAPABLE-CORE.md).

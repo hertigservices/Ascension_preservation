@@ -30,6 +30,13 @@ Original Ascension.exe + reviewed AuthGate proxy
 | World bridge | `127.0.0.1:8088` | Translate between the Ascension client and the configured core world |
 | AzerothCore worldserver | `127.0.0.1:8086` | Serve the selected realm's world and character database |
 
+Every endpoint above is loopback, and that is the reviewed default: one Windows
+machine. Two opt-in deployments move it — the client under **Wine**, and the
+client on a **different machine** from the server. Both are configured through
+`authgate.cfg` plus `ASC_BRIDGE_HOST`, and both are documented, with their
+security trade-off, in [LAN-AND-LINUX.md](LAN-AND-LINUX.md) (contributed by
+**maribela**). Nothing on this page changes if you do not use them.
+
 Port 3725 appears only while the client is running. Do not start a separate
 helper on that port. The old Python auth shim on **3799 is not required** and
 should be stopped/removed from this realm's startup dependencies. The standalone

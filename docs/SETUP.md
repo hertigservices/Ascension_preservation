@@ -41,6 +41,13 @@ installed-hub/
   responder inside the client on 3725. Follow [the current AuthGate guide](HOW-THE-REDIRECT-WORKS.md);
   an already migrated installation needs no client reinstall. The legacy shim on
   3799 is optional. The Python testbed uses 8087 and separate JSON character state.
+- **Run the client on Linux, or on another machine:** both are opt-in and neither
+  changes the single-box default. `ASC_BRIDGE_HOST` moves the bridge off loopback
+  and `authgate.cfg` points the client at it; read
+  [Linux, Wine and LAN](LAN-AND-LINUX.md) first, including its security section.
+- **Run against a core that has the CoA classes:** set `ASC_AC_VALID_CLASSES`
+  so classes 12..32 are created natively instead of on a carrier class. See
+  [CoA-capable core](COA-CAPABLE-CORE.md).
 
 ## Runtime configuration
 

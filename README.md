@@ -13,6 +13,8 @@ Tools and protocol research for reconstructing Ascension locally with a user-sup
 | [Character importer](tools/character-importer/) | Standalone offline Bind My Soul importer |
 | [Stock-client work](stock-client/) | Experimental generators and authored compatibility shim |
 | [Protocol reference](docs/WIRE-SPEC.md) | Auth and world wire research |
+| [Linux, Wine and LAN](docs/LAN-AND-LINUX.md) | Original client on a Linux host, or on a different machine than the server |
+| [CoA-capable core](docs/COA-CAPABLE-CORE.md) | Creating classes 12..32 natively instead of on a carrier class |
 | [Compatibility manifest](manifests/compatibility.json) | Runtime distinctions and recorded dependency baseline |
 
 [Azeroth Control](https://github.com/hertigservices/azeroth-control) manages realms
@@ -30,7 +32,10 @@ See [runtime configuration](docs/SETUP.md#runtime-configuration) and
 
 The default original-client path uses the reviewed AuthGate package and the
 AzerothCore bridge. See [the current authentication guide](docs/HOW-THE-REDIRECT-WORKS.md).
-The legacy shim on 3799 remains an explicit alternative.
+The legacy shim on 3799 remains an explicit alternative. It defaults to one
+Windows machine on loopback; running the client under Wine, or on a separate
+machine from the server, is opt-in and documented in
+[Linux, Wine and LAN](docs/LAN-AND-LINUX.md) — contributed by **maribela**.
 
 The bridge and Python testbed are distinct runtime paths. A feature verified in one
 is not automatically verified in the other. Stock-client compatibility work remains
