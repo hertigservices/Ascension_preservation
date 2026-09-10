@@ -423,16 +423,23 @@ if not OpenAscensionURL then function OpenAscensionURL(path) Stock.Log("OpenAsce
 -- template when something *renders* the item, so the request here is a hyperlink set on an
 -- off-screen tooltip (the 3.3.5 idiom); one of those did raise the query and the next GetItemInfo
 -- answered. The shim therefore renders, then polls the item cache and fires the event through the
--- custom event bus. Requests are queued and metered: an item cache warmed flat out crowds out the
--- session's other traffic.
+-- custom event bus. Requests are queued, because the client does not send them as they are made:
+-- it appends to an internal FIFO and drains that at a fixed rate of its own, and a deep FIFO
+-- delays the session's other queries (a mass warm-up once starved the loot-roll frame's). So the
+-- queue here is bounded by how many requests are OUTSTANDING rather than by a rate: at most
+-- IN_FLIGHT of them are unanswered at a time, which keeps the client's FIFO shallow, paces the
+-- shim to whatever the client actually drains, and means a request that has gone out and stayed
+-- unanswered for GIVE_UP really is an item the world does not have.
 ASC.Events.Define({ "ITEM_CACHE_REQUEST_SUCCESS", "QUEST_CACHE_REQUEST_SUCCESS", "CREATURE_CACHE_REQUEST_SUCCESS" })
 C_AssetQueryService = C_AssetQueryService or {}
 if not C_AssetQueryService.TryCacheItem then
     local QUEUED = -1        -- pending[id] stays QUEUED until its request goes out, then counts polls
-    local PER_BURST, BURST_EVERY, GIVE_UP = 5, 0.25, 24   -- 20 requests/s; 12 s of polling each
+    local IN_FLIGHT, GIVE_UP = 12, 24        -- at most 12 unanswered; 12 s of polling each
     local pending, failed, queue = {}, {}, {}
-    local pumping, polling, tip = false, false, nil
+    local inflight = 0
+    local polling, tip = false, nil
     local function fire(itemID)
+        if (pending[itemID] or QUEUED) >= 0 then inflight = inflight - 1 end
         pending[itemID] = nil
         ASC.Events.Fire("ITEM_CACHE_REQUEST_SUCCESS", itemID)
         -- and straight into the item listener (FrameXML\Objects\AsyncCallbackHandler.lua), the way
@@ -451,37 +458,36 @@ if not C_AssetQueryService.TryCacheItem then
         tip:Hide()
     end
     local function pump()
-        local sent = 0
-        while sent < PER_BURST do
+        while inflight < IN_FLIGHT do
             local itemID = table.remove(queue, 1)
             if not itemID then break end
             if pending[itemID] == QUEUED then
                 pending[itemID] = 0
+                inflight = inflight + 1
                 request(itemID)
-                sent = sent + 1
             end
         end
-        if queue[1] then C_Timer.After(BURST_EVERY, pump) else pumping = false end
     end
     local function poll()
-        local ready, waiting = nil, false
+        local ready = nil
         for itemID, count in pairs(pending) do
             if GetItemInfo(itemID) then
                 ready = ready or {}
                 ready[#ready + 1] = itemID
-            elseif count == QUEUED then
-                waiting = true                      -- request not sent yet, so do not age it
-            elseif count + 1 >= GIVE_UP then
-                pending[itemID] = nil
-                failed[itemID] = true               -- the world answered "no such template"
-            else
-                pending[itemID] = count + 1
-                waiting = true
+            elseif count >= 0 then                  -- only age a request that has actually gone out
+                if count + 1 >= GIVE_UP then
+                    pending[itemID] = nil
+                    inflight = inflight - 1
+                    failed[itemID] = true           -- the world answered "no such template"
+                else
+                    pending[itemID] = count + 1
+                end
             end
         end
         -- fire outside the traversal: a callback may queue further items
         if ready then for _, itemID in ipairs(ready) do fire(itemID) end end
-        if waiting or next(pending) then C_Timer.After(0.5, poll) else polling = false end
+        pump()                                      -- answered requests make room for queued ones
+        if next(pending) then C_Timer.After(0.5, poll) else polling = false end
     end
     function C_AssetQueryService.TryCacheItem(itemID)
         itemID = tonumber(itemID)
@@ -494,7 +500,7 @@ if not C_AssetQueryService.TryCacheItem then
         if not pending[itemID] then
             pending[itemID] = QUEUED
             queue[#queue + 1] = itemID
-            if not pumping then pumping = true; C_Timer.After(0, pump) end
+            pump()
             if not polling then polling = true; C_Timer.After(0.5, poll) end
         end
         return true
