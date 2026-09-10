@@ -327,7 +327,42 @@ FIRST_CUSTOM_OPCODE = 0x521          # NUM_MSG_TYPES; at or above this is Ascens
 # Character-Advancement class byte (10 = Tinker, up to 32) that has no
 # `playercreateinfo` row, so the core would refuse the creation outright.
 AC_VALID_CLASSES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 11}
+# A core carrying the CoA class work has real playercreateinfo rows for 12..32, so
+# those classes must NOT be substituted -- they build natively.  coa_mode owns that
+# set (and its ASC_AC_VALID_CLASSES override); adopt it rather than shadowing it
+# with the stock list, which is what silently forced every CoA class through the
+# carrier-class path even on a core that could build it.
+if COA_MODE:
+    AC_VALID_CLASSES = coa_mode.AC_VALID_CLASSES
 AC_FALLBACK_CLASS = int(os.environ.get("ASC_FALLBACK_CLASS", "1"))   # Warrior
+
+# Stock 3.3.5a race/class pairs.  Player::Create refuses an invalid pair outright
+# ("Possible hacking-attempt ... invalid race/class pair"), so a carrier class is
+# only usable if the chosen RACE can actually be it: race 10 (Blood Elf) has no
+# Warrior, and substituting the class-1 default there fails creation every time.
+AC_RACE_CLASSES = {
+    1:  {1, 2, 4, 5, 6, 8, 9},        # Human
+    2:  {1, 3, 4, 5, 6, 7, 9},        # Orc
+    3:  {1, 2, 3, 4, 5, 6},           # Dwarf
+    4:  {1, 3, 4, 5, 6, 11},          # Night Elf
+    5:  {1, 4, 5, 6, 8, 9},           # Undead
+    6:  {1, 3, 6, 7, 11},             # Tauren
+    7:  {1, 4, 6, 8, 9},              # Gnome
+    8:  {1, 3, 4, 5, 6, 8, 9},        # Troll
+    10: {2, 3, 4, 5, 6, 8, 9},        # Blood Elf
+    11: {1, 2, 3, 5, 6, 8},           # Draenei
+}
+
+
+def carrier_class_for(race):
+    """A class the core can build AND this race is allowed to be."""
+    allowed = AC_RACE_CLASSES.get(race)
+    if allowed is None:                       # unknown/custom race: keep the default
+        return AC_FALLBACK_CLASS
+    if AC_FALLBACK_CLASS in allowed:
+        return AC_FALLBACK_CLASS
+    usable = sorted(allowed & set(AC_VALID_CLASSES))
+    return usable[0] if usable else AC_FALLBACK_CLASS
 
 # Set ASC_BRIDGE_TRACE=1 to log every opcode in both directions.  Off, only the
 # packets below are named -- enough to tell "the client never asked" apart from
@@ -523,6 +558,7 @@ RESPONSE_CODES = {
     0x52: "CHAR_LOGIN_DISABLED",       0x53: "CHAR_LOGIN_NO_CHARACTER",
 }
 SMSG_CHAR_CREATE = 0x03A
+CHAR_CREATE_SUCCESS = 0x2F        # ResponseCodes, see RESPONSE_CODES above
 SMSG_CHARACTER_LOGIN_FAILED = 0x041
 
 
@@ -819,6 +855,9 @@ class Session(object):
         self.account = b"?"
         self.customs_sent = False
         self.reason = None
+        # (name, class) staged by fix_char_create, committed to COA_STATE only
+        # once the core answers CHAR_CREATE_SUCCESS.
+        self.pending_coa_class = None
         # Two threads write to the client socket -- the core->client pump and,
         # off timers, the archive hello and the CA bootstrap -- and the client
         # headers are plaintext, so a half-written packet is not recoverable by
@@ -1034,6 +1073,18 @@ class Session(object):
                 self.log("   S->C %s -> %s"
                          % (opname(opcode, False),
                             RESPONSE_CODES.get(body[0], "0x%02X" % body[0])))
+                if opcode == SMSG_CHAR_CREATE:
+                    pending = getattr(self, "pending_coa_class", None)
+                    if pending is not None:
+                        pname, pclass = pending
+                        if body[0] == CHAR_CREATE_SUCCESS:
+                            COA_STATE.set_class(pname, pclass)
+                            self.log("   CoA: committed %r -> class %d"
+                                     % (pname, pclass))
+                        else:
+                            self.log("   CoA: create refused; %r -> class %d NOT "
+                                     "recorded" % (pname, pclass))
+                        self.pending_coa_class = None
             elif opcode == SMSG_CAST_FAILED:
                 self.log("   S->C SMSG_CAST_FAILED %s" % describe_cast_failed(body))
             elif opcode == SMSG_TRAINER_LIST:
@@ -1354,6 +1405,9 @@ class Session(object):
         clas = tail[1]
         if clas in AC_VALID_CLASSES:
             return body
+        # Must respect the chosen race: see carrier_class_for().
+        race = tail[0]
+        carrier = carrier_class_for(race)
         # CoA mode: the substitution is no longer a one-way loss.  Remember which
         # class the player actually chose, keyed by the character NAME (the only
         # identifier present in both CMSG_CHAR_CREATE and SMSG_CHAR_ENUM -- the
@@ -1363,11 +1417,18 @@ class Session(object):
             if not name:
                 pass
             elif clas in COA_CLASS_NAMES:
-                COA_STATE.set_class(name, clas)
+                # Do NOT persist yet.  The core can still refuse this create (an
+                # invalid race/class pair, a duplicate name), and a name recorded
+                # for a character that was never built stays in coa_state.json
+                # forever -- the next character to reuse that name is then enum-
+                # projected to a class it does not have, which shows up in game as
+                # "the UI says Cultist but I have Paladin spells".  Commit only on
+                # CHAR_CREATE_SUCCESS; see pending_coa_class below.
+                self.pending_coa_class = (name, clas)
                 self.log("   CoA: %r chose class %d (%s); carrier class %d for "
-                         "the core" % (name, clas,
-                                       COA_CLASS_NAMES.get(clas, "?"),
-                                       AC_FALLBACK_CLASS))
+                         "the core (race %d)" % (name, clas,
+                                                 COA_CLASS_NAMES.get(clas, "?"),
+                                                 carrier, race))
             else:
                 # Not every class the core cannot build is a CoA class. The Dev
                 # flavour this realm serves also turns CanCreateHero on, and
@@ -1380,15 +1441,16 @@ class Session(object):
                 # makes get_class() return None, and send_coa_state() already
                 # withholds the essence and known-entry packets on None and says
                 # why. Only CoA classes 12..32 are CoA classes.
+                self.pending_coa_class = None
                 self.log("   CoA: %r chose class %d (%s), which is not a CoA "
                          "class -- carrier class %d for the core, and NO CoA "
                          "class recorded, so it will never be served CoA essence"
                          % (name, clas,
                             "Free-Pick hero" if clas == 10 else "?",
-                            AC_FALLBACK_CLASS))
-        tail[1] = AC_FALLBACK_CLASS
-        self.log("   CHAR_CREATE class %d has no playercreateinfo row -> %d"
-                 % (clas, AC_FALLBACK_CLASS))
+                            carrier))
+        tail[1] = carrier
+        self.log("   CHAR_CREATE class %d has no playercreateinfo row -> %d "
+                 "(race %d)" % (clas, carrier, race))
         return body[:z + 1] + bytes(tail)
 
     def close(self, reason=None):

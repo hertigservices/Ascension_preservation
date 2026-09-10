@@ -151,6 +151,32 @@ CHR_COL_FILE = 55
 # the Free-Pick hero cannot be created either.
 AC_VALID_CLASSES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 11}
 
+# A core with the CoA class work (MAX_CLASSES 33 plus its playercreateinfo rows for
+# 12..32) CAN build those classes, and rewriting them to the fallback then produces an
+# invalid race/class pair the core refuses. Override with e.g.
+#     ASC_AC_VALID_CLASSES="1-9,11-32"
+# Ranges and single values, comma separated. Unset keeps the stock-core set above.
+def _parse_class_set(spec):
+    out = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            out.update(range(int(lo), int(hi) + 1))
+        else:
+            out.add(int(part))
+    return out
+
+
+_ac_classes_env = os.environ.get("ASC_AC_VALID_CLASSES", "").strip()
+if _ac_classes_env:
+    try:
+        AC_VALID_CLASSES = _parse_class_set(_ac_classes_env)
+    except ValueError:
+        pass
+
 
 # ---------------------------------------------------------------- DBC reading
 
