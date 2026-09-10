@@ -38,7 +38,7 @@ file it could not find.
 ## 2. Client
 
 ```
-python tools/install_client.py --stock <stock client dir> --ascension-data <dir with patch-*.MPQ> --out <new client dir> --realmlist <host:port> --stock-ui-tree <stock-ui-tree>/Interface
+python tools/install_client.py --stock <stock client dir> --ascension-data <dir with patch-*.MPQ> --out <new client dir> --realmlist <host:port> --realm-name "<realm on the list>" --stock-ui-tree <stock-ui-tree>/Interface
 ```
 
 Hardlinks (or `--copy`) the archives, maps Ascension's multi-letter archives onto free
@@ -49,7 +49,11 @@ recorded stock binary), installs the addon pack and the character-creation class
 bash the overlay copy has been seen to land nowhere. Re-running only refreshes what changed.
 
 Window size: the Collections panel is 1294 UI units wide and Ascension scales the UI to
-0.9, so the default `Config.wtf` asks for 1600x900; smaller windows clip the panel.
+0.9, so the default `Config.wtf` asks for 1600x900 (with `hwDetect 0`, or the first launch
+replaces it with its own 1024x768 pick); smaller windows clip the panel. `--realm-name`
+writes `SET realmName`: with two realms on the list (CoA and Free-Pick) a client without a
+remembered realm stops at the Realm Selection dialog after login, which is where a clean
+rehearsal of these steps first stopped (2026-09-10).
 
 ## 3. Server
 

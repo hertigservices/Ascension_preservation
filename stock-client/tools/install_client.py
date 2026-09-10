@@ -96,6 +96,8 @@ def main():
     ap.add_argument("--ascension-data", required=True, help="directory holding Ascension's Data\\patch-*.MPQ archives, read only")
     ap.add_argument("--out", required=True, help="the client to create / refresh")
     ap.add_argument("--realmlist", default="127.0.0.1:3724")
+    ap.add_argument("--realm-name", default="", help="realm the client should log into when the list has more than one "
+                    "(written as SET realmName; without it a fresh client stops at the Realm Selection dialog)")
     ap.add_argument("--resolution", default="1600x900", help="the Collections panel is 1294 UI units wide; 1600x900 fits it")
     ap.add_argument("--pack", default=os.path.join(ROOT, "build", "p2-panel"), help="assembled addon pack (Interface\\AddOns inside)")
     ap.add_argument("--stock-ui-tree", help="stock GlueXML.toc source for the glue overlay (default: extracted from --stock is NOT attempted; pass ...\\stock-ui-tree\\Interface)")
@@ -186,10 +188,15 @@ def main():
                      'set realmlist %s\nset patchlist 127.0.0.1\nset realmlistbn ""\n' % a.realmlist, dry)
     cfg = os.path.join(out, "WTF", "Config.wtf")
     if not os.path.exists(cfg):
-        write_if_differs(cfg, ('SET realmList "%s"\nSET patchlist "127.0.0.1"\nSET locale "enUS"\nSET gxWindow "1"\nSET gxMaximize "0"\n'
-                               'SET gxResolution "%s"\nSET readTOS "1"\nSET readEULA "1"\nSET readTerminationWithoutNotice "1"\n'
-                               'SET readScanning "-1"\nSET readContest "-1"\nSET accounttype "LK"\nSET movie "0"\n'
-                               'SET checkAddonVersion "0"\nSET scriptErrors "1"\n') % (a.realmlist, a.resolution), dry)
+        # hwDetect 0: otherwise the first launch runs hardware detection and replaces the
+        # requested resolution with its own pick (measured: 1600x900 asked, 1024x768 window).
+        text = ('SET realmList "%s"\nSET patchlist "127.0.0.1"\nSET locale "enUS"\nSET gxWindow "1"\nSET gxMaximize "0"\n'
+                'SET gxResolution "%s"\nSET hwDetect "0"\nSET videoOptionsVersion "3"\nSET readTOS "1"\nSET readEULA "1"\n'
+                'SET readTerminationWithoutNotice "1"\nSET readScanning "-1"\nSET readContest "-1"\nSET accounttype "LK"\n'
+                'SET movie "0"\nSET checkAddonVersion "0"\nSET scriptErrors "1"\n') % (a.realmlist, a.resolution)
+        if a.realm_name:
+            text += 'SET realmName "%s"\n' % a.realm_name.replace('"', '')
+        write_if_differs(cfg, text, dry)
 
     if not a.no_pack:
         src = os.path.join(a.pack, "Interface", "AddOns")
