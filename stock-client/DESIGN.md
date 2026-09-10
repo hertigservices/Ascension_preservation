@@ -51,9 +51,15 @@ wins over TA/CHA/C*/W*). `make_client_coa.py` computes and records the map in
      via the frame metatable: explicitly inventoried custom event names are recorded per frame and dispatched by
      `ASC.Events.Fire(name, ...)` calling the frame's OnEvent script. Stock events pass through
      untouched.
-   - `core/Transport.lua` (not implemented) — planned addon-message channel to `mod-ascension-ca`: prefix `ASC`,
-     whisper-to-self, `ASC.Send(verb, ...)`, request ids, fragment reassembly
-     with request/transfer IDs, bounded reassembly, `HELLO` handshake, mode, connected state. The existing prototype fragment syntax lacks transfer identity and is not sufficient for concurrent state/build responses.
+   - `core/Transport.lua` (P3) — the addon-message channel to `mod-ascension-ca`: prefix `ASC`,
+     whisper-to-self, `ASC.Transport.Send(verb, body)` / `.On(verb, handler)`, `HELLO` on
+     PLAYER_ENTERING_WORLD, `<verb>\t#\t<seq>\t<count>\t<chunk>` fragments reassembled per verb in
+     both directions (one transfer per verb in flight; the module answers a verb before it
+     sends the same verb again). The protocol is documented in `server/mod-ascension-ca/README.md`.
+   - `core/Live.lua` (P3) — the pending-build model over the transport: STATE installs it over
+     the preview API (known set, pending set, AE/TE budgets from the server, CoA rules mirrored
+     from the module so CanAddByEntryID answers before the round trip); ApplyPendingBuild
+     uploads the complete set; RESULT/STATE fire the panel's custom events.
    - `core/Data.lua` — accessors over the generated tables (entries by id/class/tab, edges,
      essence curve, classes, tabs, categories and specializations).
    - `core/BuildData.lua` and optional generated catalogue chunks — preserve complete captured records, source realm/date and spell order; no build activation.

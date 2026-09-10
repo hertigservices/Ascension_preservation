@@ -82,6 +82,7 @@ MANIFEST = [
     "FrameXML/Util/CharacterAdvancementCostUtil.lua",
     "FrameXML/Util/BuildCreatorUtil.lua",
     "FrameXML/Util/TokenUtil.lua",
+    "FrameXML/Util/VanityCollectionUtil.lua",
     "FrameXML/Util/TalentUtil.lua",
     "FrameXML/CurrencyBar.xml",
     "FrameXML/IconSelectorFrame.xml",

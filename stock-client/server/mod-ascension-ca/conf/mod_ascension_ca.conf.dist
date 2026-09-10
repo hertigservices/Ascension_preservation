@@ -1,0 +1,27 @@
+[worldserver]
+
+###################################################################################################
+# mod-ascension-ca: Character Advancement for the stock-client port of Ascension (CoA first)
+#
+#    AscensionCA.Enable
+#        Description: Serve Character Advancement to the addon pack over addon whispers.
+#        Default:     1
+#
+#    AscensionCA.Mode
+#        Description: Realm mode announced to the addon pack: coa | freepick | wildcard
+#        Default:     "coa"
+#
+#    AscensionCA.DefaultClassByte
+#        Description: CoA class byte assigned to a character that has no ascension_ca_character
+#                     row yet (28 = Tinker). Character creation (P4) sets the real one.
+#        Default:     28
+#
+#    AscensionCA.Debug
+#        Description: Log every verb and every spell learned/removed.
+#        Default:     0
+###################################################################################################
+
+AscensionCA.Enable = 1
+AscensionCA.Mode = "coa"
+AscensionCA.DefaultClassByte = 28
+AscensionCA.Debug = 0

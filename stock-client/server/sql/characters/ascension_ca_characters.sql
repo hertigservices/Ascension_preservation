@@ -1,0 +1,3 @@
+-- mod-ascension-ca per-character state (characters database)
+CREATE TABLE IF NOT EXISTS ascension_ca_character (guid INT UNSIGNED NOT NULL PRIMARY KEY, class_byte TINYINT UNSIGNED NOT NULL, spec_id INT UNSIGNED NOT NULL DEFAULT 0, updated_at INT UNSIGNED NOT NULL DEFAULT 0) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS ascension_ca_known (guid INT UNSIGNED NOT NULL, entry INT UNSIGNED NOT NULL, `rank` TINYINT UNSIGNED NOT NULL, PRIMARY KEY(guid, entry)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

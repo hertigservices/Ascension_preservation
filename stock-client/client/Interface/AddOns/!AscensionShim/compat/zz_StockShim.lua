@@ -52,6 +52,43 @@ end
 if not SetMaskTexture then
     function SetMaskTexture() end
 end
+-- Ascension native namespace C_VanityCollection (no vanity catalogue was recovered, see
+-- DESIGN.md): every lookup answers "nothing", which is what C_Spell's auto-place-on-bar
+-- path and VanityCollectionUtil expect for a spell that is not a vanity item.
+C_VanityCollection = C_VanityCollection or {}
+C_VanityCollection.GetItem = C_VanityCollection.GetItem or function() return nil end
+C_VanityCollection.GetItemByLearnedSpell = C_VanityCollection.GetItemByLearnedSpell or function() return nil end
+C_VanityCollection.GetOwnerByContentItem = C_VanityCollection.GetOwnerByContentItem or function() return nil end
+C_VanityCollection.GetSeasonalShowcaseItems = C_VanityCollection.GetSeasonalShowcaseItems or function() return {} end
+-- Ascension native: IsPassiveSpellID(spellID); stock IsPassiveSpell accepts a spell id too.
+if not IsPassiveSpellID then
+    function IsPassiveSpellID(spellID) return IsPassiveSpell(spellID) end
+end
+-- Ascension's PlaySound takes a retail SOUNDKIT id (SharedXML\Util\SoundKit.lua); stock takes
+-- a SoundEntries name. Map the id back to its SOUNDKIT key and spell that the 3.3.5 way
+-- (IG_MAINMENU_OPTION_CHECKBOX_ON -> igMainmenuOptionCheckboxOn, matched case-insensitively);
+-- an unknown id is silent rather than an error that aborts the caller's OnClick.
+do
+    local native = PlaySound
+    local names
+    function PlaySound(sound, ...)
+        if type(sound) == "number" then
+            if not names then
+                names = {}
+                for key, id in pairs(SOUNDKIT or {}) do if type(id) == "number" then names[id] = key end end
+            end
+            local key = names[sound]
+            if not key then return end
+            local parts = {}
+            for tok in string.gmatch(key, "[^_]+") do
+                parts[#parts + 1] = #parts == 0 and string.lower(tok) or (string.upper(string.sub(tok, 1, 1)) .. string.lower(string.sub(tok, 2)))
+            end
+            sound = table.concat(parts)
+        end
+        local ok, a, b = pcall(native, sound, ...)
+        if ok then return a, b end
+    end
+end
 
 ----------------------------------------------------------------------------------------
 -- 2. Frame:GetAllAttributes() - native in Ascension; stock can only GetAttribute(name).
@@ -180,6 +217,21 @@ SlashCmdList.ASCCA = function() OpenCharacterAdvancement() end
 --    auto-open the CA tab when Stock.autoOpenPanel is set, so tests need no chat input.
 ----------------------------------------------------------------------------------------
 Stock.autoOpenPanel = true
+-- Test helpers (the harness drives the UI through /run lines that must stay short).
+function Stock.FindNode(entryID)
+    local f = EnumerateFrames()
+    while f do
+        if f.entry and f.IsVisible and f:IsVisible() and (f.entry.ID == entryID or f.entryID == entryID) then return f end
+        f = EnumerateFrames(f)
+    end
+end
+function Stock.FindButton(text)
+    local f = EnumerateFrames()
+    while f do
+        if f.GetObjectType and f:GetObjectType() == "Button" and f:IsVisible() and f.GetText and f:GetText() == text then return f end
+        f = EnumerateFrames(f)
+    end
+end
 local probe = CreateFrame("Frame")
 probe:RegisterEvent("PLAYER_ENTERING_WORLD")
 probe:SetScript("OnEvent", function()

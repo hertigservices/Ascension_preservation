@@ -31,7 +31,7 @@ def build(data_root,dataset,class_byte,level,output,catalogue=None):
     if not 1<=level<=80:raise ValueError('preview level must be 1..80')
     config={'dataset':dataset,'classByte':class_byte,'level':level,'readOnly':True}
     texts={}; source_hashes={}
-    for name in ('core/Namespaces.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','Bootstrap.lua'):
+    for name in ('core/Namespaces.lua','core/EventBus.lua','core/CustomEvents.lua','core/Data.lua','core/BuildData.lua','api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'):
         raw=(SOURCE/name).read_bytes()
         source_hashes[name]=hashlib.sha256(raw).hexdigest()
         texts[name]=raw.decode('utf-8-sig')
@@ -62,7 +62,7 @@ def build(data_root,dataset,class_byte,level,output,catalogue=None):
             texts[target]=raw.decode('utf-8-sig');order.append(target)
         source_hashes['catalogue-generation.json']=hashlib.sha256((catalogue/'generation.json').read_bytes()).hexdigest()
     texts['Config.lua']='-- Generated explicit offline-preview selection.\nASC.Config='+gen.lua(config)+'\n'
-    order.extend(('api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','Bootstrap.lua'))
+    order.extend(('api/C_ClassInfo.lua','api/C_CharacterAdvancement.lua','api/C_BuildCreator.lua','core/Transport.lua','core/Live.lua','Bootstrap.lua'))
     texts['!AscensionShim.toc']='''## Interface: 30300
 ## Title: Ascension Stock Client Preview
 ## Notes: Data and API core preview; server learning is disabled.
