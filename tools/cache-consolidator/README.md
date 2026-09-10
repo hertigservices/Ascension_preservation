@@ -28,3 +28,7 @@ context in docs/LEGACY-README.md. Original author history is retained through a
 Git subtree split of the old tools directory.
 
 [BisBeard supplemental catalog](docs/BISBEARD.md) has its own lossless importer and verifier; it does not replace captured WDB records.
+
+[Exiles database catalog](docs/EXILES-DB.md) preserves a reviewed offline mirror of the
+`db.exil.es` CoA site — spells, loot tables, talent trees and a change log — with the
+same rule: website values are attributed claims, and captured WDB records stay authoritative.

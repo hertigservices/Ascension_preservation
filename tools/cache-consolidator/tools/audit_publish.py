@@ -24,7 +24,13 @@ ALLOW_SUBSTR = [b"World of Warcraft\\Cache", b"<redacted",
                 # The commit trailer publish.py writes. A documented no-reply
                 # mailbox belonging to no one, allowed as this exact string and
                 # nothing wider -- any other address still fails.
-                b"noreply@anthropic.com"]
+                b"noreply@anthropic.com",
+                # Game text, not a person. The GM "BAN Hammer" spell in the
+                # Exiles database mirror tells a banned player to appeal to a
+                # mailbox at a TLD that does not exist. Allowed as this exact
+                # string and nothing wider -- another name at the same domain,
+                # or this name at a real domain, still fails.
+                b"techbot@gnome.mail"]
 
 # A placeholder is not a leak.  The tool has to be able to name the path it
 # refuses -- "WTF/Account/<login email>/" IS the documentation of the rule --
