@@ -189,9 +189,44 @@ if not CharacterAdvancement_LoadUI then
 end
 BuildCreator_LoadUI = BuildCreator_LoadUI or loader("Ascension_BuildCreator")
 SkillCards_LoadUI = SkillCards_LoadUI or loader("Ascension_SkillCards")
-VanityCollection_LoadUI = VanityCollection_LoadUI or loader("Ascension_VanityCollection")
 MysticEnchant_LoadUI = MysticEnchant_LoadUI or loader("Ascension_EnchantCollection")
-AppearanceUI_LoadUI = AppearanceUI_LoadUI or loader("Ascension_AppearanceUI")
+-- Collections tabs whose data was never recovered (the vanity and transmog catalogues were
+-- 0-byte JSON in every capture, see DESIGN.md §4): the tab opens an honest placeholder
+-- panel under the frame name Collections expects, instead of loading an addon whose every
+-- list would be empty. The original addons stay in the repository for when data appears.
+-- Every Collections panel draws its own chrome (RaisedPortraitFrameTemplate, the template
+-- CoATalentFrame uses) and Collections resizes itself to the panel, so the placeholder
+-- inherits the same template and carries the tab's title and icon.
+local function placeholderPanel(name, title, icon, body)
+    return function()
+        if _G[name] then return true end
+        local ok, f = pcall(CreateFrame, "Frame", name, Collections, "RaisedPortraitFrameTemplate")
+        if not ok or not f then f = CreateFrame("Frame", name, Collections) end
+        -- same geometry as CoATalentFrame (CoATalentFrame.xml): the panel IS the visible window
+        f:SetWidth(1294)
+        f:SetHeight(666)
+        f:SetPoint("BOTTOM", Collections, "BOTTOM", 0, 8)
+        f:SetFrameStrata("DIALOG")
+        f:Hide()
+        if PortraitFrame_SetTitle then pcall(PortraitFrame_SetTitle, f, title) end
+        if PortraitFrame_SetIcon then pcall(PortraitFrame_SetIcon, f, icon) end
+        local h = f:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+        h:SetPoint("TOP", f, "TOP", 0, -150)
+        h:SetText(title)
+        local t = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        t:SetPoint("TOP", h, "BOTTOM", 0, -24)
+        t:SetWidth(560)
+        t:SetJustifyH("CENTER")
+        t:SetText(body)
+        return true
+    end
+end
+VanityCollection_LoadUI = VanityCollection_LoadUI or placeholderPanel("StoreCollectionFrame", VANITY or "Vanity", "Interface\\icons\\INV_Chest_Awakening",
+    "No vanity catalogue was recovered from Ascension: the collection data was empty (0 bytes) in every capture this port is built from.\n\n"
+    .. "The original Ascension_VanityCollection addon is preserved in the repository and will be wired in here if the data is ever found.")
+AppearanceUI_LoadUI = AppearanceUI_LoadUI or placeholderPanel("AppearanceWardrobeFrame", WARDROBE or "Wardrobe", "Interface\\Icons\\inv_arcane_orb",
+    "No transmogrification catalogue was recovered from Ascension: the wardrobe data was empty (0 bytes) in every capture this port is built from.\n\n"
+    .. "The original Ascension_AppearanceUI addon is preserved in the repository and will be wired in here if the data is ever found.")
 -- Ascension_Collections is LoadOnDemand; Ascension's UIParent loads it on first use.
 Collections_LoadUI = Collections_LoadUI or loader("Ascension_Collections")
 local function OpenCharacterAdvancement()
