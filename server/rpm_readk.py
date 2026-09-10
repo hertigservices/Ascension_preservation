@@ -25,7 +25,18 @@ PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 INVALID = ctypes.c_void_p(-1).value
 
-k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+# Importable off Windows so callers that never take the RPM path (e.g. the AuthGate
+# route, where the key is read in-process) can still import this module. Any actual
+# call fails loudly rather than at import time.
+try:
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+except AttributeError:      # non-Windows CPython has no ctypes.WinDLL
+    k32 = None
+
+
+def _require_windows():
+    if k32 is None:
+        raise OSError("rpm_readk requires Windows; use the in-process key oracle instead")
 
 
 class PROCESSENTRY32(ctypes.Structure):
@@ -45,6 +56,7 @@ class MODULEENTRY32(ctypes.Structure):
 
 
 def find_pids(exe_name=b"Ascension.exe"):
+    _require_windows()
     snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if snap == INVALID:
         return []
@@ -64,6 +76,7 @@ def find_pids(exe_name=b"Ascension.exe"):
 
 
 def module_base(pid, name=MODULE_NAME):
+    _require_windows()
     snap = k32.CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
     if snap == INVALID:
         return None
@@ -82,6 +95,7 @@ def module_base(pid, name=MODULE_NAME):
 
 
 def _open(pid):
+    _require_windows()
     h = k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
     return h or None
 

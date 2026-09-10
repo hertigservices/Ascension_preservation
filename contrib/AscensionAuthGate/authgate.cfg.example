@@ -1,0 +1,10 @@
+# Copy to "authgate.cfg" beside Extensions.dll. Only the first 511 bytes are
+# read, so keep keys at the top. No inline comments: everything after "=" is
+# the value. Values are echoed to proxy_auth.log.
+
+# authserver, port always 3724
+#auth_ip = 192.168.1.50
+# bridge address; ports 8085/8087/8088 only
+#realm = 192.168.1.50:8088
+# needed for any non-loopback realm
+#allow_remote_world = 1

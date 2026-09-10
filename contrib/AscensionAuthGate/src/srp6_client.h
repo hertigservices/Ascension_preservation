@@ -213,9 +213,17 @@ done:
     SecureZeroMemory(M1,sizeof(M1));SecureZeroMemory(M2,sizeof(M2));SecureZeroMemory(proof,sizeof(proof));
     return result;
 }
+/* 0 = loopback only (default). Set from config to permit one non-loopback
+ * authserver; deliberately a single address, not a wildcard. */
+static unsigned long g_srp6_allowed_ip = 0;
+
+
 static int srp6_validate(const char *user,const char *pass,unsigned long authip_net) {
     SOCKET s;struct sockaddr_in sa;int result;
-    if(authip_net!=htonl(INADDR_LOOPBACK) || !srp6_credentials(user,pass))return -1;
+    /* Loopback-only by default. A deployment may opt in to ONE additional endpoint
+     * (see authgate.cfg / g_srp6_allowed_ip) for LAN play; anything else is refused. */
+    if(authip_net!=(g_srp6_allowed_ip?g_srp6_allowed_ip:htonl(INADDR_LOOPBACK))
+       || !srp6_credentials(user,pass))return -1;
     s=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);if(s==INVALID_SOCKET)return -1;
     ZeroMemory(&sa,sizeof(sa));sa.sin_family=AF_INET;sa.sin_port=htons(3724);sa.sin_addr.s_addr=authip_net;
     if(connect(s,(struct sockaddr*)&sa,sizeof(sa))!=0){closesocket(s);return -1;}

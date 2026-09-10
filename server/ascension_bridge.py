@@ -91,7 +91,9 @@ from world_server import (RC4, SERVER_ENC_SEED, SERVER_DEC_SEED, smsg_realm_info
 import chardata
 
 # ---- configuration ----------------------------------------------------------
-LISTEN_HOST = "127.0.0.1"
+# Loopback by default. Set ASC_BRIDGE_HOST=0.0.0.0 to serve other machines on a
+# trusted LAN; those clients need authgate.cfg with allow_remote_world = 1.
+LISTEN_HOST = os.environ.get("ASC_BRIDGE_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("ASC_BRIDGE_PORT", "8088"))   # 8085/8087/8088 ONLY
 AC_HOST = os.environ.get("ASC_AC_HOST", "127.0.0.1")
 AC_PORT = int(os.environ.get("ASC_AC_PORT", "8086"))

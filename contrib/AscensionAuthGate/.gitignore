@@ -10,3 +10,6 @@ last-*.json
 *.exp
 *.map
 __pycache__/
+
+# local deployment config (may contain a LAN address); ship only the .example
+authgate.cfg

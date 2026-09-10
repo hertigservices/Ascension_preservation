@@ -24,6 +24,24 @@ static int g_ready = 0;
 static DWORD g_login_rva    = GATE_LOGIN_RVA;
 static DWORD g_authobj_slot = RVA_AUTHOBJ_SLOT;
 static DWORD g_off_login_k  = OFF_LOGIN_K;
+
+/* Extensions.dll's world-endpoint allow-list check (see tools/allowlist.py). It builds
+ * the stored endpoint string from Ascension.exe 0x00C79C9E, searches a 91-entry list in
+ * .rdata, and records "not found":
+ *
+ *     10A3CACA  cmp  edi, [allowlist_end]
+ *     10A3CAD3  sete byte ptr [ebp-0x41]      ; guard = (it == end)
+ *
+ * Only three loopback endpoints are listed (127.0.0.1:8085/:8087/:8088), so a LAN world
+ * address trips the guard and the client dies with ERROR #132 shortly after the world
+ * draws. Forcing the guard to 0 accepts any endpoint. Same-length patch:
+ *     0F 94 45 BF  sete byte [ebp-0x41]   ->   C6 45 BF 00  mov byte [ebp-0x41], 0
+ * Extension-relative like g_authobj_slot, so it is trusted only against the known
+ * extension hash and is overridable by authgate.profile. The four bytes are verified
+ * before the patch is written, so a wrong offset fails closed and patches nothing.
+ * Applied only when authgate.cfg sets allow_remote_world = 1. */
+#define EXT_ALLOWLIST_GUARD_RVA 0xA3CAD3
+static DWORD g_allowlist_rva = EXT_ALLOWLIST_GUARD_RVA;
 #define PROD_B0 51
 #define PROD_B1 210
 #define PROD_B2 230
@@ -119,6 +137,43 @@ static void *hook_iat(HMODULE mod, const char *dll, const char *fn, void *repl)
     return orig;
 }
 
+
+/* Patch an import slot by matching the RESOLVED address rather than the import
+ * name. Under Wine every ws2_32 OriginalFirstThunk entry reads with
+ * IMAGE_ORDINAL_FLAG set, so the name-based walk above finds nothing even though
+ * the file's imports are by name. Comparing against GetProcAddress works whether
+ * the import was by name or ordinal. */
+static void *hook_iat_addr(HMODULE mod, const char *dll, void *target, void *repl)
+{
+    BYTE *base = (BYTE *)mod;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)base;
+    IMAGE_NT_HEADERS *nt;
+    IMAGE_DATA_DIRECTORY *dir;
+    IMAGE_IMPORT_DESCRIPTOR *imp;
+    void *orig = NULL;
+
+    if (!target || dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    nt = (IMAGE_NT_HEADERS *)(base + dos->e_lfanew);
+    dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir->VirtualAddress) return NULL;
+    imp = (IMAGE_IMPORT_DESCRIPTOR *)(base + dir->VirtualAddress);
+
+    for (; imp->Name; imp++) {
+        IMAGE_THUNK_DATA *ft;
+        if (dll && lstrcmpiA((const char *)(base + imp->Name), dll) != 0) continue;
+        ft = (IMAGE_THUNK_DATA *)(base + imp->FirstThunk);
+        for (; ft->u1.Function; ft++) {
+            DWORD old;
+            if ((void *)ft->u1.Function != target) continue;
+            orig = target;
+            if (VirtualProtect(&ft->u1.Function, sizeof(void *), PAGE_READWRITE, &old)) {
+                ft->u1.Function = (DWORD_PTR)repl;
+                VirtualProtect(&ft->u1.Function, sizeof(void *), old, &old);
+            }
+        }
+    }
+    return orig;
+}
 
 typedef HANDLE (WINAPI *CreateFileA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -256,18 +311,44 @@ __declspec(naked) void ClientExtensionsDummy(void)
 
 /* SEH-guarded reads: the auth object is a heap pointer that may be null or in
  * flux during construction. Never let a bad read take the client down. */
+#ifdef _MSC_VER
 static int kr_read_u32(const void *addr, DWORD *out)
 {
     __try { *out = *(volatile DWORD *)addr; return 1; }
     __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
 }
+#else
+/* Cross-build port (clang/GCC, no MSVC SEH): validate the page before reading
+ * instead of catching the fault. Same intent -- a bad pointer must not take the
+ * client down -- reached by checking rather than trapping. */
+static int kr_readable(const void *p, SIZE_T n)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!p || !VirtualQuery(p, &mbi, sizeof(mbi))) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
+    return (SIZE_T)((BYTE *)mbi.BaseAddress + mbi.RegionSize - (BYTE *)p) >= n;
+}
+static int kr_read_u32(const void *addr, DWORD *out)
+{
+    if (!kr_readable(addr, sizeof(DWORD))) return 0;
+    *out = *(volatile DWORD *)addr; return 1;
+}
+#endif
 static int kr_read_bytes(const void *addr, unsigned char *dst, int n)
 {
+#ifdef _MSC_VER
     __try {
         int i;
         for (i = 0; i < n; i++) dst[i] = ((volatile const unsigned char *)addr)[i];
         return 1;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+#else
+    int i;
+    if (!kr_readable(addr, (SIZE_T)n)) return 0;
+    for (i = 0; i < n; i++) dst[i] = ((volatile const unsigned char *)addr)[i];
+    return 1;
+#endif
 }
 static int kr_all_zero(const unsigned char *p, int n)
 {
@@ -330,7 +411,76 @@ static int as_build_challenge(unsigned char out[119])
  * (bypass) path. VALID -> call the original login (custom auth proceeds to char-select
  * via the in-process AUTHSRV); REJECTED/UNREACHABLE -> block. Login RVA is g_login_rva
  * (compiled default GATE_LOGIN_RVA, overridable by authgate.profile). */
-#define GATE_AUTH_IP   0x0100007Fu     /* 127.0.0.1 authserver (TODO: realmList IP for LAN) */
+#define GATE_AUTH_IP   0x0100007Fu     /* 127.0.0.1 authserver; authgate.cfg auth_ip overrides */
+
+/* ---- optional local config: authgate.cfg beside the DLL ------------------------
+ * Lets a deployment point the gate and the realm list at another machine without a
+ * rebuild. Absent or unparsable -> the compiled defaults above are used unchanged.
+ *
+ *     auth_ip = 192.168.1.50        # authserver to validate credentials against
+ *     realm   = 192.168.1.50:8088   # address handed to the client in the realm list
+ *
+ * Setting auth_ip to a non-loopback address deliberately relaxes the loopback-only
+ * guard in srp6_client.h, and only for that one address. Passwords then cross the
+ * LAN inside SRP6 (never in clear), but do this only on a network you trust. */
+static unsigned long g_auth_ip = GATE_AUTH_IP;
+static char g_realm_addr[64] = "127.0.0.1:8088";
+static int g_allow_remote_world = 0;
+
+static void cfg_trim(char *s)
+{
+    char *e; while (*s == ' ' || *s == '\t') memmove(s, s + 1, lstrlenA(s));
+    e = s + lstrlenA(s);
+    while (e > s && (e[-1]==' '||e[-1]=='\t'||e[-1]=='\r'||e[-1]=='\n')) *--e = 0;
+}
+
+static void load_config(void)
+{
+    char path[MAX_PATH], buf[512], line[160], b[200];
+    HANDLE h; DWORD got = 0; int i = 0, n;
+
+    lstrcpynA(path, g_dir, MAX_PATH);
+    lstrcatA(path, "authgate.cfg");
+    h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE) { aslog("[cfg] no authgate.cfg; using compiled defaults\r\n"); return; }
+    ReadFile(h, buf, sizeof(buf) - 1, &got, NULL);
+    CloseHandle(h);
+    buf[got] = 0;
+
+    while (i < (int)got) {
+        char *eq;
+        n = 0;
+        while (i < (int)got && buf[i] != '\n' && n < (int)sizeof(line) - 1) line[n++] = buf[i++];
+        if (i < (int)got) i++;
+        line[n] = 0;
+        cfg_trim(line);
+        if (!line[0] || line[0] == '#' || line[0] == ';') continue;
+        eq = line; while (*eq && *eq != '=') eq++;
+        if (!*eq) continue;
+        *eq++ = 0;
+        cfg_trim(line); cfg_trim(eq);
+
+        if (!lstrcmpiA(line, "auth_ip")) {
+            unsigned long a = inet_addr(eq);
+            if (a == INADDR_NONE) { wsprintfA(b, "[cfg] bad auth_ip '%s'; keeping default\r\n", eq); aslog(b); }
+            else {
+                g_auth_ip = a;
+                g_srp6_allowed_ip = a;      /* permit exactly this one endpoint */
+                wsprintfA(b, "[cfg] auth_ip = %s\r\n", eq); aslog(b);
+            }
+        } else if (!lstrcmpiA(line, "allow_remote_world")) {
+            g_allow_remote_world = (eq[0] == '1' || eq[0] == 'y' || eq[0] == 'Y' ||
+                                    eq[0] == 't' || eq[0] == 'T');
+            wsprintfA(b, "[cfg] allow_remote_world = %d\r\n", g_allow_remote_world);
+            aslog(b);
+        } else if (!lstrcmpiA(line, "realm")) {
+            if (lstrlenA(eq) > 0 && lstrlenA(eq) < (int)sizeof(g_realm_addr)) {
+                lstrcpynA(g_realm_addr, eq, sizeof(g_realm_addr));
+                wsprintfA(b, "[cfg] realm = %s\r\n", g_realm_addr); aslog(b);
+            }
+        }
+    }
+}
 typedef int (__cdecl *gate_login_t)(const char *, const char *);
 static gate_login_t g_orig_login;
 static volatile LONG g_gate_deny = 1;   /* set when the last login was rejected -> AUTHSRV fails it */
@@ -341,7 +491,7 @@ static int __cdecl gate_my_login(const char *user, const char *pass)
         InterlockedExchange(&g_gate_deny, 1);
         return g_orig_login(user, pass);
     }
-    v = srp6_validate(user, pass, GATE_AUTH_IP);
+    v = srp6_validate(user, pass, g_auth_ip);
     wsprintfA(b, "[gate] %s\r\n",
               v == 1 ? "VALID (proceed)" : v == 0 ? "REJECTED (auth-failed shown)" : "UNREACHABLE (auth-failed shown)");
     aslog(b);
@@ -405,6 +555,44 @@ static void rl_str(unsigned char *buf, int *pos, const char *s)
 /* Minimal two-block realm list (WIRE-SPEC section 7): one connectable realm at
  * 127.0.0.1:8088 (local Ascension bridge) + its category-27 metadata twin so
  * the CoA realm screen will display and select it. Auth-channel framing: LE size. */
+/* Hand the client the key AzerothCore already has.
+ *
+ * The world digest is built from acore_auth.account.session_key, which the
+ * authserver wrote during the gate's SRP6 exchange. The client would otherwise
+ * present its OWN key from the custom login, and AzerothCore answers
+ * "Authentication failed for account". Writing our SRP6 key into the client's
+ * auth object makes both sides agree without touching the database -- which is
+ * what lets the client reach the worldserver with no bridge in between.
+ *
+ * Done after the realm list is served: the custom login has finished by then (so
+ * nothing overwrites it) and the world connection has not been made yet. */
+/* Neutralise the world-endpoint allow-list so a non-loopback realm address works.
+ * Only meaningful for multi-machine play; guarded on the exact original bytes so a
+ * different build logs a mismatch instead of being corrupted. */
+static void patch_world_allowlist(void)
+{
+    HMODULE eo = GetModuleHandleA("Extensions_orig.dll");
+    BYTE *t; DWORD old; char b[128];
+    static const BYTE want[4] = {0x0F,0x94,0x45,0xBF};   /* sete byte [ebp-0x41] */
+    static const BYTE repl[4] = {0xC6,0x45,0xBF,0x00};   /* mov  byte [ebp-0x41],0 */
+    if (!g_allow_remote_world) return;
+    if (!eo) { aslog("[allowlist] Extensions_orig not loaded\r\n"); return; }
+    t = (BYTE *)eo + g_allowlist_rva;
+    if (!memcmp(t, repl, 4)) { aslog("[allowlist] already patched\r\n"); return; }
+    if (memcmp(t, want, 4)) {
+        wsprintfA(b, "[allowlist] guard bytes are %02X %02X %02X %02X, not 0F 94 45 BF -- NOT patching\r\n",
+                  t[0], t[1], t[2], t[3]);
+        aslog(b); return;
+    }
+    if (!VirtualProtect(t, 4, PAGE_EXECUTE_READWRITE, &old)) {
+        aslog("[allowlist] guard not writable\r\n"); return;
+    }
+    memcpy(t, repl, 4);
+    VirtualProtect(t, 4, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), t, 4);
+    aslog("[allowlist] world-endpoint allow-list neutralised (remote world address permitted)\r\n");
+}
+
 static int build_realmlist(unsigned char *out)
 {
     unsigned char pl[512];
@@ -421,7 +609,7 @@ static int build_realmlist(unsigned char *out)
     pl[p++] = 0;                             /* lock */
     pl[p++] = 0;                             /* flags (no SPECIFY_BUILD -> no version gate) */
     rl_str(pl, &p, g_coa ? "Vol'jin - Conquest of Azeroth" : "Area 52 - Free-Pick");
-    rl_str(pl, &p, "127.0.0.1:8088");        /* allow-listed; :8088 = ascension_bridge.py -> AzerothCore :8086 */
+    rl_str(pl, &p, g_realm_addr);            /* allow-listed loopback port, or authgate.cfg "realm" */
     memcpy(pl + p, &pop, 4); p += 4;         /* population f32 */
     pl[p++] = 0;                             /* numChars */
     pl[p++] = 1;                             /* category */
@@ -569,8 +757,14 @@ static DWORD WINAPI authsrv_thread(LPVOID unused)
           setsockopt(c,SOL_SOCKET,SO_RCVTIMEO,(const char*)&timeout,sizeof(timeout));
           setsockopt(c,SOL_SOCKET,SO_SNDTIMEO,(const char*)&timeout,sizeof(timeout)); }
         aslog("[+] client connected\r\n");
+#ifdef _MSC_VER
         __try { as_handle(c); }
         __except (EXCEPTION_EXECUTE_HANDLER) { aslog("  handler exception\r\n"); }
+#else
+        /* No SEH on the cross-build. The faulting reads this guarded are already
+         * page-validated above, so the residual risk is the socket path itself. */
+        as_handle(c);
+#endif
         closesocket(c);
     }
 }
@@ -628,8 +822,10 @@ static void load_profile(void)
     if (prof_get(buf, "login_rva", &v))        g_login_rva = v;
     if (prof_get(buf, "authobj_slot_rva", &v)) g_authobj_slot = v;
     if (prof_get(buf, "off_login_k", &v))      g_off_login_k = v;
-    wsprintfA(b, "[startup] profile applied: login_rva=0x%X slot=0x%X off_k=0x%X\r\n",
-              g_login_rva, g_authobj_slot, g_off_login_k);
+    if (prof_get(buf, "allowlist_rva", &v))    g_allowlist_rva = v;
+    wsprintfA(b, "[startup] profile applied: login_rva=0x%X slot=0x%X off_k=0x%X "
+              "allowlist=0x%X\r\n",
+              g_login_rva, g_authobj_slot, g_off_login_k, g_allowlist_rva);
     aslog(b);
 }
 
@@ -666,6 +862,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         g_ready = 1;
         aslog("=== AuthGate CLEAN: status logging only; no packet/key capture ===\r\n");
         load_profile();   /* optional per-build offset override; else compiled defaults */
+        load_config();    /* optional deployment config: auth_ip / realm / allow_remote_world */
         cli = GetModuleHandleA(NULL);
         o_CreateFileA = (CreateFileA_t)hook_iat(cli, "kernel32.dll", "CreateFileA", (void *)my_CreateFileA);
         o_CreateFileW = (CreateFileW_t)hook_iat(cli, "kernel32.dll", "CreateFileW", (void *)my_CreateFileW);
@@ -677,10 +874,23 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         pwsaconnect = ws ? (void *)GetProcAddress(ws, "WSAConnect") : NULL;
         o_connect_real = (connect_t)install_inline_hook(pconnect, (void *)my_connect_inl);
         o_wsaconnect_real = (WSAConnect_t)install_inline_hook(pwsaconnect, (void *)my_wsaconnect_inl);
-        aslog(o_connect_real && o_wsaconnect_real ? "[startup] local auth redirects installed\r\n"
-                                               : "[startup] auth redirect hook FAILED\r\n");
+        /* Fall back to the import table when the prologue is not the Microsoft
+         * hotpatch stub. Wine's ws2_32 is GCC-built (55 89 e5 ...), so the inline
+         * hook correctly refuses it and the redirect would otherwise be lost.
+         * Patching the thunk is compiler-agnostic and needs no stolen bytes.
+         * This client imports ws2_32 by name and calls it only from the exe. */
+        if (!o_connect_real)
+            o_connect_real = (connect_t)hook_iat_addr(cli, "ws2_32.dll", pconnect,
+                                                      (void *)my_connect_inl);
+        if (!o_wsaconnect_real)
+            o_wsaconnect_real = (WSAConnect_t)hook_iat_addr(cli, "ws2_32.dll", pwsaconnect,
+                                                            (void *)my_wsaconnect_inl);
+        /* WSAConnect is absent from some builds' imports; connect is what matters. */
+        aslog(o_connect_real ? "[startup] local auth redirects installed\r\n"
+                             : "[startup] auth redirect hook FAILED\r\n");
         /* Preserve the proven original-DLL load timing; defer loader redesign. */
         ensure_real();
+        patch_world_allowlist();      /* after the genuine extension is loaded */
         gate_install();
         thread = CreateThread(NULL, 0, authsrv_thread, NULL, 0, NULL);
         if (thread) CloseHandle(thread);
