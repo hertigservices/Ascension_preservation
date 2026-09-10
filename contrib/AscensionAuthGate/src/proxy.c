@@ -439,6 +439,10 @@ static void load_config(void)
     char path[MAX_PATH], buf[512], line[160], b[200];
     HANDLE h; DWORD got = 0; int i = 0, n;
 
+    if (lstrlenA(g_dir) + (int)sizeof("authgate.cfg") > MAX_PATH) {
+        aslog("[cfg] client path too long for authgate.cfg; using compiled defaults\r\n");
+        return;
+    }
     lstrcpynA(path, g_dir, MAX_PATH);
     lstrcatA(path, "authgate.cfg");
     h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
@@ -555,17 +559,6 @@ static void rl_str(unsigned char *buf, int *pos, const char *s)
 /* Minimal two-block realm list (WIRE-SPEC section 7): one connectable realm at
  * 127.0.0.1:8088 (local Ascension bridge) + its category-27 metadata twin so
  * the CoA realm screen will display and select it. Auth-channel framing: LE size. */
-/* Hand the client the key AzerothCore already has.
- *
- * The world digest is built from acore_auth.account.session_key, which the
- * authserver wrote during the gate's SRP6 exchange. The client would otherwise
- * present its OWN key from the custom login, and AzerothCore answers
- * "Authentication failed for account". Writing our SRP6 key into the client's
- * auth object makes both sides agree without touching the database -- which is
- * what lets the client reach the worldserver with no bridge in between.
- *
- * Done after the realm list is served: the custom login has finished by then (so
- * nothing overwrites it) and the world connection has not been made yet. */
 /* Neutralise the world-endpoint allow-list so a non-loopback realm address works.
  * Only meaningful for multi-machine play; guarded on the exact original bytes so a
  * different build logs a mismatch instead of being corrupted. */
