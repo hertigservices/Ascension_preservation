@@ -388,6 +388,8 @@ local p7 = {
     APPEARANCE_TYPE_COMPANION = "Companions", APPEARANCE_TYPE_TOY = "Toys", APPEARANCE_TYPE_COSMETIC = "Cosmetics",
     APPEARANCE_TYPE_COSMETIC_PET = "Pet Cosmetics", APPEARANCE_TYPE_SPELL_VISUAL = "Spell Visuals",
     APPEARANCE_WARDROBE = "Wardrobe", CLEAR_INVALID_APPEARANCES = "Clear invalid appearances", SAVE_OUTFIT = "Save Outfit", NEW_OUTFIT = "New Outfit",
+    -- the refusal C_Appearance.CanApplyPendingAppearances returns; the Wardrobe prints it above Apply
+    APPEARANCE_NO_TRANSMOGRIFIER = "Transmogrification is not available on this realm.",
     ENABLE_TRANSMOG = "Show appearances", ENABLE_TRANSMOG_TOOLTIP = "Show other players' item appearances.",
     DISABLE_TRANSMOG = "Hide appearances", DISABLE_TRANSMOG_TOOLTIP = "Hide other players' item appearances.",
     ENABLE_SPELLVISUAL_TRANSMOG = "Show spell visuals", ENABLE_SPELLVISUAL_TRANSMOG_TOOLTIP = "Show other players' spell visual appearances.",

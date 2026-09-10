@@ -149,10 +149,11 @@ by `--coa-realm`); the module forces class byte 10 and the Hero rules
   store over the 10,678 recovered items (browse, search, filter, preview; Purchase and
   Deliver are refused, there is no web shop or delivery verb, and an item counts as owned
   only when its learned spell is known); `/ca wardrobe` opens the transmogrification panel
-  over the 41,783 recovered appearances (browse by type and slot, search; the cells try the
-  item on once the client's item cache answers `GetItemInfo()` for it, which the test client
-  never did; Apply is refused, there is no transmogrifier on the port, and an appearance
-  counts as collected when the character carries one of its items); on a Hero realm
+  over the 41,783 recovered appearances (browse by type and slot, search; every cell tries its
+  item on, and the shim asks the world for the item template the first time a cell shows it --
+  a page costs 18 item queries, and the answers persist in `Cache\WDB\enUS\itemcache.wdb`, so
+  each item is paid for once per client; Apply is refused, there is no transmogrifier on the
+  port, and an appearance counts as collected when the character carries one of its items); on a Hero realm
   `/ca skillcards` opens the Skill Cards panel with its slot counts and empty collections
   (the only capture of that system recorded no cards). All three are Ascension's own addons.
 - Errors: the shim writes Lua errors to the server log as `ASC LOG [<name>] ...`; XML

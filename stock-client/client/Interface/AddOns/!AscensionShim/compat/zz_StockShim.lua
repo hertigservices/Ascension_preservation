@@ -341,7 +341,16 @@ if not GetInstantItemLink then
         return link or ("item:" .. tostring(itemID))
     end
 end
-if not TryCacheItem then function TryCacheItem(itemID) return GetItemInfo(itemID) ~= nil end end
+-- Ascension's bare global (Ascension_VanityCollection\VanityStore.lua calls it): the same request,
+-- resolved at call time because the cache service is defined further down this file.
+if not TryCacheItem then
+    function TryCacheItem(itemID)
+        if C_AssetQueryService and C_AssetQueryService.TryCacheItem then
+            return C_AssetQueryService.TryCacheItem(itemID)
+        end
+        return GetItemInfo(itemID) ~= nil
+    end
+end
 if not GetInventoryItemTrueID then function GetInventoryItemTrueID(unit, slot) return GetInventoryItemID(unit, slot) end end
 if not SetModelApplyComponents then function SetModelApplyComponents() end end
 if not GetScaledCursorPosition then
@@ -407,13 +416,22 @@ if not GetItemPvPPower then function GetItemPvPPower() return 0 end end
 if not IsSeasonalCollectionUnlocked then function IsSeasonalCollectionUnlocked() return false end end
 if not OpenAscensionURL then function OpenAscensionURL(path) Stock.Log("OpenAscensionURL(" .. tostring(path) .. "): no web shop on this port") end end
 -- Ascension's asynchronous item/quest/creature cache service (FrameXML\Objects\AsyncCallbackHandler.lua):
--- TryCache* asks the server for a record and a *_CACHE_REQUEST_SUCCESS event follows. On 3.3.5
--- GetItemInfo() on an unknown id is itself the request and no event exists, so the shim asks,
--- then polls the item cache for a few seconds and fires the event through the custom event bus.
+-- TryCache* asks the server for a record and a *_CACHE_REQUEST_SUCCESS event follows.
+-- On 3.3.5 there is no such event, and - measured on this realm 2026-09-10 with the world's packet
+-- logging on - a bare GetItemInfo() on an uncached id is NOT a request: four calls over eleven
+-- seconds produced no CMSG_ITEM_QUERY_SINGLE at all. The client only asks the world for an item
+-- template when something *renders* the item, so the request here is a hyperlink set on an
+-- off-screen tooltip (the 3.3.5 idiom); one of those did raise the query and the next GetItemInfo
+-- answered. The shim therefore renders, then polls the item cache and fires the event through the
+-- custom event bus. Requests are queued and metered: an item cache warmed flat out crowds out the
+-- session's other traffic.
 ASC.Events.Define({ "ITEM_CACHE_REQUEST_SUCCESS", "QUEST_CACHE_REQUEST_SUCCESS", "CREATURE_CACHE_REQUEST_SUCCESS" })
 C_AssetQueryService = C_AssetQueryService or {}
 if not C_AssetQueryService.TryCacheItem then
-    local pending = {}
+    local QUEUED = -1        -- pending[id] stays QUEUED until its request goes out, then counts polls
+    local PER_BURST, BURST_EVERY, GIVE_UP = 5, 0.25, 24   -- 20 requests/s; 12 s of polling each
+    local pending, failed, queue = {}, {}, {}
+    local pumping, polling, tip = false, false, nil
     local function fire(itemID)
         pending[itemID] = nil
         ASC.Events.Fire("ITEM_CACHE_REQUEST_SUCCESS", itemID)
@@ -422,6 +440,49 @@ if not C_AssetQueryService.TryCacheItem then
         local listener = ItemQueryListener
         if listener and listener.FireCallbacks then pcall(listener.FireCallbacks, listener, itemID) end
     end
+    -- Render the item somewhere invisible; that render is what makes the client send the query.
+    -- The tooltip is parentless, owned by WorldFrame with no anchor, and hidden again at once.
+    local function request(itemID)
+        if not tip then
+            tip = CreateFrame("GameTooltip", "ASC_StockItemQueryTooltip", nil, "GameTooltipTemplate")
+        end
+        tip:SetOwner(WorldFrame, "ANCHOR_NONE")
+        pcall(tip.SetHyperlink, tip, "item:" .. itemID)
+        tip:Hide()
+    end
+    local function pump()
+        local sent = 0
+        while sent < PER_BURST do
+            local itemID = table.remove(queue, 1)
+            if not itemID then break end
+            if pending[itemID] == QUEUED then
+                pending[itemID] = 0
+                request(itemID)
+                sent = sent + 1
+            end
+        end
+        if queue[1] then C_Timer.After(BURST_EVERY, pump) else pumping = false end
+    end
+    local function poll()
+        local ready, waiting = nil, false
+        for itemID, count in pairs(pending) do
+            if GetItemInfo(itemID) then
+                ready = ready or {}
+                ready[#ready + 1] = itemID
+            elseif count == QUEUED then
+                waiting = true                      -- request not sent yet, so do not age it
+            elseif count + 1 >= GIVE_UP then
+                pending[itemID] = nil
+                failed[itemID] = true               -- the world answered "no such template"
+            else
+                pending[itemID] = count + 1
+                waiting = true
+            end
+        end
+        -- fire outside the traversal: a callback may queue further items
+        if ready then for _, itemID in ipairs(ready) do fire(itemID) end end
+        if waiting or next(pending) then C_Timer.After(0.5, poll) else polling = false end
+    end
     function C_AssetQueryService.TryCacheItem(itemID)
         itemID = tonumber(itemID)
         if not itemID then return false end
@@ -429,15 +490,12 @@ if not C_AssetQueryService.TryCacheItem then
             C_Timer.After(0, function() fire(itemID) end)
             return true
         end
+        if failed[itemID] then return false end
         if not pending[itemID] then
-            pending[itemID] = 0
-            local function poll()
-                if not pending[itemID] then return end
-                if GetItemInfo(itemID) then return fire(itemID) end
-                pending[itemID] = pending[itemID] + 1
-                if pending[itemID] < 20 then C_Timer.After(0.5, poll) else pending[itemID] = nil end
-            end
-            C_Timer.After(0.5, poll)
+            pending[itemID] = QUEUED
+            queue[#queue + 1] = itemID
+            if not pumping then pumping = true; C_Timer.After(0, pump) end
+            if not polling then polling = true; C_Timer.After(0.5, poll) end
         end
         return true
     end
@@ -451,10 +509,40 @@ if not C_UICamera then
         return f
     end })
 end
+-- Ascension's Creature object (its SharedXML\Objects\Creature.lua was not ported, but the
+-- TypeExtensions Model.lua that was ported asks for one in SetDisplayInfo). A creature display is
+-- drawn from the client's own model data, so on 3.3.5 there is nothing to wait for: a display id
+-- is always "cached" and every continuation runs at once.
+Creature = Creature or {}
+CreatureMixin = CreatureMixin or {}
+if not Creature.CreateFromID then
+    Creature.Cache = setmetatable({}, { __mode = "kv" })
+    function Creature:CreateFromID(displayID)
+        displayID = tonumber(displayID)
+        if displayID and self.Cache[displayID] then return self.Cache[displayID] end
+        local creature = CreateFromMixins(CreatureMixin)
+        creature:SetCreatureID(displayID)
+        if displayID then self.Cache[displayID] = creature end
+        return creature
+    end
+    function CreatureMixin:SetCreatureID(displayID) self.creatureID = displayID and tonumber(displayID) end
+    function CreatureMixin:GetCreatureID() return self.creatureID end
+    function CreatureMixin:Clear() self.creatureID = nil end
+    function CreatureMixin:IsEmpty() return type(self.creatureID) ~= "number" or self.creatureID <= 0 end
+    function CreatureMixin:IsCached() return not self:IsEmpty() end
+    function CreatureMixin:Query() end
+    function CreatureMixin:ContinueOnLoad(func)
+        if type(func) == "function" and not self:IsEmpty() then func(self.creatureID) end
+    end
+    function CreatureMixin:CancelableContinueOnLoad(func)
+        self:ContinueOnLoad(func)
+        return function() end
+    end
+end
 -- Ascension extended the DressUpModel widget (the Wardrobe's models): SetDisplayInfo takes a
 -- "loaded" callback, and a dozen camera / sequence / drag methods exist only there. The stock
 -- widget shares one method table per widget type, so the extensions are added to it once:
--- the callback runs immediately, the rest are no-ops (the model simply keeps its default view).
+-- the missing methods are no-ops (the model simply keeps its default view).
 do
     local ok, probe = pcall(CreateFrame, "DressUpModel", nil, UIParent)
     local mt = ok and probe and getmetatable(probe)
@@ -466,14 +554,16 @@ do
                                 "ShowMelee", "SetSpell" }) do
             if not methods[name] then methods[name] = function() end end
         end
-        if methods.SetDisplayInfo and not methods.ASC_SetDisplayInfoWrapped then
-            local original = methods.SetDisplayInfo
-            methods.SetDisplayInfo = function(self, displayID, callback, ...)
-                local result = original(self, displayID, ...)
-                if type(callback) == "function" then callback() end
-                return result
+        -- SetDisplayInfo(displayID, callback) is Ascension's, installed on this same table by
+        -- compat\SharedXML\TypeExtensions\Model.lua; with the Creature object above it works and
+        -- answers the callback itself. Only supply one when that file is absent, and answer the
+        -- callback there so a caller is never left waiting on a model it will never be told about.
+        if not methods.SetDisplayInfo then
+            methods.SetDisplayInfo = function(self, displayID, callback)
+                if displayID then pcall(self.SetCreature, self, displayID)
+                else pcall(self.ClearModel, self) end
+                if type(callback) == "function" then callback(displayID, true) end
             end
-            methods.ASC_SetDisplayInfoWrapped = true
         end
     else
         Stock.Log("DressUpModel method table not reachable; the Wardrobe models will lack Ascension's extensions")
