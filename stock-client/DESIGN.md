@@ -18,7 +18,13 @@ works to. Change it here first.
 
 ```
 client-coa/
-  Wow.exe                    stock 12340 + reviewed caller-dispatch, LAA and bounded archive-capacity patches
+  Wow.exe                    stock 12340 + reviewed caller-dispatch, LAA, bounded archive-capacity and loose-UI
+                             patches (the last one stops the client renaming a loose Interface\GlueXML to .old;
+                             P4 finding, see TROUBLESHOOTING.md)
+  Interface/GlueXML/         ours (tools: gen_glue_data.py, install_glue_overlay.py): GlueXML.toc = stock toc +
+                             AscensionCreate.xml; the CoA class chooser on the STOCK create screen. It picks a
+                             stock carrier class with the same power bar and mails the choice to the world
+                             through the Sound_VoiceChatInputDriverName CVar (the only glue->world channel).
   Data/*.MPQ                 stock base + Ascension patches (hardlinks locally; archive.org publicly)
   Data/patch-Y.MPQ           ours (tools: mpqwrite.py): STOCK ChrClasses/CharBaseInfo/CharStartOutfit/
                              SkillRaceClassInfo. Highest free general slot, so it outranks patch-M/S/T. Without it

@@ -1,0 +1,24 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+	<Script file="AscensionCreateData.lua"/>
+	<Script file="AscensionCreate.lua"/>
+	<!-- the stock class buttons' look, restated (glue templates from another file are not reliably inheritable) -->
+	<CheckButton name="AscensionCreateClassButtonTemplate" virtual="true">
+		<Size><AbsDimension x="28" y="28"/></Size>
+		<Scripts>
+			<OnClick>AscensionCreate_ClassButton_OnClick(self)</OnClick>
+			<OnEnter>AscensionCreate_ClassButton_OnEnter(self)</OnEnter>
+			<OnLeave>AscensionCreate_ClassButton_OnLeave(self)</OnLeave>
+		</Scripts>
+		<NormalTexture name="$parentNormalTexture" file="Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes"/>
+		<PushedTexture name="$parentPushedTexture" file="Interface\Glues\CharacterCreate\UI-CharacterCreate-Classes">
+			<TexCoords left="0" right="0.25" top="0" bottom="0.25"/>
+		</PushedTexture>
+		<HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD"/>
+		<CheckedTexture file="Interface\Buttons\CheckButtonHilight" alphaMode="ADD"/>
+	</CheckButton>
+	<Frame name="AscensionCreateFrame" parent="CharacterCreate" setAllPoints="true">
+		<Scripts>
+			<OnLoad>AscensionCreate_OnLoad(self)</OnLoad>
+		</Scripts>
+	</Frame>
+</Ui>

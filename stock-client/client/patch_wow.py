@@ -66,11 +66,28 @@ def va2off(secs, va):
     raise ValueError("VA 0x%08x has no file-backed section bytes" % va)
 
 
-def patch_bytes(data, *, signature=True, laa=True, archive_capacity=True):
+# Loose UI directories. At startup (called from 0x004DA7BD, right before the GlueXML
+# signature dispatch) the routine at 0x005F4D90 walks {"Interface\GlueXML",
+# "Interface\FrameXML"} and, whenever the directory exists on disk, renames it to
+# "<dir>.old" (0x461B30 exists? -> "%s.old" -> 0x461D70 delete old -> 0x461C70 rename).
+# That is what keeps a loose glue overlay from ever loading, independently of the
+# signature verdict above. Turning the per-directory `je` (skip when absent) into an
+# unconditional jump leaves both directories in place; the signature dispatch patch then
+# accepts their files. Measured 2026-09-10: without this the client moved our
+# Interface\GlueXML to GlueXML.old on the very next start.
+LOOSE_UI_VA = 0x005F4DBF
+LOOSE_UI_ORIG = b"\x74\x39"   # je 0x005F4DFA
+LOOSE_UI_NEW = b"\xEB\x39"    # jmp 0x005F4DFA
+
+
+def patch_bytes(data, *, signature=True, laa=True, archive_capacity=True, loose_ui=True):
     """Validate the exact input and return a new buffer; never change the source."""
     if len(data) != STOCK_SIZE or hashlib.sha256(data).hexdigest() != STOCK_SHA256:
         raise ValueError("source is not the recorded stock 12340 binary; refusing")
     pe, secs = sections(data)
+    loose_off = va2off(secs, LOOSE_UI_VA)
+    if data[loose_off:loose_off + len(LOOSE_UI_ORIG)] != LOOSE_UI_ORIG:
+        raise ValueError("loose UI directory check does not have stock bytes")
     routine = va2off(secs, SIG_VA)
     if data[routine:routine + len(SIG_ORIG)] != SIG_ORIG:
         raise ValueError("shared signature routine does not have stock bytes")
@@ -94,6 +111,8 @@ def patch_bytes(data, *, signature=True, laa=True, archive_capacity=True):
     if laa:
         flags = struct.unpack_from("<H", out, pe + 22)[0]
         struct.pack_into("<H", out, pe + 22, flags | 0x20)
+    if loose_ui:
+        out[loose_off:loose_off + len(LOOSE_UI_NEW)] = LOOSE_UI_NEW
     return bytes(out)
 
 
@@ -122,12 +141,14 @@ def main(argv=None):
     parser.add_argument("--no-sig", action="store_true", help="leave signature checks unchanged")
     parser.add_argument("--no-laa", action="store_true")
     parser.add_argument("--no-archive-capacity", action="store_true", help="leave the stock 64-entry handle array unchanged")
+    parser.add_argument("--no-loose-ui", action="store_true", help="keep renaming loose Interface\\GlueXML / FrameXML to .old at startup")
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args(argv)
     try:
         data = Path(args.source).read_bytes()
         print("input: %s (%d bytes, sha256 %s)" % (args.source, len(data), hashlib.sha256(data).hexdigest()))
-        out = patch_bytes(data, signature=not args.no_sig, laa=not args.no_laa, archive_capacity=not args.no_archive_capacity)
+        out = patch_bytes(data, signature=not args.no_sig, laa=not args.no_laa, archive_capacity=not args.no_archive_capacity,
+                          loose_ui=not args.no_loose_ui)
         for name, va, original, table, target in SIG_SITES:
             print("%s: verified dispatch 0x%08X -> valid target 0x%08X" % (name, va, target))
         print("shared verification routine and Blizzard addon caller: unchanged")
@@ -135,7 +156,8 @@ def main(argv=None):
             return 0
         write_output(args.source, args.output, out)
         print("output: %s (sha256 %s)" % (args.output, hashlib.sha256(out).hexdigest()))
-        print("caller dispatch patch=%s; LAA=%s; archive capacity=%d" % (not args.no_sig, not args.no_laa, 64 if args.no_archive_capacity else ARCHIVE_CAPACITY))
+        print("caller dispatch patch=%s; LAA=%s; archive capacity=%d; loose UI directories kept=%s" % (
+            not args.no_sig, not args.no_laa, 64 if args.no_archive_capacity else ARCHIVE_CAPACITY, not args.no_loose_ui))
         return 0
     except (OSError, ValueError, struct.error) as ex:
         print("!! %s" % ex)

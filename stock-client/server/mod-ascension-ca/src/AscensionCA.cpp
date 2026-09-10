@@ -94,6 +94,15 @@ namespace AscensionCA
         std::string name;
         uint32 caType = 0;
         std::string caName;
+        uint8 powerType = 0;    // ChrClasses DisplayPower: 0 mana, 1 rage, 2 focus, 3 energy, 6 runic power
+        uint8 carrier = 0;      // preferred stock class for that power bar
+    };
+    struct Archetype
+    {
+        std::string uuid;
+        std::string name;
+        uint32 classType = 0;
+        std::vector<std::pair<uint32, uint8>> entries; // build order
     };
     struct Spec
     {
@@ -109,12 +118,15 @@ namespace AscensionCA
     std::unordered_map<uint8, ClassRow> classes;
     std::unordered_map<uint32, Spec> specs;
     std::map<uint8, std::map<uint8, Budget>> essence; // family -> level -> budget
+    std::unordered_map<std::string, Archetype> archetypes;
     bool dataLoaded = false;
 
     struct PlayerState
     {
         uint8 classByte = 0;
         uint32 specId = 0;
+        bool chosen = false;           // the CoA class was chosen (glue chooser / CLASS verb), not defaulted
+        std::string archetype;         // archetype build still being applied on level-up ("" = none)
         std::map<uint32, uint8> known; // entry -> rank
         std::map<std::string, std::map<uint32, std::string>> inbound; // verb -> seq -> chunk
         std::map<std::string, uint32> inboundCount;
@@ -139,7 +151,7 @@ namespace AscensionCA
     void LoadData()
     {
         entries.clear(); classes.clear(); specs.clear(); essence.clear();
-        if (QueryResult r = WorldDatabase.Query("SELECT class_byte, token, name, ca_class_type, ca_class_name FROM ascension_ca_class"))
+        if (QueryResult r = WorldDatabase.Query("SELECT class_byte, token, name, ca_class_type, ca_class_name, power_type, carrier_class FROM ascension_ca_class"))
         {
             do
             {
@@ -147,7 +159,29 @@ namespace AscensionCA
                 ClassRow c;
                 c.byte = f[0].Get<uint8>(); c.token = f[1].Get<std::string>(); c.name = f[2].Get<std::string>();
                 c.caType = f[3].Get<uint32>(); c.caName = f[4].Get<std::string>();
+                c.powerType = f[5].Get<uint8>(); c.carrier = f[6].Get<uint8>();
                 classes[c.byte] = c;
+            } while (r->NextRow());
+        }
+        archetypes.clear();
+        if (QueryResult r = WorldDatabase.Query("SELECT uuid, name, class_type FROM ascension_ca_archetype"))
+        {
+            do
+            {
+                Field* f = r->Fetch();
+                Archetype a;
+                a.uuid = f[0].Get<std::string>(); a.name = f[1].Get<std::string>(); a.classType = f[2].Get<uint32>();
+                archetypes[a.uuid] = a;
+            } while (r->NextRow());
+        }
+        if (QueryResult r = WorldDatabase.Query("SELECT uuid, entry, `rank` FROM ascension_ca_archetype_entry ORDER BY uuid, ordinal"))
+        {
+            do
+            {
+                Field* f = r->Fetch();
+                auto it = archetypes.find(f[0].Get<std::string>());
+                if (it != archetypes.end())
+                    it->second.entries.emplace_back(f[1].Get<uint32>(), f[2].Get<uint8>());
             } while (r->NextRow());
         }
         if (QueryResult r = WorldDatabase.Query("SELECT id, class_token, spec_token, name, passive_spell FROM ascension_ca_spec"))
@@ -319,12 +353,31 @@ namespace AscensionCA
         Send(player, "HELLO\t" + std::to_string(PROTOCOL) + "\t" + g.mode + "\t" + (g.enabled && dataLoaded ? "1" : "0"));
     }
 
+    // STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<chosen>\t<entry:rank,...>
     void SendState(Player* player, PlayerState const& st)
     {
         Budget b = BudgetFor(st, player->GetLevel());
         std::string body = std::to_string(st.classByte) + "\t" + std::to_string(st.specId) + "\t" + std::to_string(b.ae) + "\t" + std::to_string(b.te)
-            + "\t" + std::to_string(player->GetLevel()) + "\t" + EncodeKnown(st);
+            + "\t" + std::to_string(player->GetLevel()) + "\t" + (st.chosen ? "1" : "0") + "\t" + EncodeKnown(st);
         SendLong(player, "STATE", body);
+    }
+
+    // The power bar the client draws comes from the stock class it was created with, so a
+    // CoA class may only ride a carrier with the same bar (3.3.5 hunters run on mana).
+    uint8 PowerOfStockClass(uint8 stockClass)
+    {
+        switch (stockClass)
+        {
+            case 1: return 1;   // warrior: rage
+            case 4: return 3;   // rogue: energy
+            case 6: return 6;   // death knight: runic power
+            default: return 0;  // everyone else: mana
+        }
+    }
+    bool CarrierFits(ClassRow const& cls, uint8 stockClass)
+    {
+        uint8 want = cls.powerType == 2 ? 0 : cls.powerType; // focus classes ride a mana carrier
+        return PowerOfStockClass(stockClass) == want;
     }
 
     // ---- spells ------------------------------------------------------------------------
@@ -391,8 +444,8 @@ namespace AscensionCA
         for (auto const& [entry, rank] : st.known)
             if (rank)
                 trans->Append("INSERT INTO ascension_ca_known (guid, entry, `rank`) VALUES ({}, {}, {})", guid, entry, uint32(rank));
-        trans->Append("REPLACE INTO ascension_ca_character (guid, class_byte, spec_id, updated_at) VALUES ({}, {}, {}, {})",
-                      guid, uint32(st.classByte), st.specId, uint32(GameTime::GetGameTime().count()));
+        trans->Append("REPLACE INTO ascension_ca_character (guid, class_byte, spec_id, chosen, archetype, updated_at) VALUES ({}, {}, {}, {}, '{}', {})",
+                      guid, uint32(st.classByte), st.specId, uint32(st.chosen ? 1 : 0), st.archetype, uint32(GameTime::GetGameTime().count()));
         CharacterDatabase.CommitTransaction(trans);
     }
 
@@ -403,14 +456,18 @@ namespace AscensionCA
         st.known.clear();
         st.classByte = g.defaultClassByte;
         st.specId = 0;
-        if (QueryResult r = CharacterDatabase.Query("SELECT class_byte, spec_id FROM ascension_ca_character WHERE guid = {}", guid))
+        st.chosen = false;
+        st.archetype.clear();
+        if (QueryResult r = CharacterDatabase.Query("SELECT class_byte, spec_id, chosen, archetype FROM ascension_ca_character WHERE guid = {}", guid))
         {
             Field* f = r->Fetch();
             st.classByte = f[0].Get<uint8>();
             st.specId = f[1].Get<uint32>();
+            st.chosen = f[2].Get<uint8>() != 0;
+            st.archetype = f[3].Get<std::string>();
         }
         else
-            CharacterDatabase.Execute("INSERT INTO ascension_ca_character (guid, class_byte, spec_id, updated_at) VALUES ({}, {}, 0, {})",
+            CharacterDatabase.Execute("INSERT INTO ascension_ca_character (guid, class_byte, spec_id, chosen, archetype, updated_at) VALUES ({}, {}, 0, 0, '', {})",
                                       guid, uint32(st.classByte), uint32(GameTime::GetGameTime().count()));
         if (classes.find(st.classByte) == classes.end())
             st.classByte = g.defaultClassByte;
@@ -571,6 +628,84 @@ namespace AscensionCA
         SendState(player, st);
     }
 
+    // Learn the next entries of the character's archetype build that fit the level and the
+    // budget, in build order; called after CLASS and after every level-up.
+    void ApplyArchetype(Player* player, PlayerState& st)
+    {
+        if (st.archetype.empty())
+            return;
+        auto it = archetypes.find(st.archetype);
+        if (it == archetypes.end())
+            return;
+        std::map<uint32, uint8> wanted = st.known;
+        bool changed = false;
+        for (auto const& [entry, rank] : it->second.entries)
+        {
+            auto k = wanted.find(entry);
+            if (k != wanted.end() && k->second >= rank)
+                continue;
+            std::map<uint32, uint8> trial = wanted;
+            trial[entry] = rank;
+            if (Validate(player, st, trial).ok)
+            {
+                wanted = trial;
+                changed = true;
+            }
+        }
+        if (changed)
+            Commit(player, st, wanted);
+    }
+
+    // CLASS\t<classByte>[\t<archetypeUUID>]: the glue chooser's pick, delivered by the addon
+    // pack on the character's first world entry. Accepted once, while the character has no
+    // Character Advancement rows yet.
+    void HandleClass(Player* player, PlayerState& st, std::vector<std::string> const& args)
+    {
+        uint32 byte = args.size() > 1 ? static_cast<uint32>(std::strtoul(args[1].c_str(), nullptr, 10)) : 0;
+        std::string uuid = args.size() > 2 ? args[2] : "";
+        auto cls = classes.find(static_cast<uint8>(byte));
+        if (byte == 0 || byte > 255 || cls == classes.end())
+        {
+            Send(player, "RESULT\tCLASS\tERR\tunknown-class\t" + std::to_string(byte));
+            return;
+        }
+        if (st.chosen || !st.known.empty())
+        {
+            Send(player, "RESULT\tCLASS\tERR\talready-chosen\t" + std::to_string(st.classByte));
+            SendState(player, st);
+            return;
+        }
+        if (!CarrierFits(cls->second, player->getClass()))
+        {
+            Send(player, "RESULT\tCLASS\tERR\tcarrier-mismatch\t" + std::to_string(player->getClass()));
+            return;
+        }
+        for (char c : uuid)
+            if (!(std::isxdigit(static_cast<unsigned char>(c)) || c == '-'))
+            {
+                Send(player, "RESULT\tCLASS\tERR\tbad-archetype\t0");
+                return;
+            }
+        if (!uuid.empty())
+        {
+            auto a = archetypes.find(uuid);
+            if (a == archetypes.end() || (a->second.classType && a->second.classType != cls->second.caType))
+            {
+                Send(player, "RESULT\tCLASS\tERR\tbad-archetype\t0");
+                return;
+            }
+        }
+        st.classByte = static_cast<uint8>(byte);
+        st.chosen = true;
+        st.archetype = uuid;
+        st.specId = 0;
+        SaveKnown(player, st);
+        ApplyArchetype(player, st);
+        LOG_INFO("module", "ASC {}: CoA class {} ({}) chosen{}", player->GetName(), byte, cls->second.name, uuid.empty() ? "" : " with archetype " + uuid);
+        Send(player, "RESULT\tCLASS\tOK");
+        SendState(player, st);
+    }
+
     void HandleReset(Player* player, PlayerState& st, std::string const& what)
     {
         std::map<uint32, uint8> keep;
@@ -612,6 +747,7 @@ namespace AscensionCA
         if (verb == "APPLY") { HandleApply(player, st, args.size() > 1 ? args[1] : ""); return; }
         if (verb == "SPEC") { HandleSpec(player, st, args.size() > 1 ? static_cast<uint32>(std::strtoul(args[1].c_str(), nullptr, 10)) : 0); return; }
         if (verb == "RESET") { HandleReset(player, st, args.size() > 1 ? args[1] : "talents"); return; }
+        if (verb == "CLASS") { HandleClass(player, st, args); return; }
         Send(player, "ERROR\tunknown\t" + verb);
     }
 
@@ -678,7 +814,10 @@ public:
     {
         auto it = AscensionCA::players.find(player->GetGUID().GetCounter());
         if (it != AscensionCA::players.end())
+        {
+            AscensionCA::ApplyArchetype(player, it->second);
             AscensionCA::SendState(player, it->second);
+        }
     }
 
     void OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 guid) override

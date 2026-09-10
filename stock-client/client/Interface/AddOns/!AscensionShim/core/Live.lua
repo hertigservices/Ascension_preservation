@@ -238,11 +238,34 @@ T.On("HELLO", function(body)
     if enabled == "1" then T.Send("STATE") else log("module disabled (mode " .. tostring(mode) .. ")") end
 end)
 
--- STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<id:rank,...>
+-- The glue chooser cannot talk to the world server, and stock 3.3.5 Lua cannot register a
+-- CVar; the one in-process mailbox from glue Lua to world Lua is a registered string CVar
+-- nobody reads while voice chat is off. The chooser writes "ASC:<name>:<classByte>:<uuid>"
+-- there; the first STATE with chosen=0 consumes it for the matching character.
+local MAILBOX = "Sound_VoiceChatInputDriverName"
+local function consumeMailbox()
+    local ok, value = pcall(GetCVar, MAILBOX)
+    if not ok or type(value) ~= "string" then return end
+    local name, classByte, uuid = string.match(value, "^ASC:([^:]+):(%d+):?([%x%-]*)$")
+    if not name then return end
+    pcall(SetCVar, MAILBOX, "System Default")
+    if name ~= UnitName("player") then log("mailbox is for " .. name .. ", ignored") return end
+    T.Send("CLASS", classByte .. (uuid ~= "" and ("\t" .. uuid) or ""))
+    log("sent CLASS " .. classByte .. " " .. uuid)
+    return true
+end
+Live.ConsumeMailbox = consumeMailbox
+
+-- STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<chosen>\t<id:rank,...>
 T.On("STATE", function(body)
-    local classByte, spec, ae, te, level, list = string.match(body, "^(%d+)\t(%d+)\t(%d+)\t(%d+)\t(%d+)\t?(.*)$")
+    local classByte, spec, ae, te, level, chosen, list = string.match(body, "^(%d+)\t(%d+)\t(%d+)\t(%d+)\t(%d+)\t(%d)\t?(.*)$")
     if not classByte then log("bad STATE: " .. string.sub(body, 1, 60)) return end
     classByte, spec, ae, te, level = tonumber(classByte), tonumber(spec), tonumber(ae), tonumber(te), tonumber(level)
+    state.chosen = chosen == "1"
+    if not state.chosen and not state.mailboxTried then
+        state.mailboxTried = true
+        if consumeMailbox() then return end -- the CLASS reply brings a fresh STATE
+    end
     local config = ASC.Config
     local ctx = Preview.Context
     if not ctx or ctx.identity.ID ~= classByte or ctx.level ~= level then
