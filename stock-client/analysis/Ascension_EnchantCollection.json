@@ -1,0 +1,1199 @@
+{
+  "target": "Ascension_EnchantCollection",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": ["Ascension_Collections", "AscensionUI"],
+    "saved_variables": ["Ascension_EnchantCollection_CDB (SavedVariablesPerCharacter)"],
+    "files_in_order": [
+      "FrameTemplates.xml",
+      "FrameTemplateMixins.lua",
+      "Slots\\ProgressBar.lua",
+      "Slots\\SlotFrameArchitectTab.lua",
+      "Slots\\SlotFrameSlotMixin.lua",
+      "Slots\\SlotFrameSlotTab.lua",
+      "Slots\\SlotFrameReforgeTab.lua",
+      "Slots\\SlotFrame.lua",
+      "Collection\\ScrollListItemMixin.lua",
+      "Collection\\CollectionButtonMixin.lua",
+      "Collection\\CollectionFrameCollectionTab.lua",
+      "Collection\\CollectionFrameScrollsTab.lua",
+      "Collection\\CollectionFrameMixin.lua",
+      "Manager\\SpecManager.lua",
+      "Manager\\SpecManagerButtonMixin.lua",
+      "EnchantCollection.lua"
+    ]
+  },
+  "entry_points": [
+    "Collections tab: Ascension_Collections/Collections.lua:78-84 does `tab = self:AddTab(MYSTIC_ENCHANT, \"EnchantCollection\")`, `tab:SetPreClick(MysticEnchant_LoadUI)`, `self.Tabs.MysticEnchants = tab:GetTabID()` -- ONLY when `not IsCustomClass()` (a CoA-class character never gets this tab). The tab id is dynamic (ordinal after CharacterAdvancement, [HeroArchitect, SkillCards if C_Player:IsHero()], Vanity): 3 for a default class, 5 for a Hero.",
+    "Load trigger: FrameXML/UIParent.lua:433 `function MysticEnchant_LoadUI() UIParentLoadAddOn(\"Ascension_EnchantCollection\") end`, run as the tab's PreClick; the panel is then found by NAME: SharedXML/TabSystem/TabSystemMixin.lua:316 `GetPanelForTabID` does `_G[\"EnchantCollection\"]` and `:Show()`s it, so the global frame created at EnchantCollection.lua:864 must be named exactly `EnchantCollection` and parented to `Collections`.",
+    "Programmatic open: `Collections:GoToTab(Collections.Tabs.MysticEnchants)` (Collections.lua:181; redirects to the CA tab when ShouldShowMysticEnchantTab() is false = custom class or WildCard game mode). Called by FrameXML/Util/EnchantCollectionUtil.lua:870-925 handlers for the server-pushed events MYSTIC_ALTAR_USED, MYSTIC_SCROLL_USED, MYSTIC_ENCHANT_LEARNED, MYSTIC_ENCHANT_PROGRESS_UPDATE, MYSTIC_ENCHANT_UNLOCK_PRESET_USED -- i.e. interacting with a Mystic Altar gameobject opens this panel server-side.",
+    "Collections:OnShow gate (Collections.lua:96-101): `ShowTabID(self.Tabs.MysticEnchants)` if ShouldShowMysticEnchantTab(); tab enabled by MysticEnchantUtil.HasUnlockedEnchantTab() which is hard-coded `return true` (FrameXML/Util/MysticEnchantUtil.lua:81).",
+    "Close: `_G[\"EnchantCollectionCloseButton\"]` OnClick -> HideUIPanel(Collections) (EnchantCollection.lua:869). MYSTIC_ALTAR_CLOSED also hides Collections when this tab is current (EnchantCollectionUtil.lua:911).",
+    "No slash command, no dedicated micro button (reached through the Collections micro button / Collections frame).",
+    "OnShow side effect: `C_CVar.Set(\"allowMysticEnchantingUI\", \"1\")` (EnchantCollection.lua:96) -- a custom cvar the Ascension exe reads; on stock, SetCVar on an unregistered cvar is a silent no-op unless the shim RegisterCVar()s it."
+  ],
+  "namespaces": {
+    "C_MysticEnchant": {
+      "GetProgress": {
+        "callsites": ["EnchantCollection.lua:194"],
+        "args": "()",
+        "returns": "2 scalars: progress:number (altar XP percent 0..100; caller guards `not tonumber(progress) or progress > 100` because the live client returns INF/NaN when progress is 0), level:number (altar level; caller clamps `level > 0 and level or 1`, so 0 is tolerated). Both consumed immediately for the reforge-tab progress bar and the Level ring.",
+        "sync": "sync (also pushed later via MYSTIC_ENCHANT_PROGRESS_UPDATE(progress, level))",
+        "defined_in_lua": null
+      },
+      "GetEnchantInfoBySpell": {
+        "callsites": [
+          "EnchantCollection.lua:223", "EnchantCollection.lua:525",
+          "Slots/SlotFrameSlotMixin.lua:100", "Slots/SlotFrameSlotMixin.lua:480",
+          "Slots/SlotFrameSlotTab.lua:238", "Slots/SlotFrameSlotTab.lua:275", "Slots/SlotFrameSlotTab.lua:412",
+          "Slots/SlotFrameArchitectTab.lua:53",
+          "Collection/CollectionButtonMixin.lua:105",
+          "Collection/CollectionFrameCollectionTab.lua:65",
+          "indirect: FrameXML/Util/EnchantCollectionUtil.lua (9 sites: CheckSlotMap, HasStagedChanges, IsCollectionReforge, ApplyCollectionEnchant...)"
+        ],
+        "args": "(spellID:number)",
+        "returns": "table REData or nil (callers test `REData and next(REData)` and plain `if REData`; SlotFrameSlotTab.lua:412-418 dereferences REData.MaxStacks after only a soft nil-check, and :240 dereferences REData.Quality unguarded, so return a table for every valid enchant spell). Fields read: SpellID:number, Quality:string key of Enum.EnchantQualityEnum (\"RE_QUALITY_UNCOMMON\"|\"RE_QUALITY_RARE\"|\"RE_QUALITY_EPIC\"|\"RE_QUALITY_LEGENDARY\"|\"RE_QUALITY_ARTIFACT\"...; mapped by EnchantCollectionUtil:GetQualityFromQualityName, unknown -> Uncommon), MaxStacks:number, Known:boolean (in collection), IsWorldforged:boolean, IsAvailableForCurrentClass:boolean, RequiredLevel:number, Spec:any (truthy => show spec subtitle), ClassRequirements:array of {ClassType:number(DBC class type id), TabTypes:array of {Tab:number, RequiredAE:number, RequiredTE:number}} (consumed by EnchantCollectionUtil.IsClassAndSpecAppropriate / GetSpecString and GameTooltip_GetEnchantRequirements).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEnchantInfoByItem": {
+        "callsites": [
+          "EnchantCollection.lua:423",
+          "Slots/SlotFrameSlotTab.lua:12", "Slots/SlotFrameSlotTab.lua:273",
+          "Slots/SlotFrameReforgeTab.lua:149",
+          "Collection/ScrollListItemMixin.lua:109",
+          "indirect: FrameXML/Util/EnchantCollectionUtil.lua:1431 (ShowDisenchantItemDialogue)"
+        ],
+        "args": "(itemID:number)  -- a Mystic Scroll item entry",
+        "returns": "same REData table as GetEnchantInfoBySpell, or nil for items that carry no enchant (the untarnished scroll 992720 and non-scrolls: EnchantCollection.lua:423 relies on nil there). CAUTION: SlotFrameReforgeTab.lua:150 reads `REData.RequiredLevel` BEFORE its nil check, so any scroll that reaches the reforge tab must return a table.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "QueryEnchants": {
+        "callsites": ["EnchantCollection.lua:309", "Collection/CollectionFrameCollectionTab.lua:117"],
+        "args": "(entriesPerPage:number, page:number 1-based, searchText:string, filters:table). filters is EITHER an array of filter keys (`{Enum.ECFilters.RE_FILTER_KNOWN}` at :309) OR the set returned by FilterDropDownButtonMixin:GetFilter() = `{[\"RE_FILTER_KNOWN\"]=true, [\"RE_FILTER_CLASS_WARRIOR\"]=true, ...}` (SharedXML/FilterDropDown.lua:73) at :117 -- the native must accept both shapes. Filter keys: RE_FILTER_KNOWN, RE_FILTER_UNKNOWN, RE_FILTER_UNCOMMON/RARE/EPIC/LEGENDARY/ARTIFACT, RE_FILTER_WORLDFORGED, RE_FILTER_NOT_WORLDFORGED, RE_FILTER_CLASS_<TOKEN> (DEATHKNIGHT spelled RE_FILTER_CLASS_DEATH_KNIGHT), RE_FILTER_CLASS_<TOKEN>_SPEC_<spec> (spec values come from C_ClassInfo.GetAllSpecs).",
+        "returns": "2 values: results:array (page slice, each entry has at least SpellID, Quality, Known, RequiredLevel, IsAvailableForCurrentClass, Spec -- CollectionButtonMixin:Init reads these directly from the entry, then re-fetches full REData by SpellID), maxPage:number (page count = ceil(total/entriesPerPage); :309 calls with entriesPerPage=1 and uses the second return as the TOTAL KNOWN COUNT, so it must be ceil(total/1)=total, never nil -- caller does `totalKnownEnchants and totalKnownEnchants > 0`). Results must be a non-nil table (`next(self.filteredResults)`).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanEquipSlot": {
+        "callsites": ["Slots/SlotFrameSlotMixin.lua:392"],
+        "args": "(realSlotID:number)  -- REAL slot index (EnchantCollectionUtil:GetRealSlotID), 1..NUM_MYSTIC_ENCHANT_SLOTS",
+        "returns": "2 values: ok:boolean, errorMessages:string (globalstring KEY or literal text; shown via `_G[msg] or msg` in the slot tooltip). false marks the slot red (SetBroken).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetMysticScrollCost": {
+        "callsites": ["Slots/SlotFrameReforgeTab.lua:10", "Slots/SlotFrameReforgeTab.lua:74"],
+        "args": "()",
+        "returns": "money:number (copper) or nil; nil makes the tab retry every 0.5s after the untarnished-scroll item loads (Item:ContinueOnLoad + Timer.After). Displayed as `{[Enum.UnlearnCost.Gold]=cost or 12345}`. Called at ReforgeTab OnLoad (i.e. at addon load).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetMysticScrollFilter": {
+        "callsites": ["Collection/CollectionFrameScrollsTab.lua:28", "Collection/CollectionFrameScrollsTab.lua:67", "Collection/CollectionFrameScrollsTab.lua:72", "Collection/CollectionFrameScrollsTab.lua:77"],
+        "args": "(searchText:string (trimmed), filters:table -- same set/array duality as QueryEnchants; `{}` and \"\" mean unfiltered)",
+        "returns": "nothing. Stateful: it defines what GetNumFilteredMysticScrolls / GetFilteredMysticScrollAtIndex enumerate. GetItemDataByIDUnfiltered temporarily clears the filter, scans, then restores it -- so the call must be cheap and synchronous.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetNumFilteredMysticScrolls": {
+        "callsites": ["Collection/CollectionFrameScrollsTab.lua:29", "Collection/CollectionFrameScrollsTab.lua:68"],
+        "args": "()",
+        "returns": "count:number of scroll items in the player's bags matching the current filter (caller does `or 0`). The list shows count+1 rows (last row = 'get more scrolls' pseudo item Entry=-1).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetFilteredMysticScrollAtIndex": {
+        "callsites": ["Collection/CollectionFrameScrollsTab.lua:53", "Collection/CollectionFrameScrollsTab.lua:58", "Collection/CollectionFrameScrollsTab.lua:70"],
+        "args": "(index:number 1-based within the filtered list)",
+        "returns": "itemData table or nil (caller substitutes `{}`): Entry:number (item id), Guid:number (low GUID of that item instance in bags -- used as the operand of ApplySlot/ReforgeItem/DisenchantItem/CollectionReforgeItem and as the 'in use' key), Name:string (may be \"\" -> falls back to Item:GetName()), Quality:number optional (falls back to item quality). The untarnished scroll 992720 appears as a row too (grouped, count shown via GetItemCount).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanPurchaseMysticExtract": {
+        "callsites": ["Slots/SlotFrameReforgeTab.lua:282 (ECReforgeTabMixin:PurchaseExtract -- DEAD: nothing in the addon calls PurchaseExtract)"],
+        "args": "()",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "PurchaseMysticExtract": {
+        "callsites": ["Slots/SlotFrameReforgeTab.lua:284 (dead path, see above)"],
+        "args": "()",
+        "returns": "nothing; outcome arrives as event MYSTIC_ENCHANT_PURCHASE_MYSTIC_EXTRACT_RESULT(result:string)",
+        "sync": "async-with-event MYSTIC_ENCHANT_PURCHASE_MYSTIC_EXTRACT_RESULT",
+        "defined_in_lua": null
+      },
+      "HasNearbyMysticAltar": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:994 (GetAltar) <- EnchantCollection.lua:249,366,404 (UpdateAltar at OnShow), FrameTemplateMixins.lua:41 (every cost button Update), SlotFrameSlotMixin.lua:419,515, SlotFrameSlotTab.lua:590-597"],
+        "args": "()",
+        "returns": "boolean; false shows the NoAltarFrame overlay, disables every cost button (tooltip RE_PURCHASE_NO_MYSTIC_ALTAR) and undoes staged changes. Polled on every button refresh, so must be cheap.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAppliedEnchant": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1076-1080 (GetSlotData) <- SlotFrameSlotMixin.lua:382 (UpdateSlotData, called for all slots at SlotTab OnLoad via CreateSlots and on every MYSTIC_ENCHANT_SLOT_UPDATE); also EnchantCollectionUtil:Init:833, HasStagedChanges:1218, IsCollectionReforge:1238; FrameXML/Util/MysticEnchantUtil.lua:75"],
+        "args": "(unit:string \"player\", realSlotID:number)",
+        "returns": "spellID:number of the enchant socketed in that real slot, or 0/nil when empty (ECEnchantMixin:SetEnchant treats 0 as empty; HasStagedChanges tests truthiness). Also used for other units by MysticEnchantUtil.IsEnchantApplied (inspect).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetApplyChanges": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1083 (RefreshTempData, after every ApplySlot/CollectionReforgeSlot/Undo)"],
+        "args": "()",
+        "returns": "array (must be a table, iterated with pairs) of staged scroll->slot changes: {RESlot:number (real slot), Enchant:{SpellID:number}}; empty table when nothing staged.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCollectionReforgeChanges": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1086"],
+        "args": "()",
+        "returns": "array of staged collection->slot changes: {Slot:number (real slot), Enchant:{SpellID:number}}; used only when GetApplyChanges was empty.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCollectionReforgeSlotCost": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1294,1323,957"],
+        "args": "(spellID:number)",
+        "returns": "2 numbers: tokenCost (Marks of Ascension, item 375250), moneyCost (copper); nil tolerated (`or 0`).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCollectionReforgeItemCost": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1305,964"],
+        "args": "(spellID:number)",
+        "returns": "2 numbers: (ignored tokenCost, moneyCost)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetDisenchantCost": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1372 (CalculateExtractCost) <- SlotFrameReforgeTab.lua:189 'Save to Collection' button, slot right-click menu"],
+        "args": "(spellID:number, needsToPurchaseExtract:boolean = GetItemCount(98463) <= 0)",
+        "returns": "2 numbers: extractCost (Mystic Extract item 98463), markCost (Marks of Ascension 375250)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetReforgeCost": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1391 (CalculateReforgeCost) <- ReforgeTab Button1 Update at every BAG_UPDATE/OnShow"],
+        "args": "()",
+        "returns": "tokenCost:number (Marks of Ascension) or nil",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanApplySlot": {
+        "callsites": ["indirect via name: EnchantCollectionUtil:AttemptOperation(\"ApplySlot\",\"CanApplySlot\", realSlot, guidLow) at FrameXML/Util/EnchantCollectionUtil.lua:1154 <- SlotFrameSlotTab.lua:255 (drop a scroll on a slot)"],
+        "args": "(realSlotID:number, scrollGuidLow:number)",
+        "returns": "Can* contract (all C_MysticEnchant Can* share it, see EnchantCollectionUtil:HandleError:927): (success:boolean, errorStr:string|nil, ...extra). errorStr is a globalstring KEY (`_G[errorStr] or errorStr`); keys ending in _OK are treated as success; the five RE_*_NO_MYSTIC_ALTAR keys additionally fire MYSTIC_ALTAR_CLOSED; RE_COLLECTION_REFORGE_NO_MONEY formats extra returns (_, _, totalRequiredMoney, totalRequiredTokens) or the per-spell cost.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ApplySlot": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1154 (after CanApplySlot ok)"],
+        "args": "(realSlotID:number, scrollGuidLow:number)",
+        "returns": "nothing; STAGES the change client-side (visible through GetApplyChanges) -- nothing is committed until SaveApply. Lua then fires MYSTIC_ENCHANT_SLOT_UPDATE(realSlot) itself.",
+        "sync": "sync (staging); commit is async via SaveApply -> MYSTIC_ENCHANT_APPLY_RESULT",
+        "defined_in_lua": null
+      },
+      "CanCollectionReforgeSlot": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1181 <- SlotFrameSlotTab.lua:257 (put a collected enchant into a slot)"],
+        "args": "(realSlotID:number, spellID:number)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CollectionReforgeSlot": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1181"],
+        "args": "(realSlotID:number, spellID:number)",
+        "returns": "nothing; stages (GetCollectionReforgeChanges). Commit via SaveCollectionReforge -> MYSTIC_ENCHANT_COLLECTION_REFORGE_RESULT.",
+        "sync": "sync (staging)",
+        "defined_in_lua": null
+      },
+      "CanSaveApply": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1284 (Apply) <- SlotFrameSlotTab.lua:528 (Save Changes button)"],
+        "args": "()",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SaveApply": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1284"],
+        "args": "()",
+        "returns": "nothing; server commits staged scroll applications (casts spell 93238 SPELL_APPLY_MYSTIC_ENCHANT server-side -> UNIT_SPELLCAST_START shows the cast bar).",
+        "sync": "async-with-event MYSTIC_ENCHANT_APPLY_RESULT(result:string), then MYSTIC_ENCHANT_SLOT_UPDATE per slot",
+        "defined_in_lua": null
+      },
+      "CanSaveCollectionReforge": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1273"],
+        "args": "()",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SaveCollectionReforge": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1273"],
+        "args": "()",
+        "returns": "nothing (spell 93236 cast)",
+        "sync": "async-with-event MYSTIC_ENCHANT_COLLECTION_REFORGE_RESULT",
+        "defined_in_lua": null
+      },
+      "UndoApply": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1198,1256 (ClearStagedChanges, RefundEnchant)"],
+        "args": "(realSlotID:number)",
+        "returns": "nothing; drops the staged change for that slot",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UndoCollectionReforge": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1199,1259"],
+        "args": "(realSlotID:number)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanReforgeItem": {
+        "callsites": ["indirect: Slots/SlotFrameReforgeTab.lua:233 EnchantCollectionUtil:AttemptOperation(\"ReforgeItem\",\"CanReforgeItem\", guidLow)"],
+        "args": "(scrollGuidLow:number)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ReforgeItem": {
+        "callsites": ["indirect: Slots/SlotFrameReforgeTab.lua:233"],
+        "args": "(scrollGuidLow:number)",
+        "returns": "nothing; server rerolls the scroll (spell 93235, on GetSpellCooldown(93235) cooldown which disables Button1 via SPELL_UPDATE_COOLDOWN). The UI then waits for the bag diff: NEW_BAG_ITEM_ADDED/BAG_ITEM_REPLACED with an item that GetEnchantInfoByItem resolves (CheckForReforge) to play the reveal animation.",
+        "sync": "async-with-event MYSTIC_ENCHANT_REFORGE_RESULT(result:string) + bag events",
+        "defined_in_lua": null
+      },
+      "CanDisenchantItem": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1427 (ShowDisenchantItemDialogue) <- SlotFrameReforgeTab.lua:278; Slots/SlotFrameReforgeTab.lua:261"],
+        "args": "(scrollGuidLow:number, needsToPurchaseExtract:boolean)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DisenchantItem": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1427; Slots/SlotFrameReforgeTab.lua:261"],
+        "args": "(scrollGuidLow:number, needsToPurchaseExtract:boolean)",
+        "returns": "nothing; 'save scroll to collection' (spell 93237). Success => MYSTIC_ENCHANT_DISENCHANT_RESULT(\"..._OK\") then MYSTIC_ENCHANT_LEARNED(spellID).",
+        "sync": "async-with-event MYSTIC_ENCHANT_DISENCHANT_RESULT, MYSTIC_ENCHANT_LEARNED",
+        "defined_in_lua": null
+      },
+      "CanDisenchantSlot": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1438 <- SlotFrameSlotMixin.lua:424 (slot dropdown 'Save to collection')"],
+        "args": "(realSlotID:number, needsToPurchaseExtract:boolean)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DisenchantSlot": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1438"],
+        "args": "(realSlotID:number, needsToPurchaseExtract:boolean)",
+        "returns": "nothing",
+        "sync": "async-with-event MYSTIC_ENCHANT_DISENCHANT_RESULT, MYSTIC_ENCHANT_LEARNED, MYSTIC_ENCHANT_SLOT_UPDATE",
+        "defined_in_lua": null
+      },
+      "CanDestroy": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1405 <- SlotFrameSlotMixin.lua:431 (slot dropdown 'Remove')"],
+        "args": "(realSlotID:number)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "Destroy": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1405"],
+        "args": "(realSlotID:number)",
+        "returns": "nothing (spell 93241)",
+        "sync": "async-with-event MYSTIC_ENCHANT_DESTROY_RESULT, MYSTIC_ENCHANT_SLOT_UPDATE",
+        "defined_in_lua": null
+      },
+      "CanPurchaseMysticScroll": {
+        "callsites": ["indirect: Slots/SlotFrameReforgeTab.lua:266 AttemptOperation(\"PurchaseMysticScroll\",\"CanPurchaseMysticScroll\")"],
+        "args": "()",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "PurchaseMysticScroll": {
+        "callsites": ["indirect: Slots/SlotFrameReforgeTab.lua:266"],
+        "args": "()",
+        "returns": "nothing; buys an untarnished scroll 992720 for GetMysticScrollCost() gold (spell 93239)",
+        "sync": "async-with-event MYSTIC_ENCHANT_PURCHASE_RESULT + bag events",
+        "defined_in_lua": null
+      },
+      "CanCollectionReforgeItem": {
+        "callsites": ["EnchantCollection.lua:258 via EnchantCollectionUtil:HandleCheck(\"CanCollectionReforgeItem\", guidLow, spellID); indirect EnchantCollectionUtil.lua:1445"],
+        "args": "(scrollGuidLow:number, spellID:number)",
+        "returns": "Can* contract",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CollectionReforgeItem": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1445 (ShowCollectionReforgeItemDialogue) <- EnchantCollection.lua:259"],
+        "args": "(scrollGuidLow:number, spellID:number)",
+        "returns": "nothing; rewrites an untarnished scroll into a chosen collected enchant",
+        "sync": "async-with-event MYSTIC_ENCHANT_COLLECTION_REFORGE_RESULT + bag events",
+        "defined_in_lua": null
+      }
+    },
+    "C_MysticEnchantPreset": {
+      "GetNumPresets": {
+        "callsites": ["Manager/SpecManager.lua:26", "Manager/SpecManagerButtonMixin.lua:22", "indirect: FrameXML/Util/MysticEnchantManagerUtil.lua:64,91 (GetNumPresets/GetActivePreset -- the latter runs in EnchantCollectionUtil:Init at load+0.1s and in OnShow)"],
+        "args": "()",
+        "returns": "number of unlocked presets (0 allowed; MysticEnchantManagerUtil adds +1 row for the 'unlock' entry up to MAX_MYSTIC_ENCHANT_PRESETS=100). Must not be nil (compared with `<`).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPresetData": {
+        "callsites": ["indirect: FrameXML/Util/MysticEnchantManagerUtil.lua:76 (GetPresetData) <- SlotFrameSlotTab.lua:341 (ShowPreview), SpecManagerButtonMixin.lua:15,150, MysticEnchantManagerUtil.GetActivePreset:96 (load + OnShow)"],
+        "args": "(index:number 1-based)",
+        "returns": "2 values: presetData:table mapping realSlotID -> spellID (read as `presetData[presetMap[fakeSlot]] or 0` and iterated by EnchantCollectionUtil:GetSlotMapForEnchants), isActive:boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanActivate": {
+        "callsites": ["indirect: FrameXML/Util/MysticEnchantManagerUtil.lua:177 via AttemptOperation(\"Activate\",\"CanActivate\", index) <- SlotFrameSlotTab.lua:539 (ClickApply with a preset previewed)"],
+        "args": "(index:number)",
+        "returns": "(success:boolean, errorTable:array of globalstring keys|nil) -- NOTE preset Can* returns a TABLE of error keys, unlike C_MysticEnchant Can* which returns one string.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "Activate": {
+        "callsites": ["indirect: MysticEnchantManagerUtil.lua:190"],
+        "args": "(index:number)",
+        "returns": "nothing; server saves current slots into the active preset and swaps to `index` (PRESET_CHANGE_SPELLS 84789.. cast -> cast bar). Lua fires ENCHANTCOLLECTION_PRESET_SWAP_STARTED first.",
+        "sync": "async-with-event MYSTIC_ENCHANT_PRESET_SET_ACTIVE_RESULT(result:string), then MYSTIC_ENCHANT_SLOT_UPDATE",
+        "defined_in_lua": null
+      },
+      "CanUnlock": {
+        "callsites": ["indirect: MysticEnchantManagerUtil.lua:177 via AttemptOperation(\"Unlock\",\"CanUnlock\") <- SpecManager.lua:27"],
+        "args": "()",
+        "returns": "(success:boolean, errorTable:array|nil)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "Unlock": {
+        "callsites": ["indirect: MysticEnchantManagerUtil.lua:190"],
+        "args": "()",
+        "returns": "nothing; consumes item 1806961 (spell 84872)",
+        "sync": "async-with-event MYSTIC_ENCHANT_PRESET_UNLOCK_RESULT",
+        "defined_in_lua": null
+      }
+    },
+    "C_BuildEditor": {
+      "GetPendingBuild": {
+        "callsites": ["Slots/SlotFrameArchitectTab.lua:10", "Slots/SlotFrameArchitectTab.lua:48"],
+        "args": "()",
+        "returns": "build table; only `.RandomEnchants` is read: array of {Enchant:number(spellID), Stacks:number}. Must be non-nil whenever the Architect tab is shown (`#C_BuildEditor.GetPendingBuild().RandomEnchants` at OnLoad-time closure, evaluated when the scroll list refreshes). Hero Architect only (BuildCreatorUtil.IsPickingEnchants()).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddRandomEnchant": {
+        "callsites": ["Collection/CollectionButtonMixin.lua:30"],
+        "args": "(enchantInfo:table from BuildCreatorUtil.CreateEnchantInfo(spellID, stacks=1, level) -- FrameXML/Util/BuildCreatorUtil.lua)",
+        "returns": "boolean success (true => refresh list + EnchantCollection:GetArchitectTab():Update())",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveRandomEnchant": {
+        "callsites": ["Slots/SlotFrameArchitectTab.lua:95", "Collection/CollectionButtonMixin.lua:48"],
+        "args": "(spellID:number)",
+        "returns": "nothing (ignored)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetEnchantStacks": {
+        "callsites": ["Slots/SlotFrameArchitectTab.lua:100", "Slots/SlotFrameArchitectTab.lua:105"],
+        "args": "(spellID:number, stacks:number)",
+        "returns": "nothing; UI clamps 1..REData.MaxStacks before calling",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DoesBuildHaveEnchant": {
+        "callsites": ["Collection/CollectionButtonMixin.lua:47", "Collection/CollectionButtonMixin.lua:127"],
+        "args": "(spellID:number)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Config": {
+      "GetIntConfig": {
+        "callsites": ["Collection/CollectionFrameMixin.lua:33 (SetupFilters at Collection OnLoad, keys CONFIG_MAX_RARE_RANDOM_ENCHANTS / CONFIG_MAX_EPIC_RANDOM_ENCHANTS / CONFIG_MAX_LEGENDARY_RANDOM_ENCHANTS / CONFIG_MAX_ARTIFACT_RANDOM_ENCHANTS -- only consulted when IsHeroFreepickLayout())", "indirect: FrameXML/Util/EnchantCollectionUtil.lua:105 and 7 more (CONFIG_{LEGENDARY,EPIC,RARE,UNCOMMON}_RANDOM_ENCHANT_UNLOCK_LEVEL_%d, hero slot unlock levels)"],
+        "args": "(configName:string)",
+        "returns": "number or nil (`or 0` / `or 1` fallbacks everywhere)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetBoolConfig": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:175 IsClassFusionEnabled (\"CONFIG_CLASS_FUSION_ENABLED\") <- every slot border refresh (SlotFrameSlotMixin.lua:291,326,350) and IsHeroFreepickLayout (SetupFilters at load, OnGameModeChanged at SlotTab OnShow)"],
+        "args": "(configName:string)",
+        "returns": "boolean (nil acceptable = false)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_ClassInfo": {
+      "GetAllSpecs": {
+        "callsites": ["Collection/CollectionFrameMixin.lua:63 (SetupFilters at Collection OnLoad = addon load; iterated with ipairs for each of the 10 stock class tokens WARRIOR..DRUID)"],
+        "args": "(classToken:string)",
+        "returns": "array of spec identifiers (opaque `spec`; used as the sub-filter key suffix `..\"_SPEC_\"..spec` and passed back to GetSpecInfo). MUST be a table -- nil aborts the whole OnLoad chain (ipairs(nil) error) and the panel never lays out.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpecInfo": {
+        "callsites": ["Collection/CollectionFrameMixin.lua:64"],
+        "args": "(classToken:string, spec:any from GetAllSpecs)",
+        "returns": "table {Name:string, SpecFilename:string (icon file name, prefixed with \"Interface\\\\Icons\\\\\")}",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["Collection/CollectionButtonMixin.lua:97 (when GetSpellInfo(entry.SpellID) is nil: 'Please update your patch')", "indirect: SharedXML/C_Hook.lua HandleCallback pcall failures, MysticEnchantManagerUtil.WritePresets insecure refusal"],
+        "args": "(fmt:string, ...)  -- printf-style",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_CharacterAdvancement": {
+      "GetLearnedAE": {
+        "callsites": ["indirect: FrameXML/Util/EnchantCollectionUtil.lua:1534 (IsClassAndSpecAppropriate) <- ScrollListItemMixin.lua:112 (every scroll row), SlotFrameSlotTab.lua:297; FrameXML/GameTooltip.lua:167 (GameTooltip_GetEnchantRequirements) <- SlotFrameSlotTab.lua:41"],
+        "args": "(classTypeID:number (DBC ClassType), tabID:number)",
+        "returns": "number of ability essence invested (compared `<` against RequiredAE, so must be a number)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetLearnedTE": {
+        "callsites": ["indirect: same sites as GetLearnedAE"],
+        "args": "(classTypeID:number, tabID:number)",
+        "returns": "number",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_CVar": {
+      "Set": {
+        "callsites": ["EnchantCollection.lua:96 (OnShow: \"allowMysticEnchantingUI\" = \"1\")"],
+        "args": "(cvar:string, value:string|number|boolean, triggerEvent:boolean)",
+        "returns": "nothing; thin wrapper over stock SetCVar with min/max clamping",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:119"
+      },
+      "GetBool": {
+        "callsites": ["Slots/SlotFrameSlotMixin.lua:535 (tooltip slot-id debug lines, gated by `PTR_CLIENT or IsGMClient`)"],
+        "args": "(cvar:string \"showTooltipID\")",
+        "returns": "boolean via toboolean(GetCVar())",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:115"
+      }
+    },
+    "C_Hook": {
+      "RegisterBucket": {
+        "callsites": ["EnchantCollection.lua:108 ({UNIT_SPELLCAST_STOP,FAILED,INTERRUPTED,SUCCEEDED}, 0.1, \"StopSpellCast\")", "EnchantCollection.lua:109 (7 MYSTIC_ENCHANT_*_RESULT events, 0.1, \"HandleError\")", "indirect: Region:HookBucketEvent (EnchantCollection.lua:101 BAG_UPDATE 0.1)"],
+        "args": "(ref:table, events:table|string, period:number, callback:string method name) -- handler receives (event, args) where args is an ARRAY of per-event arg arrays",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:218"
+      },
+      "SendEvent": {
+        "callsites": ["EnchantCollection.lua:879 (ENCHANTCOLLECTION_LOADED)", "Slots/SlotFrameSlotTab.lua:540 (ENCHANTCOLLECTION_PRESET_SWAP_STARTED)"],
+        "args": "(event:string, ...)",
+        "returns": "nothing; dispatches to every C_Hook:Register'ed ref (table method `ref[event](ref, ...)` by default)",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:403"
+      },
+      "Register": {
+        "callsites": ["indirect: Region:HookEvent -> C_Hook:Register(self, event) at EnchantCollection.lua:98 (16 events at OnShow), :882 (ADDON_LOADED), Manager/SpecManager.lua:13,55,56; FrameXML/Util/EnchantCollectionUtil.lua:21-26"],
+        "args": "(ref:table, events:string|table, callback?)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:175"
+      },
+      "Unregister": {
+        "callsites": ["indirect: Region:UnhookEvent/UnhookAllEvents at EnchantCollection.lua:138, Manager/SpecManager.lua:62,63,73"],
+        "args": "(ref:table, events?)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:246"
+      }
+    },
+    "C_Player": {
+      "IsHero": {
+        "callsites": ["Collection/CollectionButtonMixin.lua:28", "Collection/CollectionButtonMixin.lua:29", "indirect: EnchantCollectionUtil.lua (10 sites), Ascension_Collections/Collections.lua:49"],
+        "args": "()",
+        "returns": "boolean = IsHeroClass(\"player\") = select(2, UnitClassBase(\"player\")) == \"HERO\"  -- bottoms out in the NON-STOCK native UnitClassBase",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:51"
+      },
+      "GetClass": {
+        "callsites": ["Collection/CollectionFrameMixin.lua:106 (default-class auto filter RE_FILTER_CLASS_<token>)"],
+        "args": "()",
+        "returns": "(classFileName:string, Enum.Class id, Enum.ClassMask) from the GlobalOverwrites.lua:94 UnitClassBase wrapper",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:26"
+      },
+      "IsDefaultClass": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:257,1122 etc."],
+        "args": "()",
+        "returns": "boolean via IsDefaultClass(\"player\") = bit.contains(Enum.ClassMask.DEFAULT, UnitClassMask(unit))",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:47"
+      },
+      "IsCustomClass": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:181 (IsHeroFreepickLayout)"],
+        "args": "()",
+        "returns": "boolean (CoA class)",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:55"
+      },
+      "GetLevel": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:1097 HasRequiredLevelForSlot (every slot at OnShow)"],
+        "args": "()",
+        "returns": "number (cached PLAYER_LEVEL_UP or UnitLevel)",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:18"
+      }
+    },
+    "C_GameMode": {
+      "IsGameModeActive": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:182,1093,1108,1113; Ascension_Collections/Collections.lua:4 (ShouldShowMysticEnchantTab, WildCard); FrameXML/GameTooltip.lua:147"],
+        "args": "(...Enum.GameMode bits)",
+        "returns": "boolean; Lua over the NATIVE global GetCustomGameMode() -> bitmask",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_GameMode.lua:11"
+      },
+      "RegisterCallbackWithHandle": {
+        "callsites": ["indirect: EnchantCollectionUtil.lua:382 (\"OnGameModeChanged\")"],
+        "args": "(event, func)",
+        "returns": "handle",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/CallbackRegistryMixin.lua (C_GameMode = CreateFromMixins(CallbackRegistryMixin), FrameXML/Util/C_GameMode.lua:4)"
+      }
+    }
+  },
+  "globals": {
+    "GetItemIconInstant": {
+      "callsites": ["Collection/ScrollListItemMixin.lua:41 (untarnished scroll row icon)", "indirect: FrameXML/Objects/Item.lua:110 ItemMixin:GetIcon fallback"],
+      "args": "(itemID:number)",
+      "returns": "icon FILE NAME without path (caller prepends \"Interface\\\\Icons\\\\\") or nil (falls back to inv_misc_questionmark). Non-stock (7.x-style) native.",
+      "defined_in_lua": null
+    },
+    "GetItemInfoInstant": {
+      "callsites": ["indirect: FrameXML/Objects/Item.lua (ItemMixin cache check) <- every Item:CreateFromID: EnchantCollection.lua:333,463,745,751 (Layout at load), SlotFrameReforgeTab.lua:64,77, SlotFrameSlotTab.lua:447, ScrollListItemMixin.lua:86, MysticEnchantManagerUtil.lua:37 (FrameXML load)"],
+      "args": "(itemID)",
+      "returns": "instant item info (native, not in stock 3.3.5a)",
+      "defined_in_lua": null
+    },
+    "GetItemName": {
+      "callsites": ["indirect: FrameXML/Objects/Item.lua:95 ItemMixin:GetName fallback when GetItemInfo is not cached"],
+      "args": "(itemID)",
+      "returns": "string|nil (native)",
+      "defined_in_lua": null
+    },
+    "GetItemQuality": {
+      "callsites": ["indirect: FrameXML/Objects/Item.lua:89 ItemMixin:GetQuality fallback"],
+      "args": "(itemID)",
+      "returns": "number|nil (native)",
+      "defined_in_lua": null
+    },
+    "UnitClassBase": {
+      "callsites": ["indirect: FrameXML/Util/GlobalOverwrites.lua:94 wrapper (`_UnitClassBase = _UnitClassBase or UnitClassBase`) <- C_Player:GetClass/IsHero, IsDefaultClass/IsHeroClass/IsCustomClass (SharedXML/SharedConstants.lua:40-60), FrameXML/Constants.lua:1002 (NUM_MYSTIC_ENCHANT_SLOTS = IsDefaultClass() and 11 or 17), Collections.lua:78 tab creation"],
+      "args": "(unit:string)",
+      "returns": "(className:string, classFileName:string) where classFileName may be a CUSTOM token (\"HERO\", CoA tokens); absent from stock 3.3.5a and from all three inventories -> the shim must provide it consistently with its UnitClass override (DESIGN section 6).",
+      "defined_in_lua": null
+    },
+    "GetCustomGameMode": {
+      "callsites": ["indirect: FrameXML/Util/C_GameMode.lua:12 <- IsHeroFreepickLayout (load), HasRequiredLevelForSlot/CanApplyQualityToSlot (OnShow), Collections.lua:4"],
+      "args": "()",
+      "returns": "number bitmask of Enum.GameMode; 0 = none",
+      "defined_in_lua": null
+    },
+    "GetRealmMaxLevel": {
+      "callsites": ["indirect: FrameXML/Util/GlobalFunctions.lua:15 GetMaxLevel() <- Manager/SpecManagerButtonMixin.lua:82 (disabled preset row text)"],
+      "args": "()",
+      "returns": "number or nil (`or 60`)",
+      "defined_in_lua": null
+    },
+    "ReadCustomWTF": {
+      "callsites": ["indirect: FrameXML/Util/MysticEnchantManagerUtil.lua:17 LoadSaveStates() at FrameXML LOAD (file \"MysticEnchantSaved\")"],
+      "args": "(fileName:string)",
+      "returns": "string contents or nil/\"\" (then deserialized by C_Serialize:DeserializeDecompressFromPrint, Lua)",
+      "defined_in_lua": null
+    },
+    "WriteCustomWTF": {
+      "callsites": ["indirect: MysticEnchantManagerUtil.lua:148 WritePresets <- UpdatePresetSlotMap (called from EnchantCollectionUtil:Init at every load and preset swap) and UpdatePresetData (rename/icon)"],
+      "args": "(fileName:string, contents:string)",
+      "returns": "nothing. Guarded by issecure() -- see notes.",
+      "defined_in_lua": null
+    },
+    "IsGMClient": {
+      "callsites": ["Slots/SlotFrameSlotMixin.lua:535 (`PTR_CLIENT or IsGMClient`, truthiness only)"],
+      "args": "used as a value, never called",
+      "returns": "truthy on GM builds; no Lua definition anywhere in the tree and not in the inventories -> exe-provided global; nil on stock is correct behaviour",
+      "defined_in_lua": null
+    },
+    "PTR_CLIENT": {
+      "callsites": ["Slots/SlotFrameSlotMixin.lua:535"],
+      "args": "value",
+      "returns": "truthy on PTR builds; same status as IsGMClient (nil on stock is fine)",
+      "defined_in_lua": null
+    },
+    "EnchantCollectionUtil": {
+      "callsites": ["EnchantCollection.lua:92 (Init at load+0.1s), :131,:249,:258,:259,:366,:502,:527; FrameTemplateMixins.lua:34,:41,:339,...; Slots/*.lua (GetSlotSettings, GetSlotData, GetRealSlotID, GetTempSlotData, HasRequiredLevelForSlot, CanApplyQualityToSlot, HasStagedChanges, ClearStagedChanges, Apply, AttemptOperation, HandleCheck, CalculateReforgeCost, CalculateExtractCost, CalculateCollectionReforgeCost, GetCollectionReforgeSlotCostWithAppliedChanges, FormatCostIconOnly, GetSpecString, IsClassAndSpecAppropriate, GetQualityFromQualityName, GetBorderStyleForSlot, GetBorderStyleAnimated, GetQuestionMarkStyle, SetTexRotationWithCoord, IsClassFusionEnabled, IsHeroFreepickLayout, OnGameModeChanged, GetSlotMapLayout, GetSlotMapForEnchants, RefundEnchant, ShowApplyDialogue, ShowDisenchant*/ShowDestroy*/ShowCollectionReforgeItemDialogue, GetAltar, HandleError, maxSlots, maxCollectionButtons, unknownEnchantColor, dialogues)"],
+      "args": "frame-table of methods (see FrameXML/Util/EnchantCollectionUtil.lua function index)",
+      "returns": "the addon's whole model layer: fake<->real slot map, staged changes, cost math, dialogues; all natives it touches are listed under namespaces as 'indirect'",
+      "defined_in_lua": "FrameXML/Util/EnchantCollectionUtil.lua:20 (CreateFrame(\"FRAME\") + HookEvent x6 at file load)"
+    },
+    "MysticEnchantManagerUtil": {
+      "callsites": ["EnchantCollection.lua:544; Slots/SlotFrameSlotTab.lua:58,59,341,343,348,539; Manager/SpecManager.lua:12,17,27,28,35,39,40; Manager/SpecManagerButtonMixin.lua:15,17,19,55,64,76,77,123,150,152,154"],
+      "args": "GetActivePreset(), GetPresetData(i), GetPresetName/Icon(i), GetPresetSlotMap(i), UpdatePresetSlotMap(i, map, layout), UpdatePresetData(name, icon), SaveCurrentAndActivateIndex(i), AttemptOperation(func, check, ...), GetNumPresets(), HasUnlockItem(), GetPresetUnlockItem(), GetFreePresets()=0, SetEditablePreset(i), GetActualPresetName/Icon(i)",
+      "returns": "preset names/icons/slot maps persisted in the custom WTF file MysticEnchantSaved keyed \"<name>-<realm>\"; wraps C_MysticEnchantPreset",
+      "defined_in_lua": "FrameXML/Util/MysticEnchantManagerUtil.lua:3"
+    },
+    "MysticEnchantUtil": {
+      "callsites": ["Slots/SlotFrameReforgeTab.lua:261 NeedsToPurchaseExtract()"],
+      "args": "()",
+      "returns": "boolean GetItemCount(ItemData.MYSTIC_EXTRACT) <= 0",
+      "defined_in_lua": "FrameXML/Util/MysticEnchantUtil.lua:85"
+    },
+    "BuildCreatorUtil": {
+      "callsites": ["EnchantCollection.lua:297,366; Slots/SlotFrameSlotTab.lua:587; Collection/CollectionButtonMixin.lua:27,29,46,67,71,126 (IsPickingEnchants, CreateEnchantInfo(spellID, stacks, level))"],
+      "args": "IsPickingEnchants() -> boolean (Hero Architect enchant-pick mode; switches the left pane to ArchitectTab and hides NoAltarFrame); CreateEnchantInfo(spellID, stacks, level) -> table for C_BuildEditor.AddRandomEnchant",
+      "returns": "see args",
+      "defined_in_lua": "FrameXML/Util/BuildCreatorUtil.lua"
+    },
+    "CostUtil": {
+      "callsites": ["FrameTemplateMixins.lua:50 CanPayThePrice(cost); indirect FormatCost/FinalazeCost in EnchantCollectionUtil"],
+      "args": "cost tables keyed by Enum.UnlearnCost (Gold=0, MarksOfAscension=375250, MysticExtract=item id) -> amount",
+      "returns": "(canPay:boolean, isFree:boolean)",
+      "defined_in_lua": "FrameXML/Util/CostUtil.lua:1"
+    },
+    "ItemData": {
+      "callsites": ["EnchantCollection.lua:423,591,745,751; Slots/SlotFrameReforgeTab.lua:28,29,66,77; Collection/ScrollListItemMixin.lua:41,89,97,176; Collection/CollectionFrameScrollsTab.lua:40; indirect MysticEnchantManagerUtil.lua:37"],
+      "args": "constants",
+      "returns": "MYSTIC_EXTRACT=98463, MARK_OF_ASCENSION=375250, UNTARNISHED_MYSTIC_SCROLL=992720, UNLOCK_ENCHANT_PRESET=1806961 (MYSTIC_ORB=98570, MYSTIC_RUNE=98462 only in commented code)",
+      "defined_in_lua": "FrameXML/Data/Items.lua:1"
+    },
+    "Enum": {
+      "callsites": ["Enum.ECCollectionTabs {ScrollsTab=1, CollectionTab=2}; Enum.ECSlotTabs {ReforgeTab=1, SlotTab=2, ArchitectTab=3}; Enum.ECSlotStates {Unknown=1, Known=2, Locked=3}; Enum.ECFilters (string keys); Enum.ECSlotBorderStylesKnown/UnKnown, Enum.ECSlotQualityJewelStyles (quality -> atlas names); Enum.EnchantQualityEnum (RE_QUALITY_* -> Enum.ItemQuality); Enum.ItemQuality (Uncommon=2, Rare=3, Epic=4, Legendary=5, Vanity=6 used as 'Artifact'); Enum.UnlearnCost; Enum.GameMode (indirect)"],
+      "args": "constants",
+      "returns": "see callsites",
+      "defined_in_lua": "SharedXML/Enum.lua:34 (EC tables at :1624-1730, UnlearnCost :1543)"
+    },
+    "PRESET_CHANGE_SPELLS": {
+      "callsites": ["EnchantCollection.lua:78 (OnLoad: GetSpellInfo on each of ~250 spell ids 84789..86345 to build a name->id map for the cast bar)"],
+      "args": "array of spellIDs",
+      "returns": "used only through GetSpellInfo(id) -> name; missing Spell.dbc rows just leave gaps",
+      "defined_in_lua": "FrameXML/Constants.lua:1009"
+    },
+    "NUM_MYSTIC_ENCHANT_SLOTS": {
+      "callsites": ["indirect: EnchantCollectionUtil.maxSlots (:29) -> ECSlotTabMixin:CreateSlots (SlotFrameSlotTab.lua:197)"],
+      "args": "constant decided at FrameXML load: `IsDefaultClass() and 11 or 17`",
+      "returns": "number of fake slot buttons created",
+      "defined_in_lua": "FrameXML/Constants.lua:1002-1006"
+    },
+    "MAX_MYSTIC_ENCHANT_PRESETS": {
+      "callsites": ["indirect: MysticEnchantManagerUtil.GetMaxPresets"],
+      "args": "= 100",
+      "returns": "number",
+      "defined_in_lua": "FrameXML/Constants.lua:1007"
+    },
+    "HelpTip / HelpTips": {
+      "callsites": ["EnchantCollection.lua:54-64 (HelpTips[\"EC_HELP_SAVE_CURRENCY\"], [\"EC_HELP_LEVEL\"] registered at file load with parent frame NAMES \"EnchantCollection.CurrencyExtract\" / \"EnchantCollectionNineSlice.Level\"), :378,:382 HelpTip:Show/Hide(key)"],
+      "args": "HelpTip:Show(key:string)",
+      "returns": "tutorial callout frames",
+      "defined_in_lua": "SharedXML/HelpTip.lua:7 (HelpTip), :803 (HelpTips)"
+    },
+    "SOUNDKIT": {
+      "callsites": ["EnchantCollection.lua:27-34 (qualitySounds table built at file load), :555; Slots/SlotFrameSlotTab.lua:219,339,408,434,457,663; Collection/CollectionFrameCollectionTab.lua:83,95; Manager/SpecManager.lua:24; indirect Collections.lua:86"],
+      "args": "numeric sound-kit ids or arrays of ids (COMMON_UI_MISSION_SELECT = {172888,...}, MAGICCLICK=170271, UI_70_ARTIFACT_FORGE_RELIC_PLACE=54128, ABILITIES_TURN_PAGEA={831,836}, RARE_UI_ORDERHALL_TALENT_READY_TOAST, EPIC_UI_MISSION_200PERCENT, LEGENDARY_UI_LEGENDARY_ITEM_TOAST, SPELL_PR_ARTIFACT_LIGHTSWRATH_CAST_05)",
+      "returns": "fed to the PlaySound override (SharedXML/Util/SharedOverwrites.lua:17) which round-robins arrays and calls the NATIVE PlaySound with a NUMBER -- see stock_api_assumptions",
+      "defined_in_lua": "SharedXML/Util/SoundKit.lua:1"
+    },
+    "Timer": {
+      "callsites": ["EnchantCollection.lua:92 (After 0.1 -> EnchantCollectionUtil:Init), :586; Slots/SlotFrameReforgeTab.lua:80; indirect C_Hook buckets (Timer.NewTimer), EnchantCollectionUtil re-sends"],
+      "args": "Timer.After(sec, fn), Timer.NewTimer(sec, fn) -> {Cancel}",
+      "returns": "OnUpdate-driven Lua timers",
+      "defined_in_lua": "SharedXML/Util/Timer.lua:6"
+    },
+    "MixinAndLoadScripts / Mixin / CreateFromMixins": {
+      "callsites": ["every mixin file; FrameTemplates.xml OnLoad scripts; CreateFromMixins is called with STRING names (\"ECEnchantMixin\", \"ECEnchantUnlockSplashMixin\", \"ScrollListItemBaseMixin\") resolved through _G"],
+      "args": "MixinAndLoadScripts(frame, mixin...) copies methods and wires OnLoad/OnShow/OnHide/OnEvent/OnClick/OnEnter/OnLeave/OnUpdate/OnMouseWheel/OnValueChanged/OnMouseDown/OnMouseUp handlers, then calls OnLoad",
+      "returns": "frame",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:1,152,177"
+    },
+    "GenerateClosure / RunNextFrame": {
+      "callsites": ["EnchantCollection.lua:259,600; Slots/*.lua (many); Manager/SpecManager.lua"],
+      "args": "GenerateClosure(f, ...) -> function; RunNextFrame(fn)",
+      "returns": "closures / next-frame scheduling",
+      "defined_in_lua": "SharedXML/Util/FunctionUtil.lua:100,117"
+    },
+    "BaseFrameFadeIn / BaseFrameFadeOut": {
+      "callsites": ["EnchantCollection.lua:338,343,398,562,573,635,636,668,808,809,815,816; FrameTemplateMixins.lua; Slots/*.lua; Collection/CollectionFrameMixin.lua:146,150 (tab switching = fades)"],
+      "args": "(frame)",
+      "returns": "UIFrameFade-based show/hide with alpha animation",
+      "defined_in_lua": "AddOns/AscensionUI/AscensionUI.lua:58,68 (hence the AscensionUI dependency)"
+    },
+    "PortraitFrame_SetIcon / PortraitFrame_SetTitle": {
+      "callsites": ["EnchantCollection.lua:688,689"],
+      "args": "(frame, iconPath) / (frame, text)",
+      "returns": "nothing",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1103 and :1119 (PortraitFrame_SetTitle = BasicFrame_SetTitle)"
+    },
+    "SetParentArray": {
+      "callsites": ["FrameTemplateMixins.lua:385,424,462,500,542,960"],
+      "args": "(region, parentKeyName)",
+      "returns": "appends region to parent[key] array",
+      "defined_in_lua": "SharedXML/Util/Util.lua:11"
+    },
+    "CreateColorFromCode / CreateColor / ColorMixin": {
+      "callsites": ["FrameTemplateMixins.lua:579,580; ITEM_QUALITY_COLORS[q]:WrapText / :GetRGB / :GetRGBA (Slots/SlotFrameArchitectTab.lua:59, SlotFrameSlotMixin.lua:840), GREEN_FONT_COLOR:WrapText (ScrollListItemMixin.lua:100), RED_FONT_COLOR/HIGHLIGHT_FONT_COLOR:GetRGB, EnchantCollectionUtil.unknownEnchantColor:GetRGBA()"],
+      "args": "Color objects",
+      "returns": "ITEM_QUALITY_COLORS and the *_FONT_COLOR globals are REDEFINED as Color objects in SharedXML/SharedConstants.lua:100-160 -- stock's plain {r,g,b,hex} tables lack WrapText/GetRGB",
+      "defined_in_lua": "SharedXML/Util/ColorUtil.lua:16,88 ; SharedXML/SharedConstants.lua:144"
+    },
+    "dprint": {
+      "callsites": ["FrameTemplateMixins.lua:232; Slots/SlotFrameReforgeTab.lua:142; Manager/SpecManager.lua:17"],
+      "args": "(...)",
+      "returns": "nop unless the dev console addon replaces it",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:13 (dprint = nop)"
+    },
+    "IsDefaultClass / IsHeroClass / IsCustomClass": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:50,105 (IsDefaultClass(\"player\")); indirect everywhere"],
+      "args": "(unit)",
+      "returns": "boolean via UnitClassMask/UnitClassBase (native)",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:40-60"
+    },
+    "IconSelectCreateFrame": {
+      "callsites": ["Manager/SpecManager.lua:97 (PopupController for renaming/re-iconing a preset; .frame, :EditExisting(name, icon), :CreateNew(), .UpdateValues override)"],
+      "args": "(name, parent, pointTable)",
+      "returns": "icon-picker popup controller (uses stock GetMacroIcons/GetNumMacroIcons internally)",
+      "defined_in_lua": "AddOns/AscensionUI/Shared/IconSelector.lua:1"
+    },
+    "OldSpecializationButtonMixin": {
+      "callsites": ["Manager/SpecManagerButtonMixin.lua:1,140 (base of ECSpecManagerButtonMixin; provides SpecIcon.Icon/Settings/KnownBorder, Text, Text_Add, Selected via OldSpecializationButtonTemplate)"],
+      "args": "mixin",
+      "returns": "template children used by the preset list rows",
+      "defined_in_lua": "FrameXML/SpecListItem.lua:19 (+ FrameXML/SpecListItem.xml template)"
+    },
+    "BetterStatusBarMixin": {
+      "callsites": ["Slots/ProgressBar.lua:4 (BetterStatusBarMixin.OnLoad), plus SetStatusBarAtlas/SetStatusBarFlipbookAtlas/SetSparkAtlas/SetSparkSize/SetSparkPoint/SetText/OnValueChanged on BetterStatusBarTemplate frames (EnchantCollection.lua:780-799)"],
+      "args": "mixin",
+      "returns": "a Frame-based status bar (NOT a StatusBar widget) with .BarTexture, .flipbook, SetMinMaxValues/SetValue/GetValue in Lua",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:794 (+ .xml BetterStatusBarTemplate)"
+    },
+    "ScrollListItemBaseMixin": {
+      "callsites": ["FrameTemplates.xml:31; Slots/SlotFrameArchitectTab.lua:38"],
+      "args": "mixin (index, GetScrollList, OnSelected, Update contract)",
+      "returns": "row mixin for ScrollListTemplate",
+      "defined_in_lua": "SharedXML/Scroll/ScrollListItemBase.lua:1"
+    },
+    "OnEventToMethod": {
+      "callsites": ["Slots/SlotFrameReforgeTab.lua:7 (ECReforgeTabMixin.OnEvent = OnEventToMethod -> self[event](self, ...))"],
+      "args": "(self, event, ...)",
+      "returns": "dispatch helper used for the two Frame:RegisterEvent registrations in that file",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:87"
+    },
+    "GetMaxLevel": {
+      "callsites": ["Manager/SpecManagerButtonMixin.lua:82"],
+      "args": "()",
+      "returns": "GetRealmMaxLevel() or 60 (native inside)",
+      "defined_in_lua": "FrameXML/Util/GlobalFunctions.lua:11"
+    },
+    "GameTooltip_GetEnchantRequirements": {
+      "callsites": ["Slots/SlotFrameSlotTab.lua:41"],
+      "args": "(REData)",
+      "returns": "string of unmet AE/TE requirements or nil (uses CharacterAdvancementUtil + C_CharacterAdvancement.GetLearnedAE/TE, C_GameMode)",
+      "defined_in_lua": "FrameXML/GameTooltip.lua:146"
+    },
+    "MagicButton_OnLoad": {
+      "callsites": ["FrameTemplateMixins.lua:97"],
+      "args": "(button)",
+      "returns": "nothing",
+      "defined_in_lua": "AddOns/AscensionUI/Shared/ButtonTemplates.lua:21"
+    },
+    "CreateTexturePool / CreateFramePoolCollection / CreateFramePool": {
+      "callsites": ["FrameTemplateMixins.lua:329; Slots/SlotFrameSlotMixin.lua:789; Slots/SlotFrameSlotTab.lua:116,179; Collection/CollectionFrameCollectionTab.lua:7,34"],
+      "args": "pools (GetOrCreatePool(type, parent, template), Acquire -> (obj, isNew), ReleaseAll, EnumerateActive)",
+      "returns": "pooled unnamed frames/textures",
+      "defined_in_lua": "SharedXML/Pools.lua:222,256"
+    },
+    "AtlasUtil": {
+      "callsites": ["Slots/SlotFrameSlotMixin.lua:812,814 (AtlasExists, GetCoords); Slots/ProgressBar.lua:47 (GetAtlasInfo); indirect Texture:SetAtlas -> AtlasUtil:Unpack"],
+      "args": "(atlasName)",
+      "returns": "Lua atlas table (texture file, size, coords) -- the whole atlas system is Lua",
+      "defined_in_lua": "SharedXML/AtlasInfo.lua:4904"
+    },
+    "LinkUtil": {
+      "callsites": ["Slots/SlotFrameSlotMixin.lua:93,131 (GetSpellLink(spellID) for tooltip SetHyperlink and chat linking); indirect EnchantCollectionUtil dialogues"],
+      "args": "(spellID)",
+      "returns": "\"|Hspell:ID|h[name]|h\" style link or nil",
+      "defined_in_lua": "SharedXML/Util/HyperlinkUtil.lua:69"
+    },
+    "ClassInfoUtil": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:62 GetColoredClassName(token); indirect GetSpecString"],
+      "args": "(classToken)",
+      "returns": "colored class name string",
+      "defined_in_lua": "SharedXML/Util/ClassInfoUtil.lua:1"
+    },
+    "Const": {
+      "callsites": ["Const.TextureKit.UseAtlasSize / IgnoreAtlasSize (second arg of SetAtlas) throughout"],
+      "args": "constants",
+      "returns": "booleans",
+      "defined_in_lua": "SharedXML/Util/Const.lua:1"
+    },
+    "Item": {
+      "callsites": ["Item:CreateFromID(itemID) -> ItemMixin object with GetLink/GetName/GetIcon/GetQuality/GetItemID/ContinueOnLoad (EnchantCollection.lua:333,463; FrameTemplateMixins.lua:147; Slots/SlotFrameReforgeTab.lua:64,77; Slots/SlotFrameSlotTab.lua:447; Collection/ScrollListItemMixin.lua:86)"],
+      "args": "(itemID)",
+      "returns": "cached object; GetIcon/GetName/GetQuality use stock GetItemInfo/GetItemIcon first and the NATIVE GetItemIconInstant/GetItemName/GetItemQuality as fallbacks; GetLink synthesises a link when GetItemInfo is not cached",
+      "defined_in_lua": "FrameXML/Objects/Item.lua:8"
+    },
+    "SearchBoxTemplate_OnTextChanged": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:249"],
+      "args": "(editBox)",
+      "returns": "nothing (SearchBoxTemplate itself is SharedXML/SharedPanelTemplates.xml, not stock)",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:281"
+    },
+    "StaticPopup_DisplayedFrames": {
+      "callsites": ["EnchantCollection.lua:565 (raise popups above InputBlock)"],
+      "args": "array",
+      "returns": "global in both stock and Ascension StaticPopup.lua",
+      "defined_in_lua": "FrameXML/StaticPopup.lua:1"
+    },
+    "Collections": {
+      "callsites": ["EnchantCollection.lua:864 (parent), :870 (HideUIPanel); Collection/CollectionFrameMixin.lua:19 (Collections:HookScript(\"OnHide\"))"],
+      "args": "global frame + CollectionsMixin (TabSystemMixin): GoToTab, GetCurrentTabID, Tabs.MysticEnchants",
+      "returns": "the host panel",
+      "defined_in_lua": "AddOns/Ascension_Collections/Collections.xml:31 + Collections.lua"
+    },
+    "MysticEnchant_LoadUI / UIParentLoadAddOn / HideUIPanel / ShowUIPanel": {
+      "callsites": ["FrameXML/UIParent.lua:433; Collections.lua:79; EnchantCollection.lua:870"],
+      "args": "()",
+      "returns": "LoadAddOn wrapper; the shim's compat/FrameXML must define MysticEnchant_LoadUI (DESIGN section 3 LoadUI helpers)",
+      "defined_in_lua": "FrameXML/UIParent.lua:433 (Ascension copy)"
+    },
+    "table.Copy / string.endswith / string:trim": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:137; Slots/SlotFrameReforgeTab.lua:260; Collection/CollectionFrameScrollsTab.lua:27,64"],
+      "args": "type extensions",
+      "returns": "deep copy / suffix test / trim",
+      "defined_in_lua": "SharedXML/TypeExtensions/table.lua:1, string.lua:118 (trim: stock strtrim alias also exists)"
+    },
+    "AUCTION_NUM_STACKS, LEVEL, CANCEL, ACTIVATE, ACTIVE, AVAILABLE, CHANGE, CLASS, QUALITY, SAVE_CHANGES, ITEM_MIN_LEVEL, MERCHANT_PAGE_NUMBER, FEATURE_BECOMES_AVAILABLE_AT_LEVEL, THIS_WOULD_REQUIRE, ENCHANT_COLLECTION_* (18 keys), ENCHANT_SPECIALIZATION*, RE_* (RE_PURCHASE_NO_MYSTIC_ALTAR, RE_COLLECTION_REFORGE_NO_MYSTIC_ALTAR, RE_DISENCHANT_NO_MYSTIC_ALTAR, RE_COLLECTION_REFORGE_STACK_LIMIT, RE_QUALITY_ARTIFACT_NAME, RE_FILTER_* labels), MYSTIC_ENCHANTING_ALTAR, MYSTIC_ENCHANT_EXP_BAR_DESC, NEW_MYSTIC_ENCHANT_LEARNED, BUG_REPORT_CATEGORY_MYSTICENCHANTS, BUG_REPORT_LABEL_MYSTICENCHANT, UNLOCK_MYSTIC_ENCHANT_PRESET_HINT, BUILD_CREATOR_CLICK_TO_ADD/REMOVE, FILTER_*_TOOLTIP, TRANSMOG_COLLECTED/NOT_COLLECTED, ITEM_QUALITY2..5_DESC, SLOTTED_ENCHANTS_TITLE": {
+      "callsites": ["throughout (globalstrings); SLOTTED_ENCHANTS_TITLE and RE_QUALITY_ARTIFACT_NAME get inline defaults"],
+      "args": "strings",
+      "returns": "Ascension GlobalStrings additions (p0-framexml-gap.json lists the MYSTIC_/ENCHANT_ keys); a missing one concatenates nil -> Lua error, e.g. EnchantCollection.lua:55 at FILE LOAD (ENCHANT_COLLECTION_NEED_MORE_EXTRACTS) and :724 (ENCHANT_COLLECTION_SCROLL_COLLECTION_REFORGE_TIP)",
+      "defined_in_lua": "FrameXML/GlobalStrings.lua (Ascension) / not in this tree for some keys -- verify against the gap list"
+    }
+  },
+  "widget_methods": {
+    "HookEvent / UnhookEvent / UnhookAllEvents / HookBucketEvent": {
+      "callsites": ["EnchantCollection.lua:98,101,138,882; Manager/SpecManager.lua:13,55,56,62,63,73; FrameXML/Util/EnchantCollectionUtil.lua:21-26"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:41-55 (thin wrappers over C_Hook:Register/Unregister/RegisterBucket; they do NOT call Frame:RegisterEvent)"
+    },
+    "ClearAndSetPoint": {
+      "callsites": ["EnchantCollection.lua:402,405; FrameTemplateMixins.lua:337,594; Slots/SlotFrameSlotMixin.lua:848; Slots/SlotFrameReforgeTab.lua:110,131,136,185,190"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:36"
+    },
+    "SetShown": {
+      "callsites": ["Slots/SlotFrameSlotMixin.lua:345; Slots/SlotFrameSlotTab.lua:609; Slots/SlotFrameReforgeTab.lua:188; Slots/SlotFrameArchitectTab.lua:71,72; Collection/CollectionButtonMixin.lua:141"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28"
+    },
+    "Texture:SetAtlas": {
+      "callsites": ["everywhere an atlas name is used (about 40 sites: borders, backgrounds, glows, buttons)"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:3 (via GetTextureMetatable().__index -- GetTextureMetatable is a NON-STOCK native accessor; polyfill with getmetatable(frame:CreateTexture()).__index)"
+    },
+    "Texture:SetPortraitTexture": {
+      "callsites": ["Slots/SlotFrameArchitectTab.lua:68"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:34 (-> stock SetPortraitToTexture)"
+    },
+    "Button:SetNormalAtlas / SetHighlightAtlas": {
+      "callsites": ["Slots/SlotFrameArchitectTab.lua:41,42; FrameXML/Ascension_CharacterFrame/SidePanels/MysticEnchantPanel.xml (MysticEnchantArchitectTabItemTemplate buttons)"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25-41 (via GetButtonMetatable/GetCheckButtonMetatable, non-stock accessors)"
+    },
+    "Button:SetEnabled": {
+      "callsites": ["indirect: EnchantCollectionUtil.lua:10 StaticPopup OnShow"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:13"
+    },
+    "GameTooltip:SetSpellByID": {
+      "callsites": ["Slots/SlotFrameArchitectTab.lua:81"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Tooltip.lua:209 (-> SetHyperlink(\"spell:\"..id))"
+    },
+    "BetterStatusBar: SetStatusBarAtlas / SetStatusBarFlipbookAtlas / SetSparkAtlas / SetSparkSize / SetSparkPoint / SetFormattedText / SetText / SetMinMaxValues / SetValue / GetValue / OnValueChanged / .BarTexture / .flipbook": {
+      "callsites": ["EnchantCollection.lua:176-189,783-799,802-825; Slots/ProgressBar.lua:4-60"],
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:794-1000 (BetterStatusBarMixin) + SharedPanelTemplates.xml BetterStatusBarTemplate"
+    },
+    "PlayUpdateValueAnim / OnUpdateAnim": {
+      "callsites": ["EnchantCollection.lua:183"],
+      "defined_in_lua": "Slots/ProgressBar.lua:39 (this addon)"
+    },
+    "ScrollList: SetTemplate / SetGetNumResultsFunction / SetCanSelect / RefreshScrollFrame / GetSelectedHighlight / SetSelectedIndex / GetSelectedIndex / .isInitialized / .ScrollFrame / .InsetFrame": {
+      "callsites": ["Slots/SlotFrameArchitectTab.lua:4-35; Collection/CollectionFrameScrollsTab.lua:10-102,120-123; Collection/CollectionFrameMixin.lua:156-160; Manager/SpecManager.lua:12,47,51,68,88-95"],
+      "defined_in_lua": "SharedXML/Scroll/ScrollList.lua (ScrollListMixin) + ScrollList.xml (ScrollListTemplate, StandardProportionalScrollListTemplate, ScrollListItemTemplate, ScrollListItemTextTemplate) -- HybridScrollFrame-based"
+    },
+    "FilterDropDownButton: RegisterCallback / AddFilterOption / CreateFilterInfo / AddOptionSpacer / AddCategoryOption / AddSubFilterOption / ClearFilters / SetFilter / GetFilter": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:25-75,93-135"],
+      "defined_in_lua": "SharedXML/FilterDropDown.lua:73-280 (FilterDropDownButtonMixin, FilterDropDown.xml FilterDropDownButtonTemplate)"
+    },
+    "TabSystem / Collections: GoToTab / GetCurrentTabID / SelectTabID / ShowTabID / SetTabEnabled / GetTabByID": {
+      "callsites": ["indirect: EnchantCollectionUtil.lua:874-925; Collections.lua:96-101,181"],
+      "defined_in_lua": "SharedXML/TabSystem/TabSystemMixin.lua + AddOns/Ascension_Collections/Collections.lua:181"
+    },
+    "Item mixin: GetLink / GetName / GetIcon / GetQuality / GetItemID / ContinueOnLoad": {
+      "callsites": ["see globals.Item"],
+      "defined_in_lua": "FrameXML/Objects/Item.lua"
+    },
+    "Color: WrapText / GetRGB / GetRGBA": {
+      "callsites": ["see globals.CreateColorFromCode"],
+      "defined_in_lua": "SharedXML/Util/ColorUtil.lua:88 (ColorPrototype)"
+    },
+    "Sparkle (SparkleTemplate) .Anim: SetTranslationRange / SetLifetimeRange / Refresh": {
+      "callsites": ["FrameTemplateMixins.lua:335-341,592-604; Slots/SlotFrameSlotMixin.lua:846-852"],
+      "defined_in_lua": "SharedXML/EffectTemplates.xml (+ its .lua)"
+    },
+    "IconSelector PopupController: .frame / EditExisting / CreateNew / UpdateValues": {
+      "callsites": ["Manager/SpecManager.lua:10,15-19,37-43"],
+      "defined_in_lua": "AddOns/AscensionUI/Shared/IconSelector.lua"
+    },
+    "PanelTemplates_SetNumTabs / PanelTemplates_SetTab / PanelTemplates_GetSelectedTab": {
+      "callsites": ["Collection/CollectionFrameMixin.lua:16,70,79,95,134,142; EnchantCollection.lua:319,514"],
+      "defined_in_lua": "stock FrameXML/UIPanelTemplates.lua (stock 3.3.5a API, listed for completeness)"
+    },
+    "Frame:SetMotionScriptsWhileDisabled, GameTooltip:GetSpell, Texture:IsDesaturated, Button:GetFontString, Button:LockHighlight/UnlockHighlight, Region:IsMouseOver, AnimationGroup/Animation API (SetLooping, SetChange, SetScale, SetOffset, SetDegrees, SetSmoothing, SetStartDelay, SetEndDelay, SetOrder, IsPlaying, Pause)": {
+      "callsites": ["FrameTemplateMixins.lua, Slots/SlotFrameSlotMixin.lua, Slots/SlotFrameArchitectTab.lua, Slots/SlotFrameSlotTab.lua:400"],
+      "defined_in_lua": "stock 3.3.5a widget API -- no shim work"
+    }
+  },
+  "events": {
+    "MYSTIC_ALTAR_USED": {
+      "registered_at": ["FrameXML/Util/EnchantCollectionUtil.lua:21 (HookEvent) -- not by the addon itself"],
+      "handler_args": "none; handler calls Collections:GoToTab(Collections.Tabs.MysticEnchants) => THE open trigger when the player uses a Mystic Altar",
+      "fired_by": "native (server: altar gossip/use). Not in api-surface __EVENT__ rows but no Lua fires it."
+    },
+    "MYSTIC_ALTAR_CLOSED": {
+      "registered_at": ["EnchantCollection.lua:98 (OnShow list, line 11)", "FrameXML/Util/EnchantCollectionUtil.lua:22"],
+      "handler_args": "none; EnchantCollection:UpdateAltar() (re-polls HasNearbyMysticAltar); EnchantCollectionUtil hides Collections when this tab is current",
+      "fired_by": "native | Lua (C_Hook.SendEvent at FrameXML/Util/EnchantCollectionUtil.lua:945 when a Can* returns one of the RE_*_NO_MYSTIC_ALTAR keys)"
+    },
+    "MYSTIC_ENCHANT_REFORGE_RESULT": {
+      "registered_at": ["EnchantCollection.lua:98 (OnShow list line 8)"],
+      "handler_args": "(result:string) e.g. \"RE_REFORGE_OK\" or an error globalstring key; handler calls UpdateProgress() then HandleError(...) (string ending _OK => ignored). ECReforgeTabMixin:MYSTIC_ENCHANT_REFORGE_RESULT (SlotFrameReforgeTab.lua:242) exists but is never registered on that frame -- dead.",
+      "fired_by": "native (after ReforgeItem)"
+    },
+    "MYSTIC_ENCHANT_SLOT_UPDATE": {
+      "registered_at": ["EnchantCollection.lua:98 (OnShow list line 9)"],
+      "handler_args": "(realSlotID:number); handler maps to the fake slot via EnchantCollectionUtil:GetFakeSlotID and re-reads EVERY slot (GetSlotData + CanEquipSlot) and refreshes buttons; falls back to the reforge tab when nothing staged and no item selected",
+      "fired_by": "native (api-surface __EVENT__ NATIVE) | Lua (C_Hook.SendEvent at FrameXML/Util/EnchantCollectionUtil.lua:1159,1186,1204,1264 after staging/undo)"
+    },
+    "MYSTIC_ENCHANT_LEARNED": {
+      "registered_at": ["EnchantCollection.lua:98 (line 10)", "FrameXML/Util/EnchantCollectionUtil.lua:25"],
+      "handler_args": "(spellID:number) -- vararg `...` read as spellID when a non-zero number; plays quality sound, switches to Collection tab, shows EnchantUnlockPopup:SetEnchant(spellID)",
+      "fired_by": "native (after DisenchantItem/DisenchantSlot succeed) | Lua re-send with 0.5s delay at EnchantCollectionUtil.lua:880 when the addon was not yet loaded"
+    },
+    "MYSTIC_ENCHANT_PROGRESS_UPDATE": {
+      "registered_at": ["EnchantCollection.lua:98 (line 17)", "FrameXML/Util/EnchantCollectionUtil.lua:26"],
+      "handler_args": "(progress:number, level:number) -> UpdateProgress(progress, level)",
+      "fired_by": "native | Lua re-send at EnchantCollectionUtil.lua:894"
+    },
+    "MYSTIC_SCROLL_USED": {
+      "registered_at": ["EnchantCollection.lua:98 (line 16)", "FrameXML/Util/EnchantCollectionUtil.lua:23"],
+      "handler_args": "(itemID:number) -- the scroll the player right-clicked in bags; opens the panel on the Scrolls tab and selects it (0.1s later)",
+      "fired_by": "native (server, on scroll item use) | Lua re-send at EnchantCollectionUtil.lua:907"
+    },
+    "MYSTIC_ENCHANT_UNLOCK_PRESET_USED": {
+      "registered_at": ["FrameXML/Util/EnchantCollectionUtil.lua:24 (forwards to EnchantCollection:MYSTIC_ENCHANT_UNLOCK_PRESET_USED)"],
+      "handler_args": "none; opens the tab and toggles the SpecManager next frame",
+      "fired_by": "native (on using item 1806961)"
+    },
+    "MYSTIC_ENCHANT_PRESET_SET_ACTIVE_RESULT": {
+      "registered_at": ["EnchantCollection.lua:98 (line 13)", "Manager/SpecManager.lua:56 (while SpecManager shown)"],
+      "handler_args": "(result:string|nil) -> UpdateActivePresetButton (GetActivePreset), ClearDelayedPreview, EnchantCollectionUtil:Init(), HandleError(result or \"\")",
+      "fired_by": "native (after C_MysticEnchantPreset.Activate) | Lua (C_Hook.SendEvent at FrameXML/Util/MysticEnchantManagerUtil.lua:168 with NO args, on renaming the active preset)"
+    },
+    "MYSTIC_ENCHANT_PRESET_UNLOCK_RESULT": {
+      "registered_at": ["EnchantCollection.lua:114 (HandleError bucket)", "Manager/SpecManager.lua:55"],
+      "handler_args": "(result:string)",
+      "fired_by": "native"
+    },
+    "MYSTIC_ENCHANT_PRESET_SAVE_RESULT": {
+      "registered_at": ["EnchantCollection.lua:115 (HandleError bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native"
+    },
+    "MYSTIC_ENCHANT_COLLECTION_REFORGE_RESULT": {
+      "registered_at": ["EnchantCollection.lua:109 (HandleError bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native (after SaveCollectionReforge / CollectionReforgeItem)"
+    },
+    "MYSTIC_ENCHANT_APPLY_RESULT": {
+      "registered_at": ["EnchantCollection.lua:110 (bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native (after SaveApply)"
+    },
+    "MYSTIC_ENCHANT_PURCHASE_RESULT": {
+      "registered_at": ["EnchantCollection.lua:111 (bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native (after PurchaseMysticScroll)"
+    },
+    "MYSTIC_ENCHANT_INSPECT_RESULT": {
+      "registered_at": ["EnchantCollection.lua:112 (bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native (api-surface __EVENT__ NATIVE)"
+    },
+    "MYSTIC_ENCHANT_DESTROY_RESULT": {
+      "registered_at": ["EnchantCollection.lua:113 (bucket)"],
+      "handler_args": "(result:string)",
+      "fired_by": "native (after Destroy)"
+    },
+    "MYSTIC_ENCHANT_DISENCHANT_RESULT": {
+      "registered_at": ["EnchantCollection.lua:98 (line 23)"],
+      "handler_args": "(result:string); `string.find(result, \"_OK$\")` => waitingForDisenchant + SetupEnchantUnlockPopup; then HandleError",
+      "fired_by": "native (after DisenchantItem/DisenchantSlot)"
+    },
+    "MYSTIC_ENCHANT_PURCHASE_MYSTIC_EXTRACT_RESULT": {
+      "registered_at": ["Slots/SlotFrameReforgeTab.lua:13 -- via stock Frame:RegisterEvent (the ONLY custom event this addon registers through the frame event system; dispatched by OnEventToMethod)"],
+      "handler_args": "(result:string); result:endswith(\"_OK\") => retries DisenchantItem",
+      "fired_by": "native (api-surface __EVENT__ NATIVE)"
+    },
+    "MYSTIC_ENCHANT_SLOT_MAP_REFRESH": {
+      "registered_at": ["EnchantCollection.lua:98 (line 18)"],
+      "handler_args": "none -> SlotTab:ClearPreview() (UpdateSlotData on all slots)",
+      "fired_by": "Lua (C_Hook.SendEvent at FrameXML/Util/EnchantCollectionUtil.lua:852, end of Init)"
+    },
+    "ENCHANTCOLLECTION_DIALOGUE_SHOW": {
+      "registered_at": ["EnchantCollection.lua:98 (line 14)"],
+      "handler_args": "none; fades in InputBlock and raises StaticPopup_DisplayedFrames above it",
+      "fired_by": "Lua (C_Hook.SendEvent at FrameXML/Util/EnchantCollectionUtil.lua:11, StaticPopupDialogs.ASC_APPLY_EC_CONFIRM.OnShow)"
+    },
+    "ENCHANTCOLLECTION_DIALOGUE_HIDE": {
+      "registered_at": ["EnchantCollection.lua:98 (line 15)"],
+      "handler_args": "none",
+      "fired_by": "Lua (C_Hook.SendEvent at FrameXML/Util/EnchantCollectionUtil.lua:14)"
+    },
+    "ENCHANTCOLLECTION_PRESET_SWAP_STARTED": {
+      "registered_at": ["EnchantCollection.lua:98 (line 22)"],
+      "handler_args": "none -> hasDelayedPreview=true",
+      "fired_by": "Lua (C_Hook.SendEvent at Slots/SlotFrameSlotTab.lua:540)"
+    },
+    "ENCHANTCOLLECTION_LOADED": {
+      "registered_at": ["Manager/SpecManager.lua:13 (unhooks itself)"],
+      "handler_args": "none",
+      "fired_by": "Lua (C_Hook.SendEvent at EnchantCollection.lua:879 in ADDON_LOADED)"
+    },
+    "NEW_BAG_ITEM_ADDED": {
+      "registered_at": ["EnchantCollection.lua:98 (line 20)"],
+      "handler_args": "(bag, slot, itemID, count) -> PlayQualitySoundForItem + CheckForReforge (the reforge reveal animation keys off this)",
+      "fired_by": "Lua (C_Hook.SendEvent at FrameXML/Util/C_InventoryState.lua:105,154 -- a bag-diff over stock BAG_UPDATE/ITEM_PUSH using GetContainerItemInfo/GetContainerItemID; the shim just needs stock bag events)"
+    },
+    "BAG_ITEM_REPLACED": {
+      "registered_at": ["EnchantCollection.lua:98 (line 21)"],
+      "handler_args": "(bag, slot, oldItemID, oldCount, newItemID, newCount)",
+      "fired_by": "Lua (FrameXML/Util/C_InventoryState.lua:116)"
+    },
+    "PLAYER_MONEY": {
+      "registered_at": ["EnchantCollection.lua:98 (line 12)"],
+      "handler_args": "none -> ReforgeTab:UpdateButtons()",
+      "fired_by": "native (stock)"
+    },
+    "BAG_UPDATE": {
+      "registered_at": ["EnchantCollection.lua:101 (HookBucketEvent 0.1s) and called directly at :102"],
+      "handler_args": "ignored; refreshes scroll list + ReforgeTab:Init(untrainedScrollCount, waitingForReforge)",
+      "fired_by": "native (stock)"
+    },
+    "UNIT_SPELLCAST_START": {
+      "registered_at": ["EnchantCollection.lua:98 (line 19)"],
+      "handler_args": "(unit) must be \"player\"; then UnitCastingInfo(unit) -> name matched against the GetSpellInfo-derived name map of the 8 progress spells + PRESET_CHANGE_SPELLS; reads startTime/endTime/castID(8th) to drive InputBlock.Progress",
+      "fired_by": "native (stock; the server-side casts of 93235-93241/84789/84872 produce it)"
+    },
+    "UNIT_SPELLCAST_STOP / UNIT_SPELLCAST_FAILED / UNIT_SPELLCAST_INTERRUPTED / UNIT_SPELLCAST_SUCCEEDED": {
+      "registered_at": ["EnchantCollection.lua:108 (C_Hook bucket 0.1s -> StopSpellCast(event, args))"],
+      "handler_args": "args[1] = {unit, spellName, rank, lineID, spellID}; compares args[1][4] (stock 3.3.5a lineID) with the castID captured from UnitCastingInfo",
+      "fired_by": "native (stock)"
+    },
+    "SPELL_UPDATE_COOLDOWN": {
+      "registered_at": ["Slots/SlotFrameReforgeTab.lua:12 (Frame:RegisterEvent)"],
+      "handler_args": "none -> GetSpellCooldown(93235) gates Button1",
+      "fired_by": "native (stock)"
+    },
+    "CURRENCY_DISPLAY_UPDATE / UNIT_INVENTORY_CHANGED": {
+      "registered_at": ["FrameTemplateMixins.lua:102-103 (ECCurrencyFrameMixin OnShow, Frame:RegisterEvent)"],
+      "handler_args": "UNIT_INVENTORY_CHANGED(unit==\"player\") -> refresh GetItemCount text",
+      "fired_by": "native (stock)"
+    },
+    "ADDON_LOADED": {
+      "registered_at": ["EnchantCollection.lua:882 (HookEvent)"],
+      "handler_args": "(addonName) == \"Ascension_EnchantCollection\" -> init Ascension_EnchantCollection_CDB (never actually written to elsewhere in the addon) and fire ENCHANTCOLLECTION_LOADED",
+      "fired_by": "native (stock)"
+    },
+    "OnGameModeChanged (C_GameMode callback, not an event)": {
+      "registered_at": ["FrameXML/Util/EnchantCollectionUtil.lua:382"],
+      "handler_args": "none -> recomputes slotSettings layout (also called directly at SlotTab OnShow, SlotFrameSlotTab.lua:126)",
+      "fired_by": "Lua (C_GameMode on ASCENSION_CUSTOM_GAME_MODE_CHANGED, itself a native event)"
+    }
+  },
+  "frames": [
+    "EnchantCollection (CreateFrame FRAME, parent Collections, PortraitFrameTemplate; EnchantCollection.lua:864) -- template children reached by global name: EnchantCollectionCloseButton (:869), EnchantCollectionNineSlice (HelpTips parent \"EnchantCollectionNineSlice.Level\")",
+    "EnchantCollection.Slots, EnchantCollection.Collection, EnchantCollection.CollectionScrollReforge, EnchantCollection.CollectionScrollReforge.Button1, EnchantCollection.NoAltarFrame, EnchantCollection.CurrencyExtract, EnchantCollection.CurrencyMarks, EnchantCollection.InputBlock, EnchantCollection.InputBlock.Progress, EnchantCollection.InputBlock.Progress.BorderFrame, EnchantCollectionNineSlice.Level",
+    "$self.EnchantUnlockPopup (literal name -- \"$self\" is not a CreateFrame substitution; harmless bug at EnchantCollection.lua:855), $self.EnchantUnlockPopup.AnimatedEnchant, .Animation, .AnimatedEnchant.GlowFrame",
+    "EnchantCollection.Slots.ReforgeTab, .ReforgeTab.Inset, .ReforgeTab.Button1, .ReforgeTab.Button2, .ReforgeTab.Button2YellowGlow, .ReforgeTab.ProgressBar, .ReforgeTab.ProgressBar.BorderFrame, .ReforgeTab.AnimatedEnchant (+.GlowFrame), .ReforgeTab.ReforgeAnimation, .ReforgeTab.PostReforgeAnimation",
+    "EnchantCollection.Slots.SlotTab, .SlotTab.Inset, .SlotTab.EnchantActivationFrame (+.AnimatedEnchant, .SpecIcon), .SlotTab.Button, .SlotTab.Button.YellowGlow, .SlotTab.UndoButton, .SlotTab.ActiveSpecButton (+.Button, .SpecIcon), .SlotTab.SpecManager, .SlotTab.SpecManager.ScrollsTab, .SlotTab.SpecManager.PopupController; slot buttons themselves come from a frame pool and are unnamed (each has a $parentDropDownMenu child and a DisabledOverlayFrame)",
+    "EnchantCollection.Slots.ArchitectTab, .ArchitectTab.Inset, EnchantCollection.Slots.ArchitectTabScrollList",
+    "EnchantCollection.Collection.ScrollsTab (+.InsetFrame, .NoResultsFrame), EnchantCollection.Collection.CollectionTab (+.PageLeftButton, .PageRightButton, .NoResultsFrame), EnchantCollection.CollectionTab1, EnchantCollection.CollectionTab2, EnchantCollection.CollectionFilter (NAME COLLISION: both the Filter button and the Search EditBox are created as \"$parentFilter\", CollectionFrameMixin.lua:239,243 -- the EditBox wins the global)",
+    "EnchantCollectionUtil (unnamed FRAME created at FrameXML load, FrameXML/Util/EnchantCollectionUtil.lua:20)",
+    "Virtual templates (FrameTemplates.xml): EnchantCollectionEnchantSlot, EnchantCollectionEnchantItem, EnchantCollectionEnchantAnimated, EnchantCollectionScrollListItem, EnchantCollectionManagerListItem, EnchantCollectionCollectionButton, EnchantCollectionProgressBar"
+  ],
+  "stock_api_assumptions": [
+    "PlaySound(number) and PlaySound(table): SOUNDKIT values are numeric sound-kit ids (SharedXML/Util/SoundKit.lua) and the override in SharedXML/Util/SharedOverwrites.lua:17 forwards a NUMBER to the native PlaySound -- stock 3.3.5a PlaySound takes a sound NAME string; the shim must map SoundKit ids to 3.3.5a sound names (or PlaySoundFile paths) or swallow them. The addon also uses stock string form (\"igMainMenuOptionCheckBoxOn\", \"igMainMenuOpen/Close\").",
+    "UnitClassBase(unit) -> (className, classFileName) is a NON-STOCK native (4.x API) wrapped at FrameXML/Util/GlobalOverwrites.lua:94 and consulted for class gating everywhere (IsDefaultClass/IsHeroClass/IsCustomClass, C_Player:IsHero/GetClass, NUM_MYSTIC_ENCHANT_SLOTS at FrameXML load, Collections tab creation). UnitClass is also overridden to return 4 values (name, token, Enum.Class id, mask) with custom tokens (\"HERO\", CoA tokens).",
+    "Frame:RegisterEvent(\"MYSTIC_ENCHANT_PURCHASE_MYSTIC_EXTRACT_RESULT\") at Slots/SlotFrameReforgeTab.lua:13 -- a custom event registered through the STOCK frame event API (the only such site in this addon; everything else goes through C_Hook table callbacks).",
+    "C_Hook delivery model: SharedXML/C_Hook.lua:15,149 creates a hidden frame that calls RegisterAllEvents() and re-broadcasts every frame event through C_Hook:SendEvent -- custom native events therefore reach Ascension UI as ordinary frame events. On the shim, DESIGN's `ASC.Events.Fire(name, ...)` must ALSO call `C_Hook:SendEvent(name, ...)` (or the metatable RegisterEvent hook must feed HookHandler's OnEvent), otherwise none of this addon's MYSTIC_* handlers ever run.",
+    "issecure()/securecall() branches in C_Hook.lua (Register :176, RegisterBucket :219, Unregister :249, SendEvent :411/:427): on Ascension SharedXML is signed/secure so these are never taken; loaded as an addon on stock, issecure() is false, so C_Hook:Register -> HookHandler:SecureSetValues -> SetAttribute -> OnAttributeChanged -> REGISTER_Update -> C_Hook:Register -> (still insecure) SecureSetValues ... infinite recursion. The compat copy of C_Hook.lua MUST have the insecure branches removed (or the shim must supply its own C_Hook). Same guard in MysticEnchantManagerUtil.WritePresets (:143) -> preset names/icons can never be saved and EnchantCollectionUtil:Init logs a C_Logger.Error on every load unless patched.",
+    "GetTextureMetatable / GetButtonMetatable / GetCheckButtonMetatable (SharedXML/TypeExtensions/Texture.lua:1, Button.lua:1-2) are non-stock native accessors (inventory: UNRESOLVED); polyfill via getmetatable(CreateFrame(\"Button\")).__index etc. Without them SetAtlas/SetNormalAtlas/SetShown/ClearAndSetPoint/HookEvent do not exist and the addon errors at its first OnLoad.",
+    "C_CVar.Set(\"allowMysticEnchantingUI\") / C_CVar.GetBool(\"showTooltipID\"): custom cvars; stock SetCVar/GetCVar on unregistered names are no-ops -> the shim should RegisterCVar(\"allowMysticEnchantingUI\",\"0\") and RegisterCVar(\"showTooltipID\",\"0\") (RegisterCVar exists in 3.3.5a) or nothing breaks but nothing persists.",
+    "ITEM_QUALITY_COLORS[q]:WrapText(...) / :GetRGB() / :GetRGBA() and GREEN_FONT_COLOR:WrapText, RED_FONT_COLOR:GetRGB, HIGHLIGHT_FONT_COLOR:GetRGB: stock 3.3.5a defines these as plain tables; Ascension redefines them as Color objects (SharedXML/SharedConstants.lua:100-160, ColorUtil.lua) -- the compat SharedXML must load before FrameXML consumers and override the stock tables.",
+    "CreateFrame(\"EditBox\", ..., \"SearchBoxTemplate\"), \"ScrollListTemplate\", \"StandardProportionalScrollListTemplate\", \"FilterDropDownButtonTemplate\", \"BetterStatusBarTemplate\", \"RedButtonTemplate\", \"SharedButtonTemplate\", \"SquareIconButtonTemplate\", \"InsetFrameNoBGTemplate\", \"InsetFrameTemplate\" (with .NineSlice), \"PortraitFrameTemplate\" (Ascension flavour with NineSlice/CloseButton), \"TabButtonTemplate\", \"LeftButtonTemplate\", \"RightButtonTemplate\", \"ButtonYellowGlowTemplate\", \"ShadowOverlaySmallTemplate\", \"DisabledOverlayTemplate\", \"SparkleTemplate\", \"PopupButtonTemplate\" (Ascension FrameXML/ItemButtonTemplate.xml), \"UIPanelDialogTemplate\" (Ascension FrameXML/UIPanelTemplates.xml with .title), \"OldSpecializationButtonTemplate\" (FrameXML/SpecListItem.xml), \"MysticEnchantArchitectTabItemTemplate\" (FrameXML/Ascension_CharacterFrame/SidePanels/MysticEnchantPanel.xml) -- all NON-stock or Ascension-modified templates that must come from compat/SharedXML or compat/FrameXML; several stock names (InsetFrameTemplate, UIPanelDialogTemplate, TabButtonTemplate, PortraitFrameTemplate) are REDEFINED with extra children the addon reaches into (.NineSlice, .title, .Icon).",
+    "MysticEnchantArchitectTabItemTemplate lives in Ascension FrameXML (MysticEnchantPanel.xml) but its OnLoad mixes in ECArchitectTabItemMixin, which is defined in THIS addon -- a FrameXML template that depends on an addon global; only instantiated lazily (ScrollList:SetTemplate at ArchitectTab OnShow) so it works, but the compat copy must keep the template.",
+    "Item:CreateFromID at addon load (EnchantCollection.lua:745,751 CurrencyExtract/CurrencyMarks) and at FrameXML load (MysticEnchantManagerUtil.lua:37) -> ItemMixin uses stock GetItemInfo/GetItemIcon plus native GetItemInfoInstant/GetItemIconInstant/GetItemName/GetItemQuality fallbacks; items 98463, 375250, 992720, 1806961 must be in the client item cache or answered by the server (names/icons/links).",
+    "GetSpellInfo on Ascension spell ids (93235-93241, 84789, 84872, PRESET_CHANGE_SPELLS 84789..86345, every enchant SpellID from REData) -- needs Ascension's Spell.dbc/SpellIcon.dbc in the client package (DESIGN section 2 says patch-M/S/T DBCs are shipped). CollectionButtonMixin:Init logs C_Logger.Error and skips a row when GetSpellInfo(SpellID) is nil.",
+    "UnitCastingInfo 8th return (castID) and UNIT_SPELLCAST_* 4th arg (lineID) are stock 3.3.5a -- compatible as written. GameTooltip:GetSpell(), Texture:IsDesaturated(), Frame:SetMotionScriptsWhileDisabled(), SetPortraitToTexture, CURRENCY_DISPLAY_UPDATE, GetFramesRegisteredForEvent, securecall, RegisterAllEvents: all stock 3.3.5a.",
+    "Custom WTF persistence: ReadCustomWTF/WriteCustomWTF (native, Extensions.dll) for file \"MysticEnchantSaved\" holding preset names/icons/slot maps (Lua-serialised via C_Serialize). Shim can back these with a SavedVariable of !AscensionShim; ReadCustomWTF returning nil is handled.",
+    "$parent-dotted frame names (\"$parent.Slots\") rely on stock $parent substitution (works in 3.3.5a); \"$self.EnchantUnlockPopup\" does not substitute and yields a literal global name."
+  ],
+  "data_files": [
+    "No LoadAscensionContentJSON / C_Content usage in this addon. The enchant catalogue (REData) is served natively by C_MysticEnchant (Ascension's custom Mystic Enchant DBC / server enchant tables, NOT the CA entries.json): per spell -> Quality key, MaxStacks, Known, IsWorldforged, IsAvailableForCurrentClass, RequiredLevel, Spec, ClassRequirements{ClassType, TabTypes{Tab, RequiredAE, RequiredTE}}; the shim's data layer needs an enchant table with exactly these columns plus scroll-item -> enchant mapping (GetEnchantInfoByItem).",
+    "C_Config keys: CONFIG_CLASS_FUSION_ENABLED (bool); CONFIG_MAX_RARE_RANDOM_ENCHANTS, CONFIG_MAX_EPIC_RANDOM_ENCHANTS, CONFIG_MAX_LEGENDARY_RANDOM_ENCHANTS, CONFIG_MAX_ARTIFACT_RANDOM_ENCHANTS (int); CONFIG_LEGENDARY/EPIC/RARE/UNCOMMON_RANDOM_ENCHANT_UNLOCK_LEVEL_%d (int, hero slot unlock levels, indirect).",
+    "Items: 98463 Mystic Extract, 375250 Mark of Ascension, 992720 Untarnished Mystic Scroll, 1806961 preset unlock item, plus every Mystic Scroll item the player owns (names/icons/quality/links via GetItemInfo -> item cache / server item query).",
+    "Spells: 93235 REFORGE, 93236 COLLECTION_REFORGE, 93237 DISENCHANT, 93238 APPLY, 93239 PURCHASE_SCROLL, 84789 ACTIVATE_PRESET, 84872 UNLOCK_PRESET, 93241 DESTROY, PRESET_CHANGE_SPELLS (FrameXML/Constants.lua:1009, ~250 ids) -- only for cast-bar name matching and GetSpellCooldown(93235).",
+    "Atlases (all resolved by the Lua atlas table SharedXML/AtlasInfo.lua): Enchant-Slot-Tab-Background, Enchant-Slot-Frame-Background, Enchant-Reforge-Anvil, Enchant-Collection-Frame-Background, EnchantSlotEmptyBig1, EnchantSlotEmptyNormal1, EnchantSlotEmptyNormal2, EnchantSlotBorderHighlight, EnchantSlotBorderSelected, EnchantSlotBorderKnownBorder, EnchantSlotBorderKnown{Uncommon,Rare,Epic,Legendary,Artifact}, EnchantSlotBorderUnknown{Normal,Uncommon,Rare,Epic,Legendary,Artifact}, EnchantSlotBorderAnimated*, EnchantSlotQuestionMarkNormal, skillbar_fill_flipbook_enchanting, skillbar_flare_enchanting, services-ring-countcircle, talents-button-reset, newplayertutorial-yellowGlow-redbutton-{left,middle,right}, collections-background-shadow-large, talents-node-choiceflyout-square-shadow, talents-node-choiceflyout-circle-locked, groupfinder-icon-class-*, itemupgrade_fx_framedecor_micafleckssheen, itemupgrade_greenplusicon, PetList-ButtonHighlight, UI-Character-Info-ItemLevel-Bounce, common-icon-redx, Char-Stat-Plus, ui-frame-bar-fill-white.",
+    "Texture files (must exist in the MPQ chain / addon pack): Interface\\\\AddOns\\\\AwAddons\\\\Textures\\\\Collections\\\\Shadow (referenced 8 times -- an ADDON path, AwAddons must ship), Interface\\\\Collections\\\\EnchantAtlas3, Interface\\\\Icons\\\\inv_MysticEnchantAltar, inv_custom_abilityessence, inv_custom_ReforgeToken, inv_misc_book_16, Interface\\\\LevelUp\\\\LevelUpTex, Interface\\\\Buttons\\\\UI-Button-Borders2, Interface\\\\FriendsFrame\\\\UI-Toast-Border, Interface\\\\FriendsFrame\\\\UI-FriendsFrame-HighlightBar, Interface\\\\COMMON\\\\ShadowOverlay-{Top,Bottom,left,Right}, Interface\\\\Minimap\\\\UI-Minimap-ZoomButton-Highlight, SPELLS\\\\starburst_blue, glow_256, 7fx_alphamask_shockwavesoft_contrast_256, 7fx_alphamask_shockwaveshadow_ba, 7fx_alphamask_shockwaveholy_a2, 8fx_mask_glowgeneric_a_128_brighter(_blend,_dissipate), FLARE_PERFECT, mask_genericglow_a, shockwave_smoke_02, shockwave_magic_a2, shockwave_spikey_bright_ba_ice, 7fx_flash_shard, Interface\\\\Icons\\\\<spec SpecFilename from C_ClassInfo.GetSpecInfo>.",
+    "Custom WTF file MysticEnchantSaved (ReadCustomWTF/WriteCustomWTF) and SavedVariablesPerCharacter Ascension_EnchantCollection_CDB (declared, initialised, never used).",
+    "GlobalStrings: ENCHANT_COLLECTION_* / RE_* / MYSTIC_* / ENCHANT_SPECIALIZATION* keys (see globals entry); two are read at FILE load (EnchantCollection.lua:55,61) so they must exist before the addon loads."
+  ],
+  "protected_actions": [
+    "None. No CastSpellByID / PickupSpell / SetBinding / RunMacro / UseItem. All server actions are the C_MysticEnchant / C_MysticEnchantPreset natives, which on Ascension make the SERVER cast spells 93235-93241 / 84789 / 84872 on the player (observed client-side only through UNIT_SPELLCAST_START).",
+    "Soft-secure gates that matter for the shim: MysticEnchantManagerUtil.WritePresets refuses when not issecure() (FrameXML/Util/MysticEnchantManagerUtil.lua:143); C_Hook's issecure() branches (see stock_api_assumptions).",
+    "SetCursor(\"CAST_CURSOR\"/\"CAST_ERROR_CURSOR\") / ResetCursor, ChatEdit_InsertLink, StaticPopup_Show, HideUIPanel(Collections) -- all unprotected in 3.3.5a."
+  ],
+  "blocking_natives": [
+    "UnitClassBase (class gating at FrameXML load: NUM_MYSTIC_ENCHANT_SLOTS, IsDefaultClass/IsHeroClass/IsCustomClass; tab creation in Collections)",
+    "GetCustomGameMode (C_GameMode:IsGameModeActive in ShouldShowMysticEnchantTab, IsHeroFreepickLayout at SetupFilters/OnGameModeChanged)",
+    "C_ClassInfo.GetAllSpecs + C_ClassInfo.GetSpecInfo (SetupFilters at Collection OnLoad -- nil aborts the OnLoad chain)",
+    "C_Config.GetBoolConfig + C_Config.GetIntConfig (IsClassFusionEnabled on every slot border refresh; SetupFilters)",
+    "C_MysticEnchant.GetMysticScrollCost (ReforgeTab OnLoad)",
+    "C_MysticEnchant.GetAppliedEnchant (every slot at SlotTab OnLoad via GetSlotData; Init)",
+    "C_MysticEnchant.GetEnchantInfoBySpell (slot init when a slot is filled; Collection rows; CheckSlotMap)",
+    "C_MysticEnchant.CanEquipSlot (UpdateSlotData for filled slots)",
+    "C_MysticEnchantPreset.GetNumPresets + C_MysticEnchantPreset.GetPresetData (MysticEnchantManagerUtil.GetActivePreset in EnchantCollectionUtil:Init at load+0.1s and OnShow)",
+    "GetItemInfoInstant / GetItemIconInstant (Item:CreateFromID in Layout at load; MysticEnchantManagerUtil at FrameXML load)",
+    "ReadCustomWTF (MysticEnchantManagerUtil at FrameXML load; may return nil) / WriteCustomWTF (Init -> UpdatePresetSlotMap; may no-op)",
+    "C_MysticEnchant.QueryEnchants (OnShow: IsAnyEnchantKnown decides the starting tab; DisplayResults)",
+    "C_MysticEnchant.GetProgress (OnShow: UpdateProgress)",
+    "C_MysticEnchant.HasNearbyMysticAltar (OnShow: UpdateAltar; every cost button Update)",
+    "C_MysticEnchant.SetMysticScrollFilter + GetNumFilteredMysticScrolls + GetFilteredMysticScrollAtIndex (Scrolls tab refresh at OnShow)",
+    "C_MysticEnchant.GetReforgeCost (ReforgeTab Button1 Update at OnShow/BAG_UPDATE)",
+    "C_Logger.Error (called from C_Hook's pcall error path and CollectionButtonMixin; must exist)"
+  ],
+  "notes": "SCOPE: this is the Mystic Enchanting panel (Collections -> Mystic Enchants). It is hidden for CoA classes (Collections.lua:78 `if not IsCustomClass()`), so under DESIGN's CoA-first release it only matters for default/Hero characters; still, EnchantCollectionUtil (FrameXML) and MysticEnchantManagerUtil load with FrameXML for everyone and touch natives at load (see below).\n\nARCHITECTURE: three-pane PortraitFrame parented to Collections: left `Slots` (ECSlotFrameMixin) with three cross-faded sub-tabs -- ReforgeTab (buy/reroll/save scrolls, altar XP bar), SlotTab (the 11/17-slot ring, preset manager), ArchitectTab (Hero Architect enchant list) -- and right `Collection` (ECCollectionFrameMixin) with ScrollsTab (HybridScroll list of scroll items in bags) and CollectionTab (paged grid of 18 collected/uncollected enchants). Overlays: CollectionScrollReforge, NoAltarFrame, InputBlock(+cast Progress), EnchantUnlockPopup, EnchantActivationFrame. All layout is procedural Lua (CreateFrame in :Layout) -- FrameTemplates.xml only declares 7 virtual button/frame templates whose OnLoad calls MixinAndLoadScripts.\n\nSLOT MODEL: UI slot ids are FAKE (1..NUM_MYSTIC_ENCHANT_SLOTS, positioned by EnchantCollectionUtil.slotSettings on two rings; slot 1 legendary, 2-4 epic, 5-7/8-17 generic/rare) and mapped to REAL server slots through EnchantCollectionUtil.slotMap (built in Init from GetAppliedEnchant per slot, persisted per preset in the custom WTF). Every native slot argument (GetAppliedEnchant, CanEquipSlot, ApplySlot, CollectionReforgeSlot, Destroy, Disenchant/UndoApply/UndoCollectionReforge, MYSTIC_ENCHANT_SLOT_UPDATE payload) is the REAL slot; GetFakeSlotID/GetRealSlotID translate. A shim server module needs: applied enchant per real slot per preset, a staging area (ApplySlot/CollectionReforgeSlot are client-side stages read back through GetApplyChanges/GetCollectionReforgeChanges; SaveApply/SaveCollectionReforge commit), and the Can* validation strings.\n\nRESULT/ERROR PROTOCOL: every C_MysticEnchant.Can* returns (ok, errorKey, ...) with globalstring KEYS; keys ending in `_OK` mean success; result EVENTS carry the same key strings (\"RE_REFORGE_OK\" etc.) and are funnelled through EnchantCollectionMixin:HandleError -> EnchantCollectionUtil:HandleError which prints them via SendSystemMessage + UIErrorsFrame. C_MysticEnchantPreset.Can* instead returns (ok, arrayOfErrorKeys). The five RE_*_NO_MYSTIC_ALTAR keys double as an 'altar closed' signal.\n\nEVENT BUS: the addon never calls Frame:RegisterEvent for custom events except SlotFrameReforgeTab.lua:13 (MYSTIC_ENCHANT_PURCHASE_MYSTIC_EXTRACT_RESULT); everything else is C_Hook (Region:HookEvent -> C_Hook:Register with table-method dispatch `self[event](self, ...)`, bucketed variants deliver (event, {args...})). On Ascension, C_Hook sees native events because HookHandler:RegisterAllEvents() rebroadcasts every frame event. So the shim's Transport `EVENT <name> [args]` must end in `C_Hook:SendEvent(name, ...)`, and DESIGN's metatable RegisterEvent hook must also let HookHandler receive custom names (or simply have ASC.Events.Fire call both). Three events are fired by Lua only (MYSTIC_ENCHANT_SLOT_MAP_REFRESH, ENCHANTCOLLECTION_DIALOGUE_SHOW/HIDE, ENCHANTCOLLECTION_PRESET_SWAP_STARTED, ENCHANTCOLLECTION_LOADED) and two bag events come from a Lua bag-diff (C_InventoryState) over stock BAG_UPDATE/ITEM_PUSH -- nothing to emulate there beyond stock events.\n\nCRITICAL SHIM PATCHES (apply to compat copies, record in client/PATCHES.md): (1) SharedXML/C_Hook.lua `if not issecure()` branches recurse infinitely from insecure code -- strip them; (2) FrameXML/Util/MysticEnchantManagerUtil.lua:143 WritePresets issecure() guard -- strip, else Init() logs an error per load and preset names never persist; (3) provide GetTextureMetatable/GetButtonMetatable/GetCheckButtonMetatable (and the other Get*Metatable used by TypeExtensions) as getmetatable(CreateFrame(type)).__index; (4) PlaySound numeric SoundKit mapping; (5) RegisterCVar the two custom cvars; (6) Ascension_EnchantCollection.toc needs `## Dependencies: Ascension_Collections, AscensionUI` already -- add !AscensionShim per DESIGN.\n\nLOAD-ORDER FACTS: EnchantCollection.lua:54-64 reads ENCHANT_COLLECTION_NEED_MORE_EXTRACTS / _LEVELS globalstrings at file load; OnLoad runs GetSpellInfo over ~260 spell ids; `Timer.After(0.1, EnchantCollectionUtil:Init)` then hits GetActivePreset -> GetNumPresets/GetPresetData, GetAppliedEnchant x slots, GetEnchantInfoBySpell, WriteCustomWTF, and fires MYSTIC_ENCHANT_SLOT_MAP_REFRESH. SetupFilters (Collection OnLoad) iterates C_ClassInfo.GetAllSpecs for the 10 stock class tokens and must not get nil. ECSlotTabMixin:OnLoad creates all slots immediately (GetSlotSettings/GetSlotData/CanEquipSlot). OnShow order: C_CVar.Set, hook 16 events, BAG_UPDATE (scroll list refresh + ReforgeTab Init -> GetReforgeCost/GetMysticScrollCost, Item loads), UpdateProgress (GetProgress), UpdateAltar (HasNearbyMysticAltar + ReforgeTab UpdateButtons), MYSTIC_ENCHANT_PRESET_SET_ACTIVE_RESULT(nil) => UpdateActivePresetButton + EnchantCollectionUtil:Init() AGAIN + PlaySound, then QueryEnchants(1,1,\"\",{RE_FILTER_KNOWN}) picks the starting Collection tab. So a shim that returns empty-but-well-typed values (QueryEnchants -> {}, 0; GetNumPresets -> 0; GetAppliedEnchant -> 0; GetProgress -> 0, 1; HasNearbyMysticAltar -> false; scroll filter count 0; GetAllSpecs -> {} ) opens the panel in a sane 'no altar / no scrolls' state.\n\nQUIRKS WORTH KNOWING: QueryEnchants' second return is used as a page count AND (with entriesPerPage=1) as the total; filters arrive as either an array or a key->true set; SlotFrameReforgeTab.lua:150 dereferences REData before its nil check; SlotFrameSlotTab.lua:412-418 dereferences REData.MaxStacks after a non-returning nil check; ECReforgeTabMixin:PurchaseExtract and :MYSTIC_ENCHANT_REFORGE_RESULT are dead; two frames share the global name EnchantCollection.CollectionFilter; the SavedVariable Ascension_EnchantCollection_CDB is never written; `C_Player:IsHero()` is called with colon syntax (C_Player is a Lua table, fine). The 'Artifact' quality is Enum.ItemQuality.Vanity (6). Hero class layout branches (IsHeroFreepickLayout, CONFIG_CLASS_FUSION_ENABLED, per-quality unlock levels) are entirely inside EnchantCollectionUtil and only need the C_Config/C_Config values to be answered.\n\nRELATED FrameXML files an adopt pass must cover for this addon: FrameXML/Util/EnchantCollectionUtil.lua (1556 lines, the model), MysticEnchantManagerUtil.lua, MysticEnchantUtil.lua, CostUtil.lua, BuildCreatorUtil.lua (IsPickingEnchants/CreateEnchantInfo), C_Player.lua, C_GameMode.lua, C_InventoryState.lua, GlobalOverwrites.lua (UnitClass/UnitClassBase wrappers), Objects/Item.lua, Data/Items.lua, Constants.lua:1002-1009, GameTooltip.lua:146 (GameTooltip_GetEnchantRequirements), SpecListItem.lua/.xml, Ascension_CharacterFrame/SidePanels/MysticEnchantPanel.xml (template), UIParent.lua:433; SharedXML: C_Hook.lua, Enum.lua (EC tables), SharedConstants.lua (colors, IsDefaultClass, OnEventToMethod), TypeExtensions/*, Util/{C_CVar,Mixin,FunctionUtil,ColorUtil,Timer,SoundKit,Const,HyperlinkUtil,ClassInfoUtil,Util,SharedOverwrites}.lua, Pools.lua, AtlasInfo.lua, HelpTip.lua, FilterDropDown.*, Scroll/*, TabSystem/*, SharedPanelTemplates.*, SharedTemplates.*, EffectTemplates.*; AscensionUI: AscensionUI.lua (BaseFrameFadeIn/Out), Shared/IconSelector.lua, Shared/ButtonTemplates.lua; Ascension_Collections (host)."
+}

@@ -1,0 +1,14 @@
+# Local generated/proprietary artifacts; keep authored source separate.
+/data/
+/build/
+/reports/
+__pycache__/
+*.pyc
+
+# Bring-your-own client binaries and archives.
+*.exe
+*.dll
+*.MPQ
+*.mpq
+*.dbc
+*.DBC

@@ -1,0 +1,548 @@
+{
+  "target": "Ascension_VanityCollection",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": ["Ascension_Collections"],
+    "saved_variables": [],
+    "files_in_order": [
+      "Ascension_VanityCollection.toc",
+      "VanityCollection.xml",
+      "VanityCollection.lua",
+      "VanityStore.lua"
+    ]
+  },
+  "entry_points": [
+    "VanityCollection_LoadUI() -- FrameXML/UIParent.lua:411 -> UIParentLoadAddOn(\"Ascension_VanityCollection\"); the only loader (LoadOnDemand=1).",
+    "Collections tab: Ascension_Collections/Collections.lua:70-74 AddTab(VANITY, \"StoreCollectionFrame\") with tab:SetPreClick(VanityCollection_LoadUI); tab id stored in Collections.Tabs.Vanity (POSITIONAL: CharacterAdvancement=1, then HeroArchitect and SkillCards only if C_Player:IsHero(), then Vanity, then MysticEnchants only if not IsCustomClass(), then Wardrobe). Open with Collections:GoToTab(Collections.Tabs.Vanity) (Collections.lua:181: ShowUIPanel(Collections); SelectTabID -> preClick loads the addon -> TabSystemMixin:SelectTab does _G[\"StoreCollectionFrame\"]:SetShown(true)) -> Store OnShow (VanityStore.lua:827) -> Store_Init.",
+    "ToggleCollections() -- FrameXML/UIParent.lua:655, bound to TalentMicroButton OnClick (FrameXML/MainMenuBarMicroButtons.xml:265); goes straight to Collections.Tabs.Vanity when IsCustomClass() and UnitLevel(\"player\") < 10.",
+    "OpenStoreCollectionAndSearch(text) / OpenStoreCollectionToCategory(category, searchText) -- FrameXML/UIParent.lua:415/422; both call VanityCollection_LoadUI() then VanityCollectionUtil.OpenAndSearch / .OpenToCategory, which THIS addon defines (VanityStore.lua:468/475) and which call Collections:GoToTab(Collections.Tabs.Vanity). External caller: Ascension_SeasonCollection/SeasonRewardMixin.lua:227; internal caller: SP counter hint button VanityStore.lua:968.",
+    "Slash commands /vanitydebug, /vdb (SLASH_DEBUGSTORE1/2, VanityStore.lua:2592) -- only registered when C_Realm.IsDevelopment() is true.",
+    "Event-driven toast: ASCENSION_STORE_COLLECTION_ITEM_LEARNED (VanityStore.lua:2492 -> UnlockNewItem) shows the UIParent-level frame StoreNewItemInCollection without the Collections panel being open -- but only once the LoD addon has been loaded at least once.",
+    "Collections itself is a UIPanel: UIPanelWindows[\"Collections\"] (FrameXML/UIParent.lua:57); Store's close button calls HideUIPanel(Collections)."
+  ],
+  "namespaces": {
+    "C_VanityCollection": {
+      "GetItem": {
+        "callsites": ["VanityStore.lua:102", "FrameXML/Util/VanityCollectionUtil.lua:19", "FrameXML/AddonCompat/AddonCompat.lua:22"],
+        "args": "(itemID:number)",
+        "returns": "vanity item record table or nil. Fields the UI reads: itemid (number, primary key; a few paths also accept itemID), name (string), quality (number 0-7, passed to GetItemQualityColor), group (number bitmask over Enum.VanityCategory -- MUST be a number: bit.contains(group, Enum.VanityCategory.AzzarFaire/Seasonal/Consumable) at :235/:246/:213 and GameTooltip.lua:533), description (string; strupper'd at :648 so nil errors for banner items), icon (string, bare icon file name; UI prepends \"Interface\\\\Icons\\\\\"), artwork (string or \"\"/nil; file name under AwAddons\\Textures\\Collections\\ and \\Collections\\PreviewItems\\), spCost (number, REQUIRED: compared > 0 / ~= 0 at :681/:733/:1307/:1962/:2351), btCost (number, REQUIRED: same), dpCost (number, OPTIONAL: when nil GetDPPrice(itemid) is called), flags (number bitmask over Enum.VanityFlags; bit.contains(item.flags, Enum.VanityFlags.CannotBeDelivered) at :693/:1980 requires a number, :788 has an `or 0` fallback), creaturePreview (number, REQUIRED: compared > 0 at :147; 0 = none; positive = CreatureDisplayInfo id passed to DressUpModel:SetDisplayInfo), contentsPreview (list of item ids, OPTIONAL `or {}`; each is Item:CreateFromID + DressUpModel:TryOn), owned (boolean, OPTIONAL: QueryItems items carry it; falls back to IsCollectionItemOwned). The addon caches records in Store.Items[itemid] and VanityCollectionUtil caches them per itemID until HOT_PATCH_VANITY_COLLECTION invalidates.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetItemByLearnedSpell": {
+        "callsites": ["FrameXML/Util/VanityCollectionUtil.lua:37"],
+        "args": "(spellID:number)",
+        "returns": "vanity item record (same shape as GetItem) or nil; caller reads .itemid and .group (FrameXML/GameTooltip.lua:530-536). Not called by this addon directly.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetOwnerByContentItem": {
+        "callsites": ["FrameXML/Util/VanityCollectionUtil.lua:53"],
+        "args": "(contentItemID:number)",
+        "returns": "the vanity item record whose contents include contentItemID, or nil; caller reads .itemid and .group (FrameXML/GameTooltip.lua:617-619). Not called by this addon directly.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSeasonalShowcaseItems": {
+        "callsites": ["FrameXML/Util/VanityCollectionUtil.lua:63"],
+        "args": "()",
+        "returns": "list table (memoised; `or {}` fallback, existence-guarded with `and`). Not called by this addon directly.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsCollectionItemOwned": {
+        "callsites": ["VanityStore.lua:19", "VanityStore.lua:308", "VanityStore.lua:691", "VanityStore.lua:1961", "VanityStore.lua:2352", "FrameXML/GameTooltip.lua:534", "FrameXML/GameTooltip.lua:620", "AddOns/Ascension_Draft/DraftActionButtonMixin.lua:8"],
+        "args": "(itemID:number)",
+        "returns": "boolean (used directly in `if`, `not`, and as the ItemKnown truthy value); scalar.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetDPPrice": {
+        "callsites": ["VanityStore.lua:125", "VanityStore.lua:2344"],
+        "args": "(itemID:number)",
+        "returns": "number of Donation Points; 0 means not purchasable with DP (compared with > 0, ~= 0, >= against GetAscensionDonationPoints()). Must not return nil (arithmetic comparisons).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "QueryItems": {
+        "callsites": ["VanityStore.lua:371"],
+        "args": "(searchText:string, categoryFlags:number|nil, filterFlags:number, unknownConst=1, offset:number, count:number). categoryFlags = bit.bor of checked Enum.VanityCategory leaf flags; when nothing is checked the UI assigns Enum.VanityCategory.All which DOES NOT EXIST in SharedXML/Enum.lua (only Weapons.All does), so the native receives nil and must treat nil as 'all categories'. filterFlags = bit.bor of local VanityFilterFlags {Owned=0x1, Unowned=0x2, Purchasable=0x4, Deliverable=0x8, Heirloom=0x10, Manastorm=0x20}; the UI only ever sets Owned (default on: Store_Init forces Known=true every OnShow), Purchasable (dev realms only), Heirloom, Manastorm. 4th arg is the literal 1 (meaning unknown; possibly sort mode). offset = (page-1)*9, count = Store.MaxItemsPerPage = 9.",
+        "returns": "table { total = number, items = { record, ... } } or nil. nil is tolerated (`or {}`), missing fields tolerated (`result.total or 0`, `result.items or {}`). Records have the GetItem shape and are cached by .itemid (or .itemID); total drives PageCount = ceil(total/9) and the Next/Prev buttons. Called synchronously on every OnShow, every filter/search keystroke (OnTextChanged), every page turn and every UnlockNewItem.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetRandomItem": {
+        "callsites": ["VanityStore.lua:630"],
+        "args": "()",
+        "returns": "vanity item record or nil (existence-guarded `C_VanityCollection.GetRandomItem and ...`). Called from Store's OnUpdate EVERY FRAME while the banner is hidden, until a non-nil record comes back; record.description is strupper'd (must be a string), record.icon/name read.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsPurchaseInProgress": {
+        "callsites": ["VanityStore.lua:773"],
+        "args": "()",
+        "returns": "boolean; true shows the PurchasePendingInputBlocker. Called unguarded in Store_Init (every OnShow and every UnlockNewItem).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RequestDelivery": {
+        "callsites": ["VanityStore.lua:719"],
+        "args": "(itemID:number)",
+        "returns": "nothing used. Asks the server to deliver (mail/bag) an owned vanity item; only enabled when owned and not Enum.VanityFlags.CannotBeDelivered. Native binding in ext-lua-bindings.tsv appears as C_CharacterCustomizationUnlocks.RequestDelivery (fn 0x103317c0) and _G RequestDeliverVanityCollectionItem (fn 0x100cf9d0); the C_VanityCollection table itself is absent from that dump.",
+        "sync": "sync (fire-and-forget; no completion event observed)",
+        "defined_in_lua": null
+      },
+      "Purchase": {
+        "callsites": ["VanityStore.lua:754"],
+        "args": "(itemID:number, currency:Enum.VanityCurrency) -- SeasonalPoints=1 or BazaarTokens=3 (DonationPoints=2 never reaches here; it goes to PurchaseWebShopItem)",
+        "returns": "nothing used. Completion is implied by the server firing ASCENSION_STORE_COLLECTION_ITEM_LEARNED(itemId) (toast + list rebuild) and ASCENSION_CUSTOM_POINTS_SEASONAL_POINTS_VALUE_CHANGED(old,new) (balance).",
+        "sync": "async-with-event ASCENSION_STORE_COLLECTION_ITEM_LEARNED",
+        "defined_in_lua": null
+      },
+      "PurchaseWebShopItem": {
+        "callsites": ["VanityStore.lua:747"],
+        "args": "(itemID:number)",
+        "returns": "boolean: true = request accepted (UI shows PurchasePendingInputBlocker), false = UI shows PurchaseFailedInputBlocker. Completion arrives as WEB_SHOP_PURCHASE_SUCCESS() or WEB_SHOP_PURCHASE_ERROR(errorText). Real-money path (Donation Points); native binding C_CharacterCustomizationUnlocks.PurchaseWebShopItem fn 0x103312f0.",
+        "sync": "async-with-event WEB_SHOP_PURCHASE_SUCCESS / WEB_SHOP_PURCHASE_ERROR",
+        "defined_in_lua": null
+      },
+      "IsConsolidatedVanityBuff": {
+        "callsites": ["FrameXML/BuffFrame.lua:237"],
+        "args": "(spellID:number)",
+        "returns": "boolean. Not used by this addon; listed because api-surface.tsv files it under C_VanityCollection (binding: C_CharacterCustomizationUnlocks.IsConsolidatedVanityBuff fn 0x10330f60).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Config": {
+      "GetBoolConfig": {
+        "callsites": ["VanityStore.lua:695", "VanityStore.lua:1969", "VanityStore.lua:2373", "VanityStore.lua:2386"],
+        "args": "(configKey:string) -- here always \"CONFIG_WEB_SHOP_ENABLED\"",
+        "returns": "boolean; false disables every Donation-Point purchase path (Buy button disabled / popup button disabled). Native fn 0x10198370.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["VanityStore.lua:729", "VanityStore.lua:742"],
+        "args": "(formatString:string, ...) -- this addon passes one pre-built string; SharedXML/C_Hook.lua passes \"%s %s %s\" plus varargs, so treat arg1 as a format string",
+        "returns": "nothing used. Native fn 0x10292170.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Realm": {
+      "IsDevelopment": {
+        "callsites": ["VanityStore.lua:1143", "VanityStore.lua:2527"],
+        "args": "()",
+        "returns": "boolean; both calls run AT FILE LOAD TIME (adds the PURCHASABLE filter row and the /vanitydebug slash command when true). A nil-call here aborts VanityStore.lua before any frame is finished. Native fn 0x100dbe60.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Player": {
+      "GetLevel": {
+        "callsites": ["VanityStore.lua:788"],
+        "args": "() (colon call)",
+        "returns": "number (cached PLAYER_LEVEL_UP value or UnitLevel(\"player\")); pure Lua over stock API.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:18"
+      }
+    },
+    "C_GameMode": {
+      "IsGameModeActive": {
+        "callsites": ["VanityStore.lua:788"],
+        "args": "(...:Enum.GameMode masks) (colon call) -- here (Enum.GameMode.Draft, Enum.GameMode.WildCard)",
+        "returns": "boolean; Lua, but it calls the NATIVE global GetCustomGameMode() -> number bitmask (api-surface NATIVE; not in ext-lua-bindings.tsv).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_GameMode.lua:11"
+      }
+    },
+    "C_Quest": {
+      "SendPathToAscensionEvent": {
+        "callsites": ["VanityStore.lua:828"],
+        "args": "(message:string) (colon call) -- \"ACTION_OPEN_THE_VANITY_COLLECTION\" on every Store OnShow",
+        "returns": "nothing; Lua: SendAddonMessage(\"ASC_PATH_TO_ASCENSION\", message, \"WHISPER\", UnitName(\"player\")) -- stock API, same self-whisper channel the DESIGN transport uses.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Quest.lua:253"
+      }
+    },
+    "C_Hook": {
+      "Register": {
+        "callsites": ["SharedXML/TypeExtensions/Region.lua:42 (via Store:HookEvent at VanityStore.lua:2519, 2520)"],
+        "args": "(ref:frame, events:string|table, callback:nil) -- with nil callback dispatches ref[eventName](ref, ...)",
+        "returns": "nothing. Pure Lua event bus: a hidden frame RegisterAllEvents() and re-dispatches every native event by name, so HookEvent works for custom event names without RegisterEvent. WARNING for stock: every entry point starts with `if not issecure() then HookHandler:SecureSetValues(...) return end`, a SetAttribute/OnAttributeChanged trampoline that calls C_Hook:Register again expecting to be secure; in an addon on a stock client issecure() stays false inside the handler, so Store:HookEvent at load time recurses until 'C stack overflow'. The shim must load C_Hook with issecure() returning true (or strip the branches).",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:158"
+      },
+      "SendEvent": {
+        "callsites": ["SharedXML/C_Hook.lua:142-151 (HookHandler OnEvent re-dispatch of every native event, and of self-whispered CHAT_MSG_ADDON prefixes)"],
+        "args": "(eventName:string, ...)",
+        "returns": "nothing; delivers to HookEvent subscribers via securecall+pcall. This is the hook the shim's EventBus can drive to fire ASCENSION_STORE_COLLECTION_ITEM_LEARNED etc.",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/C_Hook.lua:434"
+      }
+    },
+    "C_CVar": {
+      "GetBool": {
+        "callsites": ["SharedXML/HelpPlate.lua:53,56 (HelpPlateButtonTemplate OnShow, i.e. every Store OnShow)"],
+        "args": "(cvar:string) -- \"HelpTipEnabled\", \"HelpTipBitfield\"",
+        "returns": "boolean via toboolean(GetCVar(cvar)); custom CVars absent on stock return nil -> false -> flash logic skipped (harmless).",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:115"
+      },
+      "GetBitfield": {
+        "callsites": ["SharedXML/HelpPlate.lua:66"],
+        "args": "(cvar:string, bitIndex:number) -- (\"HelpTipBitfield\", HelpTips.Bits.HelpPlate_Vanity=4)",
+        "returns": "boolean; string-indexed bit over GetCVar(cvar); nil cvar -> false.",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:134"
+      }
+    },
+    "C_AssetQueryService": {
+      "TryCacheItem": {
+        "callsites": ["FrameXML/Objects/AsyncCallbackHandler.lua:42 (via ItemMixin:ContinueOnLoad/Query from VanityStore.lua:549, 564, 1294, 1973)"],
+        "args": "(itemID:number)",
+        "returns": "truthy when a cache request was issued. Transitive: Item:CreateFromID(id):ContinueOnLoad(fn) runs fn synchronously if GetItemInfo(id) is already non-nil, otherwise queues on ItemQueryListener which calls this native and waits for the native event ITEM_CACHE_REQUEST_SUCCESS(itemID). The Buy button's OnClick (:1292) and both model-preview TryOn paths depend on it. Native fn 0x100e28b0.",
+        "sync": "async-with-event ITEM_CACHE_REQUEST_SUCCESS",
+        "defined_in_lua": null
+      }
+    }
+  },
+  "globals": {
+    "GetAscensionDonationPoints": {
+      "callsites": ["VanityStore.lua:771", "VanityStore.lua:1965", "VanityStore.lua:1969", "VanityStore.lua:2373", "VanityStore.lua:2386", "VanityStore.lua:2499", "VanityStore.lua:2503", "VanityStore.lua:2510"],
+      "args": "()",
+      "returns": "number (DP balance; displayed via SetText and compared with >= / <=). Called in Store_Init on every OnShow -> blocking. Native _G fn 0x100cf5a0 (sibling GetAscensionSeasonalPoints 0x100cf5d0 is NOT used; SP balance comes from GetItemCount(ItemData.SEASONAL_POINTS)).",
+      "defined_in_lua": null
+    },
+    "OpenAscensionURL": {
+      "callsites": ["VanityStore.lua:990"],
+      "args": "(relativePath:string) -- \"store/payment/paypal\"",
+      "returns": "nothing; opens the system browser at ascension.gg/<path>. Native _G fn 0x10a4ece0. The shim must stub it (no-op / print) -- never send users to the real shop.",
+      "defined_in_lua": null
+    },
+    "IsSeasonalCollectionUnlocked": {
+      "callsites": ["VanityStore.lua:1307", "VanityStore.lua:1962"],
+      "args": "()",
+      "returns": "boolean (season pass owned); gates SP purchases and the locked tooltip. Native _G fn 0x103111d0.",
+      "defined_in_lua": null
+    },
+    "SendSystemMessage": {
+      "callsites": ["VanityStore.lua:2353"],
+      "args": "(text:string)",
+      "returns": "nothing. STOCK 3.3.5a native (stock-ui-tree FrameXML/ChatFrame.lua:1975 uses it); absent from api-surface.tsv only because it is stock.",
+      "defined_in_lua": null
+    },
+    "GetCustomGameMode": {
+      "callsites": ["FrameXML/Util/C_GameMode.lua:12 (transitive from VanityStore.lua:788)"],
+      "args": "()",
+      "returns": "number bitmask over Enum.GameMode. Native per api-surface; not in ext-lua-bindings.tsv.",
+      "defined_in_lua": null
+    },
+    "GetItemQuality": {
+      "callsites": ["FrameXML/Util/GlobalFunctions.lua:164 (transitive: GetInstantItemLink from VanityStore.lua:1309, Buy-button tooltip only when spCost>0 and season locked)"],
+      "args": "(itemID:number)",
+      "returns": "quality number even for uncached items. Native per api-surface.",
+      "defined_in_lua": null
+    },
+    "GetItemName": {
+      "callsites": ["FrameXML/Util/GlobalFunctions.lua:165 (transitive, same path as GetItemQuality)"],
+      "args": "(itemID:number)",
+      "returns": "name string even for uncached items, or nil. Native per api-surface.",
+      "defined_in_lua": null
+    },
+    "VanityCollectionUtil": {
+      "callsites": ["VanityStore.lua:98-99", "VanityStore.lua:468", "VanityStore.lua:475", "FrameXML/UIParent.lua:417,424", "FrameXML/Data/LiveUpdate.lua:56", "FrameXML/GameTooltip.lua:530,617"],
+      "args": "table: GetItem(itemID) memoises C_VanityCollection.GetItem; GetItemByLearnedSpell; GetOwnerByContentItem; GetSeasonalShowcaseItems; InvalidateItem(itemID|nil)",
+      "returns": "This addon ASSIGNS VanityCollectionUtil.OpenAndSearch / .OpenToCategory into the table at load (:468, :475) without creating it -> the table must already exist (on stock the shim must define it before this addon loads).",
+      "defined_in_lua": "FrameXML/Util/VanityCollectionUtil.lua:1"
+    },
+    "VanityCollection_LoadUI": {
+      "callsites": ["AddOns/Ascension_Collections/Collections.lua:71", "FrameXML/UIParent.lua:416,423"],
+      "args": "()",
+      "returns": "nothing; UIParentLoadAddOn(\"Ascension_VanityCollection\").",
+      "defined_in_lua": "FrameXML/UIParent.lua:411"
+    },
+    "OpenStoreCollectionToCategory": {
+      "callsites": ["VanityStore.lua:968", "AddOns/Ascension_SeasonCollection/SeasonRewardMixin.lua:227"],
+      "args": "(category:Enum.VanityCategory flag, searchText:string|nil)",
+      "returns": "nothing; loads the addon then VanityCollectionUtil.OpenToCategory.",
+      "defined_in_lua": "FrameXML/UIParent.lua:422"
+    },
+    "OpenStoreCollectionAndSearch": {
+      "callsites": ["FrameXML/UIParent.lua:415 (definition; no caller in the tree)"],
+      "args": "(text:string)",
+      "returns": "nothing; loads the addon then VanityCollectionUtil.OpenAndSearch.",
+      "defined_in_lua": "FrameXML/UIParent.lua:415"
+    },
+    "TryCacheItem": {
+      "callsites": ["VanityStore.lua:40"],
+      "args": "(itemID:number)",
+      "returns": "nothing; forces the item into the client cache via a hidden GameTooltip:SetHyperlink. Defined in the AscensionUI ADDON (not FrameXML) and this addon's toc does not depend on AscensionUI -- it relies on AscensionUI being a non-LoD addon loaded earlier. Called from LootQueryFrame OnUpdate every 20 frames while ItemLootQuery is non-empty (fed by CheckKnownItem, a global this addon exports at :10 for other addons). A different NATIVE C_AssetQueryService.TryCacheItem exists too.",
+      "defined_in_lua": "AddOns/AscensionUI/util.lua:8"
+    },
+    "CheckKnownItem": {
+      "callsites": ["VanityStore.lua:10 (definition; exported global for other addons)"],
+      "args": "(itemID:number)",
+      "returns": "C_VanityCollection.IsCollectionItemOwned(itemID); queues uncached items for TryCacheItem.",
+      "defined_in_lua": "AddOns/Ascension_VanityCollection/VanityStore.lua:10"
+    },
+    "GetInstantItemLink": {
+      "callsites": ["VanityStore.lua:1309"],
+      "args": "(itemID:number)",
+      "returns": "item link string; falls back to GetItemQuality/GetItemName natives + ITEM_QUALITY_COLORS[q]:WrapText when the item is not cached.",
+      "defined_in_lua": "FrameXML/Util/GlobalFunctions.lua:158"
+    },
+    "GenerateClosure": {
+      "callsites": ["VanityStore.lua:2361", "VanityStore.lua:2372", "VanityStore.lua:2374", "VanityStore.lua:2381", "VanityStore.lua:2387"],
+      "args": "(func, ...)",
+      "returns": "closure binding leading args (BuyItem, dpOnly) for the StaticPopup data.purchase callbacks.",
+      "defined_in_lua": "SharedXML/Util/FunctionUtil.lua:100"
+    },
+    "OnEventToMethod": {
+      "callsites": ["VanityStore.lua:2525"],
+      "args": "(self, event, ...)",
+      "returns": "dispatches self[event](self, ...) -- Store's OnEvent for the RegisterEvent'd events (PLAYER_ENTERING_WORLD, WEB_SHOP_PURCHASE_*).",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:87"
+    },
+    "tremoveItem": {
+      "callsites": ["VanityStore.lua:2003"],
+      "args": "(table, value)",
+      "returns": "removes first value match (table.RemoveItem alias).",
+      "defined_in_lua": "SharedXML/TypeExtensions/table.lua:46"
+    },
+    "bit.contains": {
+      "callsites": ["VanityStore.lua:235", "VanityStore.lua:246", "VanityStore.lua:693", "VanityStore.lua:788", "VanityStore.lua:1980"],
+      "args": "(x:number, y:number)",
+      "returns": "bit.band(x, y) == y; errors if x is nil -> record.group and record.flags must be numbers.",
+      "defined_in_lua": "SharedXML/TypeExtensions/bit.lua:26"
+    },
+    "Item": {
+      "callsites": ["VanityStore.lua:549", "VanityStore.lua:564", "VanityStore.lua:1294", "VanityStore.lua:1973"],
+      "args": "Item:CreateFromID(itemID) -> ItemMixin object; :ContinueOnLoad(fn(itemID)); :Query()",
+      "returns": "ItemMixin backed by ItemQueryListener (FrameXML/Objects/AsyncCallbackHandler.lua:193) -> C_AssetQueryService.TryCacheItem + ITEM_CACHE_REQUEST_SUCCESS. Item.Cache is only populated when issecure().",
+      "defined_in_lua": "FrameXML/Objects/Item.lua:8"
+    },
+    "Enum": {
+      "callsites": ["VanityStore.lua:213,223,235,246,429-441,450,453,693,734-746,788,1062-1140,1980,2357,2364,2367,2377,2384,2534-2570"],
+      "args": "Enum.VanityCategory (top-level flags Convenience=0x2000000 Mounts=0x4000000 Pets=0x8000000 Toys=0x10000000 Seasonal=0x20000000 Consumable=0x40000000 AzzarFaire=0x80000000; sub-tables Weapons/Armor/Spells/Miscellaneous/TamedPets with 0x100000-0x1000000 group bits + low item bits), Enum.VanityFlags {CannotBeDelivered=0x4, SeasonalShowcase=0x10, Consumable=0x20}, Enum.VanityCurrency {SeasonalPoints=1, DonationPoints=2, BazaarTokens=3}, Enum.GameMode {Draft=0x08, WildCard=0x40,...}, Enum.ItemQuality {Epic=4, Vanity=6, Heirloom=7}",
+      "returns": "Enum.VanityCategory.All is referenced (:450, :453) but NOT defined -> nil; see QueryItems contract.",
+      "defined_in_lua": "SharedXML/Enum.lua:935 (VanityCategory), :928 (VanityFlags), :1005 (VanityCurrency), :746 (GameMode), :146 (ItemQuality)"
+    },
+    "ItemData": {
+      "callsites": ["VanityStore.lua:771", "VanityStore.lua:958", "VanityStore.lua:1309", "VanityStore.lua:1963", "VanityStore.lua:1965", "VanityStore.lua:1967", "VanityStore.lua:2357", "VanityStore.lua:2360", "VanityStore.lua:2364", "VanityStore.lua:2371", "VanityStore.lua:2377", "VanityStore.lua:2380", "VanityStore.lua:2503", "VanityStore.lua:2510"],
+      "args": "SEASONAL_POINTS = 97397, SEASONAL_PASS = 97398, BAZAAR_TOKENS = 975001",
+      "returns": "item ids used with GetItemCount / GetItemInfo / GameTooltip:SetHyperlink(\"item:\"..id) -- these items must exist in the client item cache (custom items).",
+      "defined_in_lua": "FrameXML/Data/Items.lua:33-35"
+    },
+    "SOUNDKIT": {
+      "callsites": ["VanityStore.lua:967", "VanityStore.lua:989"],
+      "args": "SOUNDKIT.UCHATSCROLLBUTTON_70 = { 173751, 173752, 206512, 206513, 207761 } (table of numeric sound kit ids)",
+      "returns": "passed to PlaySound, which Ascension overrides in SharedXML/Util/SharedOverwrites.lua:17 to pick one numeric id and call the native _PlaySound(id).",
+      "defined_in_lua": "SharedXML/Util/SoundKit.lua:535"
+    },
+    "HelpPlate": {
+      "callsites": ["VanityStore.lua:2396-2459"],
+      "args": "HelpPlate[\"VANITY_STORE\"] = { cvar=\"HelpTipBitfield\", cvarBit=HelpTips.Bits.HelpPlate_Vanity(=4), MainTip=\"VANITY_STORE_MAIN\", <plates anchored by GLOBAL frame names StoreCollectionFrameSearchBox/Dropdown/Banner/Paper/CollectionList/ActivateStoreButton> }; Store.HelpPlateButton (HelpPlateButtonTemplate) .HelpPlate = \"VANITY_STORE\"",
+      "returns": "help-plate registry; HelpPlate.lua reads HELP_PLATE_VANITY_STORE_MAIN global string for MainTip text.",
+      "defined_in_lua": "SharedXML/HelpPlate.lua:19"
+    },
+    "HelpTips": {
+      "callsites": ["VanityStore.lua:2403", "VanityStore.lua:2461-2487"],
+      "args": "HelpTips[\"VANITY_STORE_*\"] = { targetPoint = HelpTip.Point.* }; HelpTips.Bits.HelpPlate_Vanity = 4",
+      "returns": "help-tip registry (HelpTip.Point from SharedXML/HelpTip.lua:7).",
+      "defined_in_lua": "SharedXML/HelpTip.lua:803 (HelpTips), FrameXML/HelpTips.lua:36 (HelpTips.Bits)"
+    },
+    "SearchBoxTemplate_OnTextChanged": {
+      "callsites": ["VanityStore.lua:464"],
+      "args": "(editBox)",
+      "returns": "toggles searchIcon/clearButton then InputBoxInstructions_OnTextChanged; not stock 3.3.5a.",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:281"
+    },
+    "Collections": {
+      "callsites": ["VanityStore.lua:2", "VanityStore.lua:469", "VanityStore.lua:476", "VanityStore.lua:860"],
+      "args": "frame (parent of StoreCollectionFrame); Collections:GoToTab(id); Collections.Tabs.Vanity",
+      "returns": "If Collections is nil at load, CreateFrame gets a nil parent (no error) but the panel is unreachable.",
+      "defined_in_lua": "AddOns/Ascension_Collections/Collections.xml:32 (frame), Collections.lua:181 (GoToTab), :74 (Tabs.Vanity)"
+    },
+    "WildCard": {
+      "callsites": ["VanityStore.lua:780-782"],
+      "args": "globals WildCard (frame) and WildCardDice (button) -- existence-guarded `if WildCard then`",
+      "returns": "suppresses the unlock toast while the WildCard dice are visible.",
+      "defined_in_lua": "AddOns/Ascension_WildCard/WildCard.lua:6, :386"
+    },
+    "ITEM_QUALITY_COLORS": {
+      "callsites": ["VanityStore.lua:2357", "VanityStore.lua:2364", "VanityStore.lua:2367", "VanityStore.lua:2377", "VanityStore.lua:2384"],
+      "args": "ITEM_QUALITY_COLORS[Enum.ItemQuality.Epic|Vanity]:WrapText(text)",
+      "returns": "entries are CreateColor() objects with :WrapText (SharedXML/Util/ColorUtil.lua:88), unlike stock's plain {r,g,b,hex} tables.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:144"
+    },
+    "StaticPopupDialogs.VANITY_PURCHASE": {
+      "callsites": ["VanityStore.lua:2359", "VanityStore.lua:2370", "VanityStore.lua:2379", "VanityStore.lua:2385", "VanityStore.lua:851-852", "VanityStore.lua:1457-1458", "VanityStore.lua:1886-1887"],
+      "args": "StaticPopup_Show(\"VANITY_PURCHASE\", itemLink, costText, { hasCurrency=bool, purchase=fn }); StaticPopup_Show(\"VANITY_PURCHASE_MULTI\", itemLink, costText, { hasCurrency1, purchase1, hasCurrency2, purchase2 }) (3-button: Bazaar Tokens / Cancel / Donation Points via OnAlt)",
+      "returns": "dialogs live in Ascension's FrameXML/StaticPopup.lua (not on stock) and use self.button1:SetEnabled (widget extension).",
+      "defined_in_lua": "FrameXML/StaticPopup.lua:1232, :1244"
+    },
+    "custom GlobalStrings": {
+      "callsites": ["VanityStore.lua:868,873,1002,1052-1140,1175,1236-1257,1280,1289,1310-1312,1447-1448,1608,1616,1725"],
+      "args": "NOT in stock GlobalStrings.lua (checked against rexxar-reference/stock-ui-tree): VANITY_ITEM_COLLECTION, VANITY_DELIVER, VANITY_PURCHASE, VANITY_WELCOME, VANITY_WELCOME_SUBTEXT, PREVIEW_ITEMS, PREVIEW_ITEMS_TOOLTIP, CA_FILTER_KNOWN, MANASTORM, APPEARANCES, WEAPONS, SPELL_VISUALS, SPELL_EFFECTS, SPELL_INCARNATIONS, BACKPACKS, ILLUSIONS, TAMED_PETS, COSMETICPETWHISTLESLOT, COSMETICPETSTONESLOT, COSMETICPETVELLUMSLOT, COSMETICPETWARHORNSLOT, COSMETICPETLODESTONESLOT, CONVENIENCE_ITEMS, COSMETIC_PETS, TOYS, SEASONAL, AZZAR_FAIRE, PURCHASABLE, VISIT_SEASONAL_COLLECTION_TO_UNLOCK, ITEM_ALSO_AVAILABLE_ON_AUCTIONHOUSE, APPEARANCE_TYPE_ITEM_SET, ITEM_QUALITY7_SHORT, ITEM_SUBCLASS_2_{0,1,2,3,4,5,6,7,8,10,13,15,16,18,19,20}, ITEM_SUBCLASS_4_{1,2,3,4,6}, ITEM_CLASS_0, ITEM_CLASS_15, VANITY, VANITY_TOOLTIP, HELP_PLATE_VANITY_STORE_MAIN (plus VANITY_ALREADY_OWNED / VANITY_NOT_OWNED used by GameTooltip.lua). Stock: ARMOR, SPELLS, MOUNTS, LOCKED_WITH_ITEM, INVTYPE_*, ALL, SEARCH, CLOSE, YES, CANCEL.",
+      "returns": "They are defined nowhere in the Lua tree (they ship in Ascension's MPQ GlobalStrings). LOAD-BEARING, not cosmetic: CA_FILTER_KNOWN, PURCHASABLE, ITEM_QUALITY7_SHORT and MANASTORM are used as identity keys (`data.name == CA_FILTER_KNOWN`, :1002/:1175/:1236-1257); if they are nil every filter row with a nil name matches, the Known/Heirloom/Manastorm toggles misfire and ResetFilter never clears. The shim must define all of them as distinct strings.",
+      "defined_in_lua": null
+    }
+  },
+  "widget_methods": {
+    "HookEvent": {
+      "callsites": ["VanityStore.lua:2519", "VanityStore.lua:2520"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:41"
+    },
+    "SetShown": {
+      "callsites": ["VanityStore.lua:1204", "VanityStore.lua:1217", "VanityStore.lua:1262"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28"
+    },
+    "SetEnabled": {
+      "callsites": ["VanityStore.lua:693", "VanityStore.lua:1963", "VanityStore.lua:1965", "VanityStore.lua:1967", "VanityStore.lua:1969", "VanityStore.lua:1981", "FrameXML/StaticPopup.lua:1237,1249,1250"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:13"
+    },
+    "Initialize (FilterDropDownMenuTemplate)": {
+      "callsites": ["VanityStore.lua:1273"],
+      "defined_in_lua": "SharedXML/FilterDropDown.lua (FilterDropDownMenuMixin:Initialize, last function) -> UIDropDownMenu_Initialize(self.DropDown, func, \"MENU\", 1); template FilterDropDown.xml:86 supplies .DropDown (UIDropDownMenuTemplate) and .ClearFiltersButton"
+    },
+    "ClearFilters (FilterDropDownMenuTemplate)": {
+      "callsites": ["VanityStore.lua:470", "VanityStore.lua:477", "FilterDropDown.xml:116 (ClearFiltersButton OnClick)"],
+      "defined_in_lua": "AddOns/Ascension_VanityCollection/VanityStore.lua:1043 (addon-defined method on the button)"
+    },
+    "SetText (InputBlockTextTemplate / InputBlockTextLoadingTemplate)": {
+      "callsites": ["VanityStore.lua:751", "VanityStore.lua:884", "VanityStore.lua:890", "VanityStore.lua:904", "VanityStore.lua:2506"],
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1260 (InputBlockText_SetText(self, title, subtext), installed per-instance by InputBlockText_OnLoad :1236)"
+    },
+    "SetAtlas (Texture)": {
+      "callsites": ["SharedXML/SharedPanelTemplates.xml:1257 (SearchBoxTemplate clearButton OnLoad)", "SharedXML/FilterDropDown.xml:153 (FilterDropDownMenuTemplate OnLoad)"],
+      "defined_in_lua": "SharedXML/Util/TextureUtil.lua (Lua atlas tables; transitive through the two templates this addon instantiates)"
+    },
+    "SetMotionScriptsWhileDisabled": {
+      "callsites": ["VanityStore.lua:1291"],
+      "defined_in_lua": null
+    },
+    "TryOn / SetDisplayInfo / SetCreature / SetUnit / RefreshUnit / SetCamera / SetLight / SetPosition / SetFacing / GetFacing / SetModelScale / GetModelScale / SetModel": {
+      "callsites": ["VanityStore.lua:502-554", "VanityStore.lua:1356-1360", "VanityStore.lua:1509-1514", "VanityStore.lua:1705-1718", "VanityStore.lua:2025-2029", "VanityStore.lua:2221-2226", "VanityStore.lua:2320-2324"],
+      "defined_in_lua": null
+    }
+  },
+  "events": {
+    "ASCENSION_STORE_COLLECTION_ITEM_LEARNED": {
+      "registered_at": ["VanityStore.lua:2519 (Store:HookEvent -> C_Hook)"],
+      "handler_args": "(itemId:number) -> Store:ASCENSION_STORE_COLLECTION_ITEM_LEARNED (:2492): ignored until PLAYER_ENTERING_WORLD seen; then UnlockNewItem: GetVanityItemCached(itemId), suppressed for flag 0x1000000 items when C_Player:GetLevel() <= 9 in Draft/WildCard, re-runs Store_Init + BuildStoreList (QueryItems), PlaySound(\"LEVELUP\"), shows the StoreNewItemInCollection toast with GetItemInfo(itemData.name) link/texture.",
+      "fired_by": "native (server: item learned / purchase completed). NOT listed in api-surface.tsv __EVENT__ rows (HookEvent-registered names were missed by the P0 scan)."
+    },
+    "ASCENSION_CUSTOM_POINTS_SEASONAL_POINTS_VALUE_CHANGED": {
+      "registered_at": ["VanityStore.lua:2520 (Store:HookEvent -> C_Hook)"],
+      "handler_args": "(oldPoints:number, newPoints:number) -> UpdateBalance(GetAscensionDonationPoints(), newPoints) (:2498).",
+      "fired_by": "native. NOT in api-surface.tsv."
+    },
+    "WEB_SHOP_PURCHASE_SUCCESS": {
+      "registered_at": ["VanityStore.lua:2522 (Store:RegisterEvent; dispatched by OnEventToMethod)"],
+      "handler_args": "() -> refresh balances (GetAscensionDonationPoints, GetItemCount(SEASONAL_POINTS)), hide pending blocker, show success blocker (:2509).",
+      "fired_by": "native (api-surface UNRESOLVED; no Lua C_Hook.SendEvent anywhere in the tree)."
+    },
+    "WEB_SHOP_PURCHASE_ERROR": {
+      "registered_at": ["VanityStore.lua:2523 (Store:RegisterEvent)"],
+      "handler_args": "(error:string) -> refresh balances, hide pending blocker, show failed blocker with SetText(\"Failed to purchase item.\", error) (:2502).",
+      "fired_by": "native (api-surface UNRESOLVED)."
+    },
+    "PLAYER_ENTERING_WORLD": {
+      "registered_at": ["VanityStore.lua:2521"],
+      "handler_args": "() -> self.ENTERED_WORLD = true (gate for the unlock toast).",
+      "fired_by": "native (stock)"
+    },
+    "HOT_PATCH_VANITY_COLLECTION": {
+      "registered_at": ["FrameXML/Data/LiveUpdate.lua:48 (not this addon)"],
+      "handler_args": "(itemID) -> VanityCollectionUtil.InvalidateItem(itemID); handler returns early when not issecure().",
+      "fired_by": "native (live hot-patch of a vanity record)"
+    },
+    "ITEM_CACHE_REQUEST_SUCCESS": {
+      "registered_at": ["FrameXML/Objects/AsyncCallbackHandler.lua:15 (EventRegistry; transitive via Item:ContinueOnLoad from VanityStore.lua:549, 564, 1294, 1973)"],
+      "handler_args": "(itemID:number) -> fires queued ItemMixin callbacks (Buy button confirm, DressUpModel:TryOn of contentsPreview).",
+      "fired_by": "native custom event (stock 3.3.5a has no GET_ITEM_INFO_RECEIVED); the shim must synthesise it or poll GetItemInfo."
+    },
+    "CHAT_MSG_ADDON": {
+      "registered_at": ["SharedXML/C_Hook.lua:130 (HookHandler RegisterAllEvents; re-dispatches self-whispered prefixes as C_Hook events)"],
+      "handler_args": "(prefix, msg, \"WHISPER\", sender==player) -> C_Hook:SendEvent(prefix, msg, ...)",
+      "fired_by": "native (stock); noted because the DESIGN transport can deliver EVENT lines through it"
+    }
+  },
+  "frames": [
+    "StoreCollectionFrame (parent Collections; the Collections tab panel)",
+    "StoreCollectionFrameCloseButton",
+    "StoreCollectionFrameTitleText (FontString)",
+    "StoreCollectionFrameSearchBox (SearchBoxTemplate; + $parentSearchIcon, $parentClearButton from template)",
+    "StoreCollectionFramePurchasePendingInputBlocker",
+    "StoreCollectionFramePurchaseFailedInputBlocker + StoreCollectionFramePurchaseFailedInputBlockerCloseButton",
+    "StoreCollectionFramePurchaseSuccessInputBlocker + StoreCollectionFramePurchaseSuccessInputBlockerCloseButton",
+    "StoreCollectionFrameSPCounter_Text, StoreCollectionFrameDPCounter_Text (FontStrings)",
+    "StoreCollectionFrameSPCounterHintButton, StoreCollectionFrameDPCounterHintButton",
+    "StoreCollectionFrameDropdown (FilterDropDownMenuTemplate; + StoreCollectionFrameDropdownMenu from template)",
+    "StoreCollectionFrameActivateStoreButton, StoreCollectionFrameBuyStoreButton",
+    "StoreCollectionFrameBanner (+ StoreCollectionFrameBannerTitleText, StoreCollectionFrameBannerDescText FontStrings)",
+    "StoreCollectionFramePaper, StoreCollectionFramePaperFake, StoreCollectionFramePaperFakeIcon (Store.Paper.Icon is parented to Paper_fake), StoreCollectionFramePaperItemPreview, StoreCollectionFramePaperModelPreview (DressUpModel)",
+    "StoreCollectionFrameCollectionList",
+    "StoreCollectionListFrameTitleText (FontString name used TWICE, :1720 TitleText and :1727 PageText; the second assignment wins the global)",
+    "StoreCollectionItemFrame1 .. StoreCollectionItemFrame9 (+ per frame $parentExtraCostIcon/$parentExtraCostText/$parentExtraCostIcon2/$parentExtraCostText2)",
+    "StoreCollection1TextNormal .. StoreCollection9TextNormal (FontStrings)",
+    "StoreNewItemInCollection (parent UIParent, FULLSCREEN_DIALOG unlock toast)",
+    "StoreCollectionFrameModelPreview (DressUpModel), StoreCollectionFrameModelPreviewFake (+ StoreCollectionFrameModelPreviewFakeCloseButton, StoreCollectionFrameModelPreviewFakeSpendPoints)",
+    "StoreCollectionFrameHelpPlateButton",
+    "NOTE: the addon also stores dotted pseudo-globals in _G that are NOT frame names: \"StoreCollectionItemFrameN.Button\", \".Icon\", \".BackgroundTexture\", \".PrestigeTexture\", \".IconFrame\", \".RoundBG\", \".Circle\", \".GroupIcon\", \"StoreCollectionN.TextNormal\", and per-button data \"StoreCollectionItemFrameN.Button.{SeasonalPointsCost,BazaarTokenCost,DonatePointsCost,ItemInternal,Icon,ItemName,ItemDescription,ArtWork,ArtWorkPreview,Item,PreviewData}\"; Store.Paper CostText/CostIcon/CostText2/CostIcon2 use $parent under an UNNAMED overlay frame"
+  ],
+  "stock_api_assumptions": [
+    "PlaySound(table) -- SOUNDKIT.UCHATSCROLLBUTTON_70 is a table of numeric sound-kit ids; SharedXML/Util/SharedOverwrites.lua:17 wraps PlaySound to pass one numeric id to the native. Stock 3.3.5a PlaySound takes a sound NAME string, so the shim's wrapper must map kit ids to stock names (or PlaySoundKitID where available). The addon's other PlaySound calls use stock names (igMainMenuContinue, igMainMenuOptionCheckBoxOn, igMainMenuClose, LEVELUP, igQuestListComplete).",
+    "ITEM_QUALITY_COLORS[q]:WrapText(text) -- entries must be ColorMixin objects (SharedXML/SharedConstants.lua:144 + ColorUtil.lua:88); stock entries are plain {r,g,b,hex} tables with no methods. Ascension's table has index 6 = Artifact/Vanity (Enum.ItemQuality.Vanity = 6) and 7 = Heirloom.",
+    "Frame:RegisterEvent(\"WEB_SHOP_PURCHASE_SUCCESS\"/\"..._ERROR\") with names the stock client never fires; must not error (DESIGN EventBus hooks RegisterEvent).",
+    "Button:SetEnabled(bool), Region:SetShown(bool), Region:HookEvent(name) -- metatable extensions from SharedXML/TypeExtensions (Button.lua:13, Region.lua:28/41), not stock 3.3.5a methods.",
+    "Texture:SetTexture(path) used as a boolean (`if not tex:SetTexture(...)` at :668/:1913) -- stock returns 1/nil, so this works on stock; the artwork fallback depends on it.",
+    "Button:IsEnabled() == 1 comparisons (:718, :1695, :1697, :2335) -- stock returns 1/nil (not boolean); a shim must not change IsEnabled to return true/false.",
+    "UIDropDownMenu: info.checked as a function, info.menuList/hasArrow sub-menus, info.func(self, arg1, arg2, checked), keepShownOnClick, DropDownListNButtonNCheck textures and _G[\"DropDownListN\"].numButtons -- all present in stock 3.3.5a UIDropDownMenu; the addon reaches into them directly (:1202, :1213, :1228, :1268-1269).",
+    "StaticPopup: 3-button dialogs with button3/OnAlt and OnShow(self, data) -- supported by stock StaticPopup.lua, but the VANITY_PURCHASE / VANITY_PURCHASE_MULTI definitions live in Ascension's FrameXML/StaticPopup.lua:1232-1258 and call self.button1:SetEnabled -> shim compat entry.",
+    "Item:CreateFromID(id):ContinueOnLoad(fn) / :Query() -- Ascension ItemMixin (FrameXML/Objects/Item.lua) resolves uncached items through C_AssetQueryService.TryCacheItem + ITEM_CACHE_REQUEST_SUCCESS; stock 3.3.5a has neither (no GET_ITEM_INFO_RECEIVED until 4.0). Already-cached items resolve synchronously via GetItemInfo.",
+    "SendAddonMessage(prefix, msg, \"WHISPER\", UnitName(\"player\")) -- stock; used by C_Quest:SendPathToAscensionEvent on every OnShow.",
+    "GetItemInfo(itemID) 10th return = texture, GetItemInfo(name) by cached name, GetItemQualityColor(q) -> r,g,b,hex, GetItemCount(itemID), SetPortraitToTexture, IsModifiedClick(\"CHATLINK\"), ChatEdit_InsertLink, GetCursorPosition, HideUIPanel, EditBox_ClearFocus -- stock signatures, used as stock.",
+    "SetMotionScriptsWhileDisabled(true) (:1291) -- stock 3.3.x method (stock LootFrame.xml/LFGFrame.xml use the attribute).",
+    "DressUpModel/PlayerModel/Model API: SetCreature, SetDisplayInfo, SetUnit, RefreshUnit, TryOn, SetModel(\".m2\"), SetModelScale/GetModelScale, SetPosition, SetFacing/GetFacing, SetCamera, SetLight -- stock 3.3.5a. SetCreature(101230) / SetDisplayInfo(record.creaturePreview) reference Ascension creature/display ids; on stock they render nothing but do not error.",
+    "AnimationGroup API (CreateAnimationGroup; Translation/Rotation/Scale/Alpha; SetSmoothing, SetOrigin, SetChange, SetOffset, SetDegrees, SetStartDelay, SetEndDelay, IsPlaying, Finish, OnPlay/OnStop/OnFinished) -- stock 3.3.5a.",
+    "SetCVar(\"uiScale\", \"1\") (:499) -- the addon WRITES the uiScale CVar whenever useUiScale is \"0\" and the model preview shows/hides; allowed from insecure code on stock but it is a persistent side effect on the player's settings.",
+    "GetCVar(\"HelpTipEnabled\"/\"HelpTipBitfield\") via C_CVar (HelpPlate OnShow) -- custom CVars; on stock GetCVar returns nil, which the Lua tolerates.",
+    "api-surface.tsv marks C_VanityCollection.GetItem in_stock_Wow.exe=Y -- that is a substring artifact (\"GetItem\"); there is no stock C_VanityCollection."
+  ],
+  "data_files": [
+    "Textures (MPQ-only; Interface\\AddOns\\AwAddons\\Textures\\ is NOT in the ui-tree): Collections\\StoreCollection (backdrop, shared with Collections.xml), StoreButtonBG, StoreButtonBG_AzzarFaire, StoreButtonBG_Seasonal, StoreButtonBG_Highlight, StoreCollectionRound, StoreCollectionRoundBG, prestige-icon-4, category-icon-{mounts,pets,toys,armor,weapons,featured,druid}, DragonHighlight, DP_Counter, SP_Counter, PreviewButton, PreviewButton_H, StorePaperArtwork, ShadowPaladinBar_Horizontal_Bgnd, PreviewItems\\Store_PreviewMain, PreviewMounts\\MountPreview, per-item Collections\\<record.artwork> and Collections\\PreviewItems\\<record.artwork>; progress\\LearnedSpell_TextureNormal; enchant\\Enchant_RefundButton",
+    "Other custom textures: Interface\\Store\\dp_icon, Interface\\icons\\FoxMountIcon, Interface\\icons\\inv_archaeology_70_demon_orbofinnerchaos, Interface\\icons\\Spell_Shadow_Teleport (stock), Interface\\icons\\INV_Chest_Awakening (tab icon), Interface\\LevelUp\\LevelUpTex (4.x asset), Interface\\common\\help-i and Interface\\common\\WhiteIconFrame (HelpPlate/tab), atlas textures for common-search-clearbutton and auctionhouse-ui-filter-redx (SharedXML TextureUtil atlas tables)",
+    "Models: World\\Kalimdor\\silithus\\passivedoodads\\ahnqirajglow\\quirajglow.m2 (stock), quirajglow_purple.m2 (custom), World\\Kalimdor\\orgrimmar\\passivedoodads\\orgrimmarbonfire\\orgrimmarfloatingembers.m2 (stock)",
+    "Fonts: Fonts\\FRIZQT__.TTF, Fonts\\MORPHEUS.TTF (stock); font object PTFontHighlightOutline3 (SharedXML/CustomFontStyles.xml:231)",
+    "Vanity catalogue: every C_VanityCollection record (itemid, name, quality, group bitmask, description, icon, artwork, spCost, btCost, dpCost, flags, creaturePreview display id, contentsPreview item list, owned) -- server/DBC data with no on-disk Lua source in the tree; must be generated for the shim (QueryItems is synchronous and paginated, so the catalogue needs to be client-side with only ownership coming from the server)",
+    "Item cache entries for custom currency items: 97397 Seasonal Points, 97398 Seasonal Pass, 975001 Bazaar Tokens (GetItemCount / GetItemInfo / tooltip hyperlinks); every catalogue item must be cacheable via item:<id> hyperlinks (TryCacheItem) for names, textures and links",
+    "Creature display ids: default preview creature 101230 (SetCreature) and per-record creaturePreview (SetDisplayInfo) -- Ascension CreatureDisplayInfo namespace",
+    "Sound kits: numeric ids 173751, 173752, 206512, 206513, 207761 (SOUNDKIT.UCHATSCROLLBUTTON_70)",
+    "CVars: HelpTipBitfield (bit 4 = HelpPlate_Vanity), HelpTipEnabled; Config key CONFIG_WEB_SHOP_ENABLED",
+    "Global strings listed under globals.\"custom GlobalStrings\" (Ascension GlobalStrings.lua in the MPQ; none are in the Lua tree)",
+    "Server-side: ASC_PATH_TO_ASCENSION addon-message trigger \"ACTION_OPEN_THE_VANITY_COLLECTION\"; web-shop purchase pipeline behind PurchaseWebShopItem (real money)"
+  ],
+  "protected_actions": [
+    "None of CastSpellByID / PickupSpell / SetBinding / RunMacro are called. HideUIPanel(Collections) and StaticPopup_Show are insecure-safe.",
+    "SetCVar(\"uiScale\", \"1\") at VanityStore.lua:499 -- not protected on 3.3.5a, but a real settings side effect worth neutralising in the shim.",
+    "Server transactions from insecure code: C_VanityCollection.Purchase (:754), PurchaseWebShopItem (:747, real-money DP), RequestDelivery (:719), OpenAscensionURL (:990). The shim must stub PurchaseWebShopItem -> false and OpenAscensionURL -> no-op, and make CONFIG_WEB_SHOP_ENABLED false so no UI path points at the real shop.",
+    "SendAddonMessage(\"ASC_PATH_TO_ASCENSION\", ...) on every OnShow -- harmless on stock, but it shares the self-whisper channel with the DESIGN transport (prefix ASC_PATH_TO_ASCENSION vs ASC); C_Hook re-dispatches self-whispered prefixes as events, so the shim's transport must not collide."
+  ],
+  "blocking_natives": [
+    "C_Realm.IsDevelopment -- called at file load (VanityStore.lua:1143, :2527); nil-call aborts the whole file.",
+    "GetAscensionDonationPoints -- Store_Init on every OnShow (:771).",
+    "C_VanityCollection.IsPurchaseInProgress -- Store_Init on every OnShow (:773), unguarded.",
+    "C_VanityCollection.QueryItems -- every OnShow/search/filter/page (:371); nil result is tolerated but yields an empty store.",
+    "C_VanityCollection.GetItem -- for every listed item (via VanityCollectionUtil.GetItem / GetVanityItem) and for the banner item; nil records make the buttons render blank.",
+    "C_VanityCollection.IsCollectionItemOwned -- for every listed item without an .owned field (:308) and on selection (:691, :1961).",
+    "C_VanityCollection.GetDPPrice -- for every listed item without a .dpCost field (:125) and in TryPurchaseSelectedItem (:2344).",
+    "(optional but hot) C_VanityCollection.GetRandomItem -- existence-guarded, polled every OnUpdate frame until it returns a record.",
+    "Non-native prerequisites that also block load: the Collections frame (Ascension_Collections), templates SearchBoxTemplate / FilterDropDownMenuTemplate / InputBlockTextTemplate / InputBlockTextLoadingTemplate / SharedButtonTemplate / HelpPlateButtonTemplate / StaticPopupButtonTemplate, font PTFontHighlightOutline3, Region:HookEvent + a non-recursing C_Hook, Enum.Vanity*, ItemData, the pre-existing VanityCollectionUtil table, HelpPlate/HelpTips tables, and the custom GlobalStrings (CA_FILTER_KNOWN etc.)."
+  ],
+  "notes": "SCOPE: the Vanity Collection store is a Collections-panel tab (StoreCollectionFrame) that browses a server-defined catalogue of cosmetic items (9 per page), previews them on a DressUpModel, delivers owned ones, and purchases with Seasonal Points (item 97397), Bazaar Tokens (item 975001) or Donation Points (real money web shop). It is out of scope for the first CA-focused release but is cheap to keep loadable. LOAD ORDER: LoadOnDemand, depends only on Ascension_Collections (itself LoD, no deps); loaded by VanityCollection_LoadUI from the Collections tab preClick. Two globals it needs come from ADDONS, not FrameXML: TryCacheItem (AscensionUI/util.lua) and WildCard/WildCardDice (guarded). It ASSIGNS into VanityCollectionUtil (FrameXML/Util/VanityCollectionUtil.lua) at load, so that table must pre-exist in the shim. C_HOOK TRAP: Store:HookEvent at :2519/:2520 runs at load time and goes through C_Hook:Register, whose `if not issecure()` branch is a SetAttribute trampoline that expects the OnAttributeChanged handler to be secure; inside an addon on a stock client it never is, so it recurses forever. Ship C_Hook with issecure() forced true for the shim (also unblocks Item.Cache, LiveUpdate HOT_PATCH handling and C_Player.pvePower which are all issecure()-gated). NATIVE CONTRACTS: records are strict -- group, flags, spCost, btCost, creaturePreview must be numbers, description a string; dpCost and contentsPreview optional; icon is a bare file name. QueryItems receives categoryFlags = nil in the default state because Enum.VanityCategory.All does not exist (only Weapons.All), so nil must mean 'all'; filterFlags default is Owned (0x1) because Store_Init forces Known=true on every OnShow; the 4th positional arg is always the literal 1. Store.GroupIcons is keyed by legacy small ints (3,4,5,7,8,15-18) while record.group is a bitmask, so the group icon always falls back to category-icon-featured -- do not 'fix' data to match. STRINGS: ~50 custom GlobalStrings are absent from the Lua tree and from stock GlobalStrings.lua; four of them (CA_FILTER_KNOWN, PURCHASABLE, ITEM_QUALITY7_SHORT, MANASTORM) are used as filter identity keys, so nil breaks filtering logically, not just visually. EVENTS: two are registered by name through C_Hook (ASCENSION_STORE_COLLECTION_ITEM_LEARNED(itemId), ASCENSION_CUSTOM_POINTS_SEASONAL_POINTS_VALUE_CHANGED(old,new)) and were MISSED by the P0 __EVENT__ inventory; two by RegisterEvent (WEB_SHOP_PURCHASE_SUCCESS(), WEB_SHOP_PURCHASE_ERROR(text)). The shim EventBus can fire them either via Frame OnEvent or C_Hook:SendEvent. The unlock toast is gated on PLAYER_ENTERING_WORLD having been seen by the Store frame after the LoD load. INVENTORY GAPS: C_VanityCollection is absent from ext-lua-bindings.tsv altogether (its natives surface there as C_CharacterCustomizationUnlocks.RequestDelivery/PurchaseWebShopItem/IsConsolidatedVanityBuff and _G RequestDeliverVanityCollectionItem/GetAscensionSeasonalPoints), so derive contracts from this file, not the dump; GetCustomGameMode/GetItemQuality/GetItemName/IsSeasonalCollectionUnlocked(present)/GetAscensionDonationPoints(present) likewise. SendSystemMessage is stock. WIRE PROTOCOL: DESIGN section 5 has no vanity verbs; a faithful shim needs VANITY OWNED (fragmented id set, KNOWN-style), VANITY DELIVER <id>, VANITY PURCHASE <id> <currency> with RESULT and EVENT ASCENSION_STORE_COLLECTION_ITEM_LEARNED, plus balances (DP can be a constant 0; SP/BT are GetItemCount of real items). QueryItems/GetItem/GetRandomItem/GetDPPrice are synchronous, so the catalogue must be a generated data/*.lua table and only ownership is server state. DP/web-shop paths must be stubbed off (PurchaseWebShopItem -> false, OpenAscensionURL -> no-op, CONFIG_WEB_SHOP_ENABLED -> false). ItemMixin:ContinueOnLoad needs a stock replacement for ITEM_CACHE_REQUEST_SUCCESS (tooltip-driven TryCacheItem + GetItemInfo polling) or the Buy button silently does nothing for uncached items. QUIRKS: the global FontString name StoreCollectionListFrameTitleText is used twice; the addon stores dotted pseudo-globals like _G[\"StoreCollectionItemFrame1.Button\"] (not frame names); Store OnUpdate polls GetRandomItem every frame while the banner is hidden and re-Shows the DressUpModel every 5 frames (HackFix); the model-preview position fix WRITES SetCVar(\"uiScale\",\"1\") when useUiScale is off. The Collections tab id for Vanity is positional and shifts with C_Player:IsHero() and IsCustomClass(); always address it as Collections.Tabs.Vanity."
+}

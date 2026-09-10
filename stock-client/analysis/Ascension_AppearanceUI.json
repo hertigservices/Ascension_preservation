@@ -1,0 +1,621 @@
+{
+  "target": "Ascension_AppearanceUI",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": ["Ascension_Collections"],
+    "saved_variables": [],
+    "files_in_order": [
+      "AppearanceTemplates.xml",
+      "AppearanceTemplates.xml -> AppearanceCategoryTabMixin.lua",
+      "AppearanceTemplates.xml -> AppearanceModelMixin.lua",
+      "AppearanceTemplates.xml -> AppearanceCategoryTabMixin.lua (listed twice in the XML; harmless re-execution)",
+      "AppearanceTemplates.xml -> AppearanceCategorySlotButtonMixin.lua",
+      "AppearanceUI.xml",
+      "AppearanceUI.xml -> AppearanceWardrobeMixin.lua",
+      "AppearanceUI.xml -> AppearanceCollectionMixin.lua",
+      "AppearanceUI.xml -> AppearancePlayerModelMixin.lua",
+      "AppearanceUI.xml -> AppearanceUI.lua",
+      "AppearanceUI.xml -> <Frame name=\"AppearanceWardrobeFrame\" parent=\"Collections\"> (OnLoad runs MixinAndLoadScripts for the three mixins)"
+    ]
+  },
+  "entry_points": [
+    "Collections tab: AddOns/Ascension_Collections/Collections.lua:88-92 does tab = self:AddTab(WARDROBE, \"AppearanceWardrobeFrame\"); tab:SetPreClick(AppearanceUI_LoadUI); Collections.Tabs.Wardrobe = tab:GetTabID(). The tab id is dynamic (6th tab normally; earlier when HeroArchitect/SkillCards/MysticEnchants tabs are absent). The panel is resolved by global NAME at select time (TabSystemMixin:GetPanelForTabID -> _G[\"AppearanceWardrobeFrame\"]), so the addon must be loaded before the tab is selected; SetPreClick guarantees that on click, GoToTab does NOT (see notes).",
+    "LoadUI: FrameXML/UIParent.lua:407 function AppearanceUI_LoadUI() UIParentLoadAddOn(\"Ascension_AppearanceUI\") end (asc-fx helper; must exist in the shim's compat/FrameXML).",
+    "FrameXML/UIParent.lua:567 ShowAppearanceWardrobe() -> Collections:GoToTab(Collections.Tabs.Wardrobe); registered as a gossip redirect for transmogrifier NPCs 190015, 1002087, 79027 (UIParent.lua:1195-1197 via C_Gossip:RedirectNPC).",
+    "FrameXML/UIParent.lua:571 ShowAppearanceCategory(appearanceType, categoryID) -> GoToTab(Wardrobe) + AppearanceUI.OpenCategory(appearanceType, categoryID).",
+    "FrameXML/UIParent.lua:576 TryOnAppearance(appearanceType, categoryID, appearanceID, itemName) -> GoToTab(Wardrobe) + AppearanceUI.OpenToTryOn(...). Fired natively by event UNLOCKED_APPEARANCE_ITEM_USED (UIParent.lua:1783: TryOnAppearance(arg2, arg1, arg3, arg4) i.e. payload order is categoryID, appearanceType, appearanceID, itemName).",
+    "Public Lua API on the addon-private table exposed as global AppearanceUI (AppearanceUI.lua): OpenCategory(appearanceType, categoryID), OpenToTryOn(appearanceType, categoryID, appearanceID, itemName), OpenToItemSet(itemSetNameOrID), OpenToOutfits(). Also CallbackRegistry events \"OnAppearanceTypeSelected\", \"OnCategorySelected\" (AppearanceUI:RegisterCallback).",
+    "Collections itself is toggled by ToggleCollections() (UIParent.lua:655, wired to the micro button in FrameXML/MainMenuBarMicroButtons.xml:265) and registered in UIPanelWindows[\"Collections\"] (UIParent.lua:57). No slash command opens the wardrobe.",
+    "HelpTip \"WARDROBE_CHANGE_TRANSMOG\" (FrameXML/HelpTips.lua:528) anchors to the global frame AppearanceWardrobeFrameDisableTransmogButton and is shown from AppearanceWardrobeMixin:OnShow."
+  ],
+  "namespaces": {
+    "C_Appearance": {
+      "_dump_note": "In ext-lua-bindings.tsv every C_Appearance.* function used here is listed under namespace C_AppearanceCollection (site_va 0x100cd9d3..0x100cdb7f). The dump's namespace column lags one namespace behind for the whole 0x100cd86a..0x100cdedf registration block; cross-check by function NAME. p0-framexml-gap.json therefore mis-files these 23 as ns_unknown; they ARE native (Extensions.dll).",
+      "GetAppearanceDisplayInfo": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:197", "AppearanceModelMixin.lua:197", "AppearanceModelMixin.lua:451", "AppearanceModelMixin.lua:514", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:54", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:60", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:97", "ui-tree/Interface/FrameXML/UIParent.lua:1786", "ui-tree/Interface/SharedXML/Util/HyperlinkUtil.lua:338"],
+        "args": "(appearanceID:number|nil)  -- MUST tolerate nil (AppearanceUtil.GetCategoryDisplayID passes nil when a category has no current/pending appearance)",
+        "returns": "6 values: displayType:string one of APPEARANCE_DISPLAY_TYPE_ITEM | _CREATURE | _ITEM_ENCHANT | _SPELL | _STATIC_SPELL_VISUAL | _ANIMATED_SPELL_VISUAL | _OUTFIT | _ITEM_SET (nil -> caller hides the model); displayID:number (item entry for ITEM; creature ENTRY id, not CreatureDisplayInfo, for CREATURE because it is fed to Model:SetCreature via SetDisplayInfo; enchant/illusion id for ITEM_ENCHANT; spellID for SPELL/*_SPELL_VISUAL; item-set id for ITEM_SET); uiCamera:number|nil (UICamera id for ApplyUICamera); displayName:string|nil; entry:any (opaque, passed back into GetAlternativeIDs); spellVisualID:number|nil (2nd arg to Model:SetSpellVisual/SetSpell)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingAppearance": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:103", "AppearanceCategorySlotButtonMixin.lua:178", "AppearanceCategorySlotButtonMixin.lua:194", "AppearanceModelMixin.lua:104", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:53", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:59", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:65"],
+        "args": "(categoryID:number)",
+        "returns": "appearanceID:number|nil; 0 is a real value meaning 'pending removal of the current transmog' (pendingAppearanceID == 0 -> undo icon); nil = nothing pending",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAppearanceForCategory": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:110", "AppearanceCategorySlotButtonMixin.lua:181", "AppearanceCategorySlotButtonMixin.lua:195", "AppearanceCategorySlotButtonMixin.lua:218", "AppearanceModelMixin.lua:103", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:53", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:59", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:65"],
+        "args": "(categoryID:number)",
+        "returns": "appearanceID:number|nil = the transmog currently APPLIED in that category (nil = slot shows its real item)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetPendingAppearance": {
+        "callsites": ["AppearanceUI.lua:21", "AppearanceCategorySlotButtonMixin.lua:183", "AppearanceModelMixin.lua:584"],
+        "args": "(categoryID:number, appearanceID:number)  -- appearanceID 0 = 'remove current transmog' (SlotButton:183)",
+        "returns": "nothing; the UI only refreshes through the PENDING_APPEARANCE_CHANGED event, so the implementation must fire it",
+        "sync": "sync (fires PENDING_APPEARANCE_CHANGED)",
+        "defined_in_lua": null
+      },
+      "ClearPendingAppearance": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:180"],
+        "args": "(categoryID:number)",
+        "returns": "nothing; must fire PENDING_APPEARANCE_CHANGED",
+        "sync": "sync (fires PENDING_APPEARANCE_CHANGED)",
+        "defined_in_lua": null
+      },
+      "ClearPendingAppearances": {
+        "callsites": ["AppearanceUI.xml:98"],
+        "args": "()",
+        "returns": "nothing; must fire PENDING_APPEARANCE_CHANGED (Cancel button)",
+        "sync": "sync (fires PENDING_APPEARANCE_CHANGED)",
+        "defined_in_lua": null
+      },
+      "ClearInvalidPendingAppearances": {
+        "callsites": ["AppearanceUI.xml:83"],
+        "args": "()",
+        "returns": "nothing; drops every pending entry for which CanSetAppearance is false; must fire PENDING_APPEARANCE_CHANGED",
+        "sync": "sync (fires PENDING_APPEARANCE_CHANGED)",
+        "defined_in_lua": null
+      },
+      "HasPendingAppearances": {
+        "callsites": ["AppearancePlayerModelMixin.lua:346"],
+        "args": "()",
+        "returns": "boolean (drives Apply/Cancel/SaveOutfit button visibility)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanApplyPendingAppearances": {
+        "callsites": ["AppearancePlayerModelMixin.lua:348"],
+        "args": "()",
+        "returns": "canApply:boolean, reason:string|nil (reason is looked up as _G[reason] or shown raw in ApplyError)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ApplyPendingAppearances": {
+        "callsites": ["AppearanceUI.xml:69", "ui-tree/Interface/FrameXML/StaticPopup.lua:258"],
+        "args": "(confirmedCosmeticPet:boolean)  -- Apply button passes false; CONFIRM_APPLY_COSMETIC_PET popup passes true",
+        "returns": "nothing; the button disables itself and waits for APPLY_PENDING_APPEARANCE_RESULT(applied:boolean, result:string); result == \"APPLY_APPEARANCES_COSMETIC_PET_APPEARANCE_CONFIRMATION\" with applied=false opens the confirmation popup",
+        "sync": "async-with-event APPLY_PENDING_APPEARANCE_RESULT",
+        "defined_in_lua": null
+      },
+      "CanSetAppearance": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:107", "AppearanceCategorySlotButtonMixin.lua:211", "AppearanceModelMixin.lua:199"],
+        "args": "(categoryID:number, appearanceID:number)",
+        "returns": "canApply:boolean, reason:string|nil (GlobalStrings key or text; shown via _G[reason] or reason)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSeeAppearances": {
+        "callsites": ["AppearanceWardrobeMixin.lua:13", "AppearanceWardrobeMixin.lua:26", "AppearanceWardrobeMixin.lua:39"],
+        "args": "()",
+        "returns": "canSeeItemTransmog:boolean, canSeeSpellTransmog:boolean (player preference: show other players' transmogs / spell visuals)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetCanSeeAppearances": {
+        "callsites": ["AppearanceWardrobeMixin.lua:28", "AppearanceWardrobeMixin.lua:41"],
+        "args": "(canSeeItemTransmog:boolean, canSeeSpellTransmog:boolean)",
+        "returns": "nothing (persisted per character; presumably server-side)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAppearanceWebURL": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:132", "AppearanceModelMixin.lua:288", "AppearanceModelMixin.lua:553", "AppearanceModelMixin.lua:630"],
+        "args": "(appearanceID:number)",
+        "returns": "url:string|nil (web-store link; nil hides the store corner button). Shim: always nil.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsEtherealBazaarAppearance": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:149", "AppearanceModelMixin.lua:292", "AppearanceModelMixin.lua:557", "AppearanceModelMixin.lua:626"],
+        "args": "(appearanceID:number)",
+        "returns": "boolean. Shim: false.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEtherealBazaarWebURL": {
+        "callsites": ["AppearanceModelMixin.lua:294"],
+        "args": "()",
+        "returns": "url:string|nil",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetItemAppearanceID": {
+        "callsites": ["AppearanceModelMixin.lua:108"],
+        "args": "(itemID:number)  -- the equipped item's entry from GetInventoryItemTrueID",
+        "returns": "appearanceID:number|nil (compared against model.appearanceID to draw the 'currently equipped' gold border)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCreatureDisplayItems": {
+        "callsites": ["AppearanceModelMixin.lua:329", "AppearancePlayerModelMixin.lua:329"],
+        "args": "(appearanceID:number)",
+        "returns": "array of itemIDs to TryOn onto the creature model (ipairs; nil or empty allowed)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTransmogable": {
+        "callsites": ["AppearanceModelMixin.lua:583"],
+        "args": "(categoryID:number, appearanceID:number)",
+        "returns": "boolean; false silently ignores the click",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAppearanceDetails": {
+        "callsites": ["AppearanceModelMixin.lua:634"],
+        "args": "(appearanceID:number)",
+        "returns": "string|nil extra tooltip line (wrapped)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAlternativeIDs": {
+        "callsites": ["AppearanceModelMixin.lua:639"],
+        "args": "(appearanceID:number, entry:any)  -- entry is the 5th return of GetAppearanceDisplayInfo",
+        "returns": "array of itemIDs sharing the appearance (ipairs; nil or {} allowed); names via GetItemName, colours via GetItemQuality",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetActiveDiscount": {
+        "callsites": ["AppearanceModelMixin.lua:689"],
+        "args": "(appearanceID:number)",
+        "returns": "discount:any-truthy|nil, url:string|nil (Discount badge SetShown(discount)). Shim: nil, nil.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAppearanceItemSet": {
+        "callsites": ["AppearanceModelMixin.lua:698"],
+        "args": "(appearanceID:number|nil)  -- MUST tolerate nil (called for outfit tiles)",
+        "returns": "setName:string|nil; the name is later passed to AppearanceUI.OpenToItemSet and typed into the search box",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AppearanceCollection": {
+      "_dump_note": "Matches the dump's FIRST C_AppearanceCollection run (site_va 0x100cd86a..0x100cd91a).",
+      "GetAppearanceTypes": {
+        "callsites": ["AppearanceCollectionMixin.lua:99"],
+        "args": "()",
+        "returns": "array of appearance-type tokens (strings) in tab order, e.g. APPEARANCE_TYPE_NONE, _ITEM, _ILLUSION, _ITEM_SET, _OUTFIT, _INCARNATION, _SPELL_VISUAL, _COSMETIC_PET, _COSMETIC, _MOUNT, _COMPANION, _TOY (NONE and ILLUSION are skipped as tabs; ILLUSION categories are folded into the ITEM tab). Iterated with ipairs -> must be a table. Tab label = _G[token] or token.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategoriesForType": {
+        "callsites": ["AppearanceUI.lua:25", "AppearanceUI.lua:40", "AppearanceCollectionMixin.lua:226", "AppearanceCollectionMixin.lua:228", "AppearancePlayerModelMixin.lua:249", "AppearancePlayerModelMixin.lua:251"],
+        "args": "(appearanceType:string)",
+        "returns": "array of categoryIDs (ipairs, unguarded at Collection:240 -> must be a table, may be empty). Item categories are fixed ids 1..16 (AppearanceUtil.lua: 1 head,2 shoulder,3 back,4 chest,5 tabard,6 shirt,7 wrist,8 hands,9 waist,10 legs,11 feet,12 ranged,13 main hand,14 off hand,15 MH illusion,16 OH illusion); ITEM_SET/OUTFIT/MOUNT/COMPANION/TOY types have exactly one category (tabs hidden); INCARNATION expects 9+ categories (layout splits at index 9).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategoryInfo": {
+        "callsites": ["AppearanceCategorySlotButtonMixin.lua:67", "AppearanceCategorySlotButtonMixin.lua:170", "AppearanceCategorySlotButtonMixin.lua:192", "AppearanceCollectionMixin.lua:241", "AppearanceCollectionMixin.lua:253"],
+        "args": "(categoryID:number)",
+        "returns": "name:string, icon:string (icon NAME, callers prepend Interface\\\\Icons\\\\), appearanceType:string (3rd return, select(3,...) at SlotButton:170)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ApplyCategoryFilter": {
+        "callsites": ["AppearanceCollectionMixin.lua:276"],
+        "args": "(categoryID:number, searchText:string (already trimmed, may be \"\"), filter:table, sorting:table). filter = FilterDropDownButtonMixin:GetFilter() -> {[filterKey:string]=boolean} using keys FILTER_COLLECTED, FILTER_UNCOLLECTED, FILTER_AVAILABLE_ON_THE_WEB_STORE, FILTER_AVAILABLE_ON_THE_ETHEREAL_BAZAAR, FILTER_ITEM_QUALITY_POOR..HEIRLOOM, FILTER_INVTYPE_MAINHAND/OFFHAND/HOLDABLE, FILTER_WEAPON_AXE/AXE2/BOW/GUN/MACE/MACE2/POLEARM/SWORD/SWORD2/STAFF/FIST/DAGGER/SPEAR/CROSSBOW/WAND/FISHING_POLE/THROWN, FILTER_ARMOR_CLOTH/LEATHER/MAIL/PLATE/SHIELD; an empty table {} (local DefaultFilter) means no filter. sorting = single-option table {[sortKey]=true} with one of SORT_RECENTLY_COLLECTED_DESC/ASC, SORT_ALPHABETICAL_ASC/DESC, SORT_ID_ASC/DESC, or {} for default order.",
+        "returns": "nothing; establishes the native 'current category view' that GetCategoryMaxPages/GetCategoryAppearances/GetCollectedCount then read",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCollectedCount": {
+        "callsites": ["AppearanceCollectionMixin.lua:277"],
+        "args": "(categoryID:number)",
+        "returns": "collected:number, numAppearances:number (progress bar 'Collected X / Y'; used as SetMinMaxValues(0, numAppearances))",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategoryMaxPages": {
+        "callsites": ["AppearanceCollectionMixin.lua:284"],
+        "args": "()  -- implicit: the view set by the last ApplyCategoryFilter",
+        "returns": "number >= 1 (page size is 18 tiles: Item1..Item18)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategoryAppearances": {
+        "callsites": ["AppearanceCollectionMixin.lua:398"],
+        "args": "(page:number 1-based)  -- implicit: the current view",
+        "returns": "array indexed 1..18 (holes allowed -> tile hidden). For ITEM/ILLUSION/INCARNATION/... types: appearanceIDs (numbers). For APPEARANCE_TYPE_ITEM_SET: appearanceIDs whose display type is ITEM_SET. For APPEARANCE_TYPE_OUTFIT: outfit NAMES (strings) with the sentinel string NEW_OUTFIT as the 'create new outfit' tile (model:SetOutfitDisplay(name, categoryID)).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsAppearanceCollected": {
+        "callsites": ["AppearanceModelMixin.lua:205", "AppearanceModelMixin.lua:566", "AppearanceModelMixin.lua:569", "AppearanceModelMixin.lua:594"],
+        "args": "(appearanceID:number)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AppearanceOutfit": {
+      "_dump_note": "Listed in ext-lua-bindings.tsv under namespace C_Appearance (site_va 0x100cdc3a..0x100cdc8a: GetAppearanceOutfits, GetOutfitInfo, SetPendingOutfit, SaveOutfit, DeleteOutfit, GetCurrentOutfitName). SaveOutfit/DeleteOutfit are called from FrameXML/StaticPopup.lua:330,341,355 (compat layer), not from this addon.",
+      "GetCurrentOutfitName": {
+        "callsites": ["AppearanceModelMixin.lua:142", "AppearanceModelMixin.lua:600", "AppearancePlayerModelMixin.lua:376"],
+        "args": "()",
+        "returns": "outfitName:string|nil (nil = current appearance matches no saved outfit; shows the Save Outfit button)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetOutfitInfo": {
+        "callsites": ["AppearanceModelMixin.lua:446", "AppearanceModelMixin.lua:593"],
+        "args": "(outfitName:string)",
+        "returns": "table {[categoryID:number] = appearanceID:number} iterated with pairs (0 = empty slot)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetPendingOutfit": {
+        "callsites": ["AppearanceModelMixin.lua:602"],
+        "args": "(outfitName:string)",
+        "returns": "nothing; loads the outfit into the pending set; must fire PENDING_APPEARANCE_CHANGED",
+        "sync": "sync (fires PENDING_APPEARANCE_CHANGED)",
+        "defined_in_lua": null
+      }
+    },
+    "C_ItemSet": {
+      "_dump_note": "Listed in ext-lua-bindings.tsv under namespace C_Item (site_va 0x100cde0a..0x100cde2a: GetAppearances, GetSetName, GetItemSetNumCollected).",
+      "GetAppearances": {
+        "callsites": ["AppearanceModelMixin.lua:505", "AppearanceModelMixin.lua:568"],
+        "args": "(itemSetDisplayID:number)  -- the displayID of an ITEM_SET-type appearance",
+        "returns": "table {[slotID:INVSLOT] = appearanceID} iterated with pairs; 0 = no piece; nil -> C_Logger.Error and abort",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetItemSetNumCollected": {
+        "callsites": ["AppearanceModelMixin.lua:202", "AppearanceModelMixin.lua:547"],
+        "args": "(itemSetDisplayID:number)",
+        "returns": "numCollected:number, numPieces:number (isCollected = numCollected/numPieces; partial sets get a grey 'uncollected' border)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetItemSetName": {
+        "callsites": ["AppearanceUI.lua:32"],
+        "args": "(setID:number)",
+        "returns": "setName:string. UNRESOLVED in api-surface.tsv and absent from the dump, which has C_ItemSet.GetSetName instead -> latent nil-call bug in the live client, reachable only when OpenToItemSet is called with a number (the in-addon caller passes the string from GetAppearanceItemSet). Shim: define it as an alias of GetSetName.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_UICamera": {
+      "_dump_note": "Listed in ext-lua-bindings.tsv under namespace C_ItemSet (site_va 0x100cdecf GetCameraInfo, 0x100cdedf GetItemCameraID).",
+      "GetItemCameraID": {
+        "callsites": ["AppearanceModelMixin.lua:366"],
+        "args": "(itemID:number)",
+        "returns": "cameraID:number|nil (illusion preview camera for the equipped weapon)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCameraInfo": {
+        "callsites": ["ui-tree/Interface/SharedXML/TypeExtensions/Model.lua:37 (transitive: Model:ApplyUICamera, called from AppearanceModelMixin.lua:278,312,343,351,375)"],
+        "args": "(cameraID:number)",
+        "returns": "x:number, y:number, z:number, facing:number, anim:number|nil (nil x -> camera ignored). Data source is UICamera.dbc-style rows; shim can ship a generated table.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Config": {
+      "GetBoolConfig": {
+        "callsites": ["AppearanceCollectionMixin.lua:44"],
+        "args": "(key:string)  -- \"CONFIG_THROWN_WEAPON_APPEARANCES_ENABLED\"",
+        "returns": "boolean (gates the Thrown filter option on the ranged category). Shim: false.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["AppearanceModelMixin.lua:324", "AppearanceModelMixin.lua:507", "AppearanceModelMixin.lua:647"],
+        "args": "(fmt:string, ...)  -- printf-style",
+        "returns": "nothing (return value of the :507 call is returned upward but ignored)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AssetQueryService": {
+      "_note": "Transitive through FrameXML/Objects/AsyncCallbackHandler.lua (ItemQueryListener/CreatureQueryListener). Called at THIS addon's file scope: AppearanceModelMixin.lua:23 ItemQueryListener:AddCallback({135522,135548,135550,135549}, nop) -> MainHandler:QueryAsset -> TryCacheItem for each id, at load time.",
+      "TryCacheItem": {
+        "callsites": ["ui-tree/Interface/FrameXML/Objects/AsyncCallbackHandler.lua:42 (from AppearanceModelMixin.lua:23 at load; :281,:305,:336,:368 via Item:CancelableContinueOnLoad; :462,:526 via ItemQueryListener:AddCancelableCallback)"],
+        "args": "(itemID:number)",
+        "returns": "boolean (true = request issued/already cached). Completion is signalled by the native event ITEM_CACHE_REQUEST_SUCCESS(itemID) consumed by AsyncCallbackHandler.lua:15 via EventRegistry.",
+        "sync": "async-with-event ITEM_CACHE_REQUEST_SUCCESS",
+        "defined_in_lua": null
+      },
+      "TryCacheCreature": {
+        "callsites": ["ui-tree/Interface/FrameXML/Objects/AsyncCallbackHandler.lua:46 (from SharedXML/TypeExtensions/Model.lua:23 SetDisplayInfo, used at AppearanceModelMixin.lua:301,328,363 and AppearancePlayerModelMixin.lua:327)"],
+        "args": "(creatureID:number)",
+        "returns": "boolean; completion via native event CREATURE_CACHE_REQUEST_SUCCESS(creatureID)",
+        "sync": "async-with-event CREATURE_CACHE_REQUEST_SUCCESS",
+        "defined_in_lua": null
+      }
+    },
+    "C_AccountInfo": {
+      "GetGMLevel": {
+        "callsites": ["ui-tree/Interface/FrameXML/Util/C_Player.lua:44 (transitive: C_Player:IsGM, called at AppearanceModelMixin.lua:566,592,654,674)"],
+        "args": "()",
+        "returns": "number; >0 enables ctrl-click '.collection appearance add' GM shortcut and ID lines in tooltips. Shim: 0.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Player": {
+      "IsGM": {
+        "callsites": ["AppearanceModelMixin.lua:566", "AppearanceModelMixin.lua:592", "AppearanceModelMixin.lua:654", "AppearanceModelMixin.lua:674"],
+        "args": "() called with colon syntax C_Player:IsGM()",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": "ui-tree/Interface/FrameXML/Util/C_Player.lua:43 (wraps native C_AccountInfo.GetGMLevel)"
+      }
+    }
+  },
+  "globals": {
+    "GetItemIconInstant": {
+      "callsites": ["AppearanceCategorySlotButtonMixin.lua:82", "ui-tree/Interface/FrameXML/Objects/Item.lua:110"],
+      "args": "(itemID:number)",
+      "returns": "icon file NAME without path (caller prepends Interface\\\\Icons\\\\) or nil -> INV_Misc_QuestionMark; works without the item being in the client cache (reads item template data natively)",
+      "defined_in_lua": null
+    },
+    "GetItemQuality": {
+      "callsites": ["AppearanceCategorySlotButtonMixin.lua:201", "AppearanceModelMixin.lua:611", "AppearanceModelMixin.lua:650"],
+      "args": "(itemID:number)",
+      "returns": "quality index 0..7 or nil (indexes ITEM_QUALITY_COLORS); instant, no cache needed",
+      "defined_in_lua": null
+    },
+    "GetItemInventoryType": {
+      "callsites": ["AppearanceModelMixin.lua:262", "AppearanceModelMixin.lua:667", "AppearanceModelMixin.lua:668"],
+      "args": "(itemID:number)",
+      "returns": "inventoryType index (0..28, DBC InventoryType) used as key into INVTYPE_INDEX_TO_SLOT / INVTYPE_INDEX_TO_STRING (FrameXML/Constants.lua:447,479); instant",
+      "defined_in_lua": null
+    },
+    "GetItemName": {
+      "callsites": ["AppearanceModelMixin.lua:645", "ui-tree/Interface/FrameXML/Objects/Item.lua:95"],
+      "args": "(itemID:number)",
+      "returns": "name:string|nil; instant",
+      "defined_in_lua": null
+    },
+    "GetItemTemplate": {
+      "callsites": ["AppearanceModelMixin.lua:663"],
+      "args": "(itemID:number)",
+      "returns": "table|nil; only field read here is .DisplayInfoID (GM tooltip)",
+      "defined_in_lua": null
+    },
+    "GetItemClassID": {
+      "callsites": ["AppearanceModelMixin.lua:669"],
+      "args": "(itemID:number)",
+      "returns": "number (GM tooltip only)",
+      "defined_in_lua": null
+    },
+    "GetItemSubClassID": {
+      "callsites": ["AppearanceModelMixin.lua:670"],
+      "args": "(itemID:number)",
+      "returns": "number (GM tooltip only)",
+      "defined_in_lua": null
+    },
+    "SetModelApplyComponents": {
+      "callsites": ["AppearanceModelMixin.lua:270", "AppearanceModelMixin.lua:272", "AppearanceModelMixin.lua:383", "AppearanceModelMixin.lua:385", "AppearanceModelMixin.lua:399", "AppearanceModelMixin.lua:401", "AppearanceModelMixin.lua:422", "AppearanceModelMixin.lua:425", "AppearanceModelMixin.lua:495", "AppearanceModelMixin.lua:498", "AppearancePlayerModelMixin.lua:97", "AppearancePlayerModelMixin.lua:99"],
+      "args": "(apply:boolean)  -- global toggle; pattern is SetModelApplyComponents(false); model:SetUnit(\"player\"); [model:Undress()]; SetModelApplyComponents(true)",
+      "returns": "nothing; while false, Model:SetUnit does not dress the model in the unit's equipment. Shim: no-op + rely on the explicit Undress() (DisplayItem/DisplayStaticSpell/DisplayAnimatedSpell do NOT call Undress themselves but TryOnTransmogGear does, so it is safe).",
+      "defined_in_lua": null
+    },
+    "GetCreatureTemplate": {
+      "callsites": ["ui-tree/Interface/FrameXML/Objects/Creature.lua:30 (transitive: CreatureMixin:IsCached, from SetDisplayInfo at AppearanceModelMixin.lua:301,328,363 and AppearancePlayerModelMixin.lua:327)"],
+      "args": "(creatureID:number)",
+      "returns": "table|nil (nil = not cached -> TryCacheCreature path). Shim: return {} when the creature is known/cached or just always {} and let Model:SetCreature do the stock query.",
+      "defined_in_lua": null
+    },
+    "OpenAscensionURL": {
+      "callsites": ["ui-tree/Interface/FrameXML/StaticPopup.lua:270 (transitive: OPEN_ASCENSION_URL popup shown from AppearanceTemplates.xml:17,260,608)"],
+      "args": "(url:string)",
+      "returns": "nothing (opens the OS browser). Only reachable when a web URL exists; shim: no-op.",
+      "defined_in_lua": null
+    },
+    "AppearanceUtil": {
+      "callsites": ["AppearanceCategorySlotButtonMixin.lua:49,51,66", "AppearanceCollectionMixin.lua:251", "AppearanceModelMixin.lua:106,364,464,473,579", "AppearancePlayerModelMixin.lua:73,160,196,200,204,235,328"],
+      "args": "GetCategorySlotID(categoryID), GetSlotDisplayID(slotID), GetSlotIllusionDisplayID(slotID), GetCategoryDisplayID(categoryID), GetCategoryDisplayInfo(categoryID), GetCategoryAppearanceID(categoryID), GetCategoryIllusionCategoryID(categoryID), GetIllusionCategorySlotID(categoryID), GetBackgroundAtlas(), GetAppearanceLink(appearanceID)",
+      "returns": "pure Lua over C_Appearance.GetPendingAppearance/GetAppearanceForCategory/GetAppearanceDisplayInfo plus stock GetInventoryItemLink/UnitRace; hard-codes category ids 1..16 <-> INVSLOT map",
+      "defined_in_lua": "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua"
+    },
+    "GetInventoryItemTrueID": {
+      "callsites": ["AppearanceCategorySlotButtonMixin.lua:59", "AppearanceModelMixin.lua:107", "AppearanceModelMixin.lua:365", "ui-tree/Interface/FrameXML/Util/AppearanceUtil.lua:71"],
+      "args": "(unit, slotID)",
+      "returns": "itemID|nil via GetInventoryItemLink + GetItemInfoFromHyperlink",
+      "defined_in_lua": "ui-tree/Interface/FrameXML/Util/GlobalOverwrites.lua:339"
+    },
+    "GetInventorySlotInfoByID": {
+      "callsites": ["AppearanceCategorySlotButtonMixin.lua:55"],
+      "args": "(slotID)",
+      "returns": "stock GetInventorySlotInfo(INVSLOT_TO_SLOTNAME[slotID]) -> slotId, texturePath (2nd value used as empty-slot icon)",
+      "defined_in_lua": "ui-tree/Interface/FrameXML/Util/GlobalOverwrites.lua:344"
+    },
+    "AppearanceUI_LoadUI": {
+      "callsites": ["ui-tree/Interface/AddOns/Ascension_Collections/Collections.lua:89"],
+      "args": "()",
+      "returns": "UIParentLoadAddOn(\"Ascension_AppearanceUI\")",
+      "defined_in_lua": "ui-tree/Interface/FrameXML/UIParent.lua:407"
+    },
+    "Collections": {
+      "callsites": ["AppearanceUI.xml:9 (parent=\"Collections\")", "AppearanceWardrobeMixin.lua:8"],
+      "args": "global frame; TabSystemMixin host; Collections.Tabs.Wardrobe",
+      "returns": "must exist before this addon loads (toc Dependencies)",
+      "defined_in_lua": "ui-tree/Interface/AddOns/Ascension_Collections/Collections.xml:31 + Collections.lua"
+    },
+    "MixinAndLoad": { "callsites": ["AppearanceUI.lua:5"], "args": "(table, mixinName...)", "returns": "mixes by NAME and calls :OnLoad", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Mixin.lua:37" },
+    "MixinAndLoadScripts": { "callsites": ["AppearanceUI.xml:127,393,402", "AppearanceTemplates.xml:341,366,661", "AppearanceCollectionMixin.lua:110", "AppearanceModelMixin.lua:28"], "args": "(frame, mixinName)", "returns": "mixes the named global mixin in, wires On* methods as scripts, calls OnLoad", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Mixin.lua:152" },
+    "CreateFromMixins": { "callsites": ["AppearanceCategoryTabMixin.lua:1", "AppearanceCollectionMixin.lua:1", "AppearancePlayerModelMixin.lua:1"], "args": "(mixinName|table, ...)  -- accepts NAMES (strings) resolved lazily", "returns": "table", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Mixin.lua:177" },
+    "CallbackRegistryMixin": { "callsites": ["AppearanceUI.lua:5", "AppearanceCollectionMixin.lua:80"], "args": "GenerateCallbackEvents, RegisterCallback, TriggerEvent", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/CallbackRegistryMixin.lua:35" },
+    "OnEventToMethod": { "callsites": ["AppearanceUI.xml:129,395", "AppearanceTemplates.xml:343,663"], "args": "(self, event, ...) -> self[event](self, ...)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedConstants.lua:87" },
+    "nop": { "callsites": ["AppearanceCategoryTabMixin.lua:2", "AppearanceModelMixin.lua:23"], "args": "()", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedConstants.lua:9" },
+    "SetParentArray": { "callsites": ["AppearanceModelMixin.lua:30"], "args": "(frame, key) -> tinsert(parent[key], frame) (builds Collection.Models)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Util.lua:11" },
+    "RunNextFrame": { "callsites": ["AppearanceModelMixin.lua:304", "AppearanceModelMixin.lua:335"], "args": "(func)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/FunctionUtil.lua:117" },
+    "GenerateClosure": { "callsites": ["AppearanceCollectionMixin.lua:119-127,176"], "args": "(func, ...)", "returns": "closure", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/FunctionUtil.lua:100" },
+    "CreateFramePool": { "callsites": ["AppearancePlayerModelMixin.lua:75"], "args": "(frameType, parent, template, resetFunc)", "returns": "pool with Acquire/ReleaseAll/EnumerateActive", "defined_in_lua": "ui-tree/Interface/SharedXML/Pools.lua:197" },
+    "HelpTip": { "callsites": ["AppearanceWardrobeMixin.lua:22", "AppearanceCategorySlotButtonMixin.lua:140-161", "AppearanceModelMixin.lua:706-713"], "args": "HelpTip:Show(parentOrKey, info), HelpTip.Point, HelpTip.ButtonStyle; HelpTips.Bits.AppearanceAvailableOnWebStore=28/AppearanceAvailableOnBazaar=29/AppearanceViewFullItemSet=30 (FrameXML/HelpTips.lua:64-66); key WARDROBE_CHANGE_TRANSMOG at HelpTips.lua:528", "returns": "uses cvar HelpTipBitfield", "defined_in_lua": "ui-tree/Interface/SharedXML/HelpTip.lua:7 (+ FrameXML/HelpTips.lua)" },
+    "Const": { "callsites": ["AppearanceCategoryTabMixin.lua:5,7", "AppearanceCategorySlotButtonMixin.lua:5-9", "AppearanceModelMixin.lua:89-143", "AppearanceTemplates.xml (OnLoad blocks)"], "args": "Const.TextureKit.UseAtlasSize=true / IgnoreAtlasSize=false", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Const.lua:1" },
+    "Enum": { "callsites": ["AppearanceCategorySlotButtonMixin.lua:203", "AppearanceModelMixin.lua:613"], "args": "Enum.ItemQuality.Vanity == 6", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Enum.lua:146" },
+    "SOUNDKIT": { "callsites": ["AppearanceUI.xml:66,82,97,141,157,262,275", "AppearanceCategorySlotButtonMixin.lua:171,179,182", "AppearanceCollectionMixin.lua:96,112,346,351", "AppearanceModelMixin.lua:582,601"], "args": "UI_TRANSMOGRIFY_APPLY={25714,62542}, UI_VOIDSTORAGE_UNDO=25715, UI_VOIDSTORAGE_REDO=25738, UI_VOIDSTORAGE_UNLOCK={...}, UI_VOIDSTORAGE_DEPOSIT={...}, CHAT_SCROLL_BUTTON={...}, ABILITIES_TURN_PAGEA={831,836}, CHARACTER_SHEET_TAB=841", "returns": "numeric SoundKit ids, some as tables (round-robin) - see stock_api_assumptions", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/SoundKit.lua:1 (PlaySound wrapper: SharedXML/Util/SharedOverwrites.lua:17)" },
+    "Item": { "callsites": ["AppearanceModelMixin.lua:275,302,333,367"], "args": "Item:CreateFromID(itemID); item:CancelableContinueOnLoad(func) -> cancel function; item:GetItemID()", "returns": "IsCached() == GetItemInfo(id) ~= nil; waits on ItemQueryListener", "defined_in_lua": "ui-tree/Interface/FrameXML/Objects/Item.lua:1" },
+    "ItemQueryListener": { "callsites": ["AppearanceModelMixin.lua:23", "AppearanceModelMixin.lua:462", "AppearanceModelMixin.lua:526"], "args": "AddCallback(ids, func), AddCancelableCallback(ids, func) -> cancel fn", "returns": "fires func(itemID) per id on ITEM_CACHE_REQUEST_SUCCESS; queries via C_AssetQueryService.TryCacheItem", "defined_in_lua": "ui-tree/Interface/FrameXML/Objects/AsyncCallbackHandler.lua:193" },
+    "Timer": { "callsites": ["AppearanceModelMixin.lua:719"], "args": "Timer.NewTimer(seconds, func) -> handle with :Cancel()", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/Timer.lua:6" },
+    "TextureUtil": { "callsites": ["AppearanceModelMixin.lua:40"], "args": "ZoomTexCoords(zoom, l,r,t,b), GetCoverTexCoords(w,h)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/TextureUtil.lua:1" },
+    "KeywordTooltip": { "callsites": ["AppearanceTemplates.xml:642"], "args": "KeywordTooltip:Create(\"ETHEREAL_BAZAAR\", KeywordTooltip.TooltipType.Movable, level)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/KeywordTooltip.lua:5" },
+    "ModelMixin": { "callsites": ["AppearanceModelMixin.lua:28", "AppearancePlayerModelMixin.lua:1,61"], "args": "OnLoad, SetEnableDragRotation, SetEnableScrollZoom, SetEnableDragMove, SetDragScale, SetMaxPosOffset, SetMinMaxDistance (uses Lua MClamp, GetScaledCursorPosition)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/ModelMixin.lua:1" },
+    "TabSystemMixin": { "callsites": ["AppearanceCollectionMixin.lua:1,82,95-97,101,106,110-114,202,219,223,232,234,242,254,265,266,297,326-329"], "args": "SetTabTemplate, SetTabSelectedSound, SetTabPoint, SetTabPadding/GetTabPadding, AddTab(text[, panelName]), RemoveAllTabs, EnumerateTabs, SelectFirstEnabledTab, GetCurrentTabID, SetTabLayout(func|\"HORIZONTAL\"), UpdateTabLayout, RegisterCallback(\"OnTabSelected\")", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/TabSystem/TabSystemMixin.lua:41" },
+    "TabSystemTabMixin": { "callsites": ["AppearanceCategoryTabMixin.lua:1", "AppearanceCollectionMixin.lua:203,244,298"], "args": "SetTabSelected, SetTooltip, GetTabID", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/TabSystem/TabSystemTabMixin.lua" },
+    "NineSlicePanelMixin": { "callsites": ["AppearanceCollectionMixin.lua:1,81", "AppearancePlayerModelMixin.lua:1"], "args": "OnLoad", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/NineSlice.lua:191" },
+    "GameTooltip_GenericTooltip": { "callsites": ["AppearanceUI.xml:145,161"], "args": "(self, anchor) reads self.tooltipTitle/self.tooltipText", "returns": "-", "defined_in_lua": "ui-tree/Interface/FrameXML/GameTooltip.lua:1264" },
+    "GameTooltip_AddSpacer": { "callsites": ["AppearanceModelMixin.lua:642,655,675"], "args": "(tooltip)", "returns": "-", "defined_in_lua": "ui-tree/Interface/FrameXML/GameTooltip.lua:1144" },
+    "GameTooltip_AddIDLine": { "callsites": ["AppearanceModelMixin.lua:656-676"], "args": "(tooltip, label, value)", "returns": "-", "defined_in_lua": "ui-tree/Interface/FrameXML/GameTooltip.lua:1291" },
+    "PortraitFrame_SetIcon": { "callsites": ["AppearanceWardrobeMixin.lua:4"], "args": "(frame, texturePath)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedPanelTemplates.lua:1103" },
+    "PortraitFrame_SetTitle": { "callsites": ["AppearanceWardrobeMixin.lua:5"], "args": "(frame, text)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedPanelTemplates.lua" },
+    "SearchBoxTemplate_OnTextChanged": { "callsites": ["AppearanceUI.xml:196,200"], "args": "(editBox)", "returns": "-", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedPanelTemplates.lua:281" },
+    "INVTYPE_INDEX_TO_SLOT / INVTYPE_INDEX_TO_STRING": { "callsites": ["AppearanceModelMixin.lua:263,667,668"], "args": "[inventoryTypeIndex] -> INVSLOT_* / \"INVTYPE_*\"", "returns": "-", "defined_in_lua": "ui-tree/Interface/FrameXML/Constants.lua:479 / :447" },
+    "ITEM_QUALITY_COLORS": { "callsites": ["AppearanceCategorySlotButtonMixin.lua:201,203", "AppearanceCollectionMixin.lua:139-146", "AppearanceModelMixin.lua:611,613,650"], "args": "[-1..9] -> ColorMixin objects with :GetRGB() and :WrapText(text)", "returns": "NOT the stock {r,g,b,hex} tables; stock 3.3.5a ITEM_QUALITY_COLORS entries have no methods", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedConstants.lua:144 (CreateColor: SharedXML/Util/ColorUtil.lua:9)" },
+    "TRANSMOG_UNLOCK_COLOR / APPEARANCE_NOT_COLLECTED_COLOR / LINK_COLOR / GREEN_FONT_COLOR / RED_FONT_COLOR / HIGHLIGHT_FONT_COLOR": { "callsites": ["AppearanceModelMixin.lua:611,619,622,627,631", "AppearanceCategorySlotButtonMixin.lua:213", "AppearancePlayerModelMixin.lua:107,112,120,122", "AppearanceTemplates.xml:299,300,613,614"], "args": "ColorMixin objects (:GetRGB, :WrapText)", "returns": "stock 3.3.5a GREEN/RED/HIGHLIGHT_FONT_COLOR are plain {r,g,b} tables without methods", "defined_in_lua": "ui-tree/Interface/SharedXML/SharedConstants.lua:95-116" },
+    "AtlasInfo / AtlasUtil": { "callsites": ["transitive from every SetAtlas/Set*Atlas call"], "args": "AtlasUtil:Unpack(name) -> texturePath, width, height, l, r, t, b, horizTile, vertTile; asserts if the atlas name is missing", "returns": "all 34 atlas names used by this addon are present in the table", "defined_in_lua": "ui-tree/Interface/SharedXML/AtlasInfo.lua:1 (+ :4904)" },
+    "StaticPopupDialogs[CONFIRM_APPLY_COSMETIC_PET | OPEN_ASCENSION_URL | CONFIRM_OVERWRITE_APPEARANCE_OUTFIT | CONFIRM_DELETE_APPEARANCE_OUTFIT | CONFIRM_SAVE_APPEARANCE_OUTFIT]": { "callsites": ["AppearancePlayerModelMixin.lua:110", "AppearanceTemplates.xml:17,63,95,260,608", "AppearanceModelMixin.lua:588"], "args": "shown with StaticPopup_Show(key, text1, text2, data)", "returns": "their OnAccept call C_Appearance.ApplyPendingAppearances(true), OpenAscensionURL(url), C_AppearanceOutfit.SaveOutfit(name), C_AppearanceOutfit.DeleteOutfit(name)", "defined_in_lua": "ui-tree/Interface/FrameXML/StaticPopup.lua:253,265,322,333,344" },
+    "PlaySound (override)": { "callsites": ["all PlaySound(SOUNDKIT.*) sites"], "args": "(soundKitIdOrTable, dontAllowMultiple)", "returns": "unwraps round-robin tables then calls the ORIGINAL native PlaySound with a NUMBER", "defined_in_lua": "ui-tree/Interface/SharedXML/Util/SharedOverwrites.lua:17" }
+  },
+  "widget_methods": {
+    "Texture:SetAtlas": { "callsites": ["AppearanceCategoryTabMixin.lua:5,7", "AppearanceCategorySlotButtonMixin.lua:5-9", "AppearanceModelMixin.lua:89-143", "AppearancePlayerModelMixin.lua:73", "AppearanceTemplates.xml:254-256,312-316,464,517,518,579-581"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Texture.lua:3 (pure Lua over AtlasInfo; uses stock SetTexture/SetTexCoord/SetHorizTile/SetVertTile)" },
+    "Button/CheckButton:SetNormalAtlas / SetHighlightAtlas / SetCheckedAtlas": { "callsites": ["AppearanceCategoryTabMixin.lua:6", "AppearanceCategorySlotButtonMixin.lua:10,11", "AppearanceTemplates.xml:56,57,88,89,193,194,600,601,635,636"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Button.lua:25-41" },
+    "Button:SetEnabled": { "callsites": ["AppearancePlayerModelMixin.lua:360,371"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Button.lua:5" },
+    "Texture:SetPortraitTexture": { "callsites": ["AppearanceCategoryTabMixin.lua:13"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Texture.lua:34 (stock SetPortraitToTexture)" },
+    "Texture:FlipX": { "callsites": ["AppearanceTemplates.xml:603,604,638,639"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Texture.lua:62" },
+    "Frame:CallScript": { "callsites": ["AppearanceWardrobeMixin.lua:34,47"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Frame.lua:23" },
+    "Region:SetShown": { "callsites": ["AppearanceCategorySlotButtonMixin.lua:114-116,218", "AppearanceCollectionMixin.lua:249,396", "AppearanceModelMixin.lua:690,699", "AppearancePlayerModelMixin.lua:359,367,370,373,377"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Region.lua:28" },
+    "Region:ClearAndSetPoint": { "callsites": ["AppearanceCollectionMixin.lua:375,387,437,447,456", "AppearanceModelMixin.lua:415,434,483,542"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Region.lua:36" },
+    "Model:SetDisplayInfo": { "callsites": ["AppearanceModelMixin.lua:301,328,363", "AppearancePlayerModelMixin.lua:327"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Model.lua:7 (Lua: Creature:CreateFromID + stock SetCreature; needs native GetCreatureTemplate / C_AssetQueryService.TryCacheCreature)" },
+    "Model:ApplyUICamera": { "callsites": ["AppearanceModelMixin.lua:278,312,343,351,375"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Model.lua:34 (Lua; needs native C_UICamera.GetCameraInfo, Lua GetScreenSize)" },
+    "Model:PlaySequence / FreezeSequence / StopSequence": { "callsites": ["AppearanceModelMixin.lua:154,279,314,345,353,378,392,393,428,429,502,503"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/Model.lua:82,121,135 (Lua over stock SetSequenceTime/OnAnimFinished/OnUpdate)" },
+    "Model:SetSpellVisual": { "callsites": ["AppearanceModelMixin.lua:391", "AppearancePlayerModelMixin.lua:162"], "defined_in_lua": null, "_note": "NATIVE Extensions.dll widget method (ext-lua-bindings.tsv _G? SetSpellVisual fn_va 0x10a6ca30): (spellID, spellVisualID) attaches a static spell visual kit to the model. No stock equivalent; shim must add a no-op to the Model metatable." },
+    "Model:SetSpell": { "callsites": ["AppearanceModelMixin.lua:402"], "defined_in_lua": null, "_note": "NATIVE Extensions.dll widget method (_G? SetSpell fn_va 0x10a6c1c0): (spellID, spellVisualID) plays an animated spell visual on the model. No stock equivalent; shim no-op." },
+    "DressUpModel:TryOn(itemOrLink[, slotID])": { "callsites": ["AppearanceModelMixin.lua:76,282,309,340,369,465,474,528,537", "AppearancePlayerModelMixin.lua:142,148,154,176,182,188,211,220,224,332"], "defined_in_lua": null, "_note": "Stock method, but Ascension accepts an explicit 2nd argument slotID (INVSLOT_MAINHAND/OFFHAND or category slot) and an \"item:<id>:<enchant>\" string for illusions. Stock 3.3.5a ignores extra args; a second one-hander lands wherever the client decides." },
+    "ModelMixin:SetEnableDragRotation / SetEnableScrollZoom / SetEnableDragMove / SetDragScale / SetMaxPosOffset / SetMinMaxDistance": { "callsites": ["AppearanceModelMixin.lua:29", "AppearancePlayerModelMixin.lua:62-67"], "defined_in_lua": "ui-tree/Interface/SharedXML/Util/ModelMixin.lua:95-172" },
+    "TabSystemTabMixin:SetTooltip / SetTabSelected / GetTabID": { "callsites": ["AppearanceCollectionMixin.lua:203,244,259,298"], "defined_in_lua": "ui-tree/Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:72" },
+    "BetterStatusBarMixin:SetText / SetMinMaxValues / SetValue (on a Frame, not a StatusBar)": { "callsites": ["AppearanceCollectionMixin.lua:279-281"], "defined_in_lua": "ui-tree/Interface/SharedXML/SharedPanelTemplates.lua:961,977,990" },
+    "FilterDropDownButtonMixin:AddFilterOption / AddSubFilterOption / AddCategoryOption / AddOptionSpacer / CreateFilterInfo / RegisterCallback / HasAnyFilters / GetFilter / ClearFilterExcept / SetSingleOptionMode": { "callsites": ["AppearanceCollectionMixin.lua:117-191,274,275,303"], "defined_in_lua": "ui-tree/Interface/SharedXML/FilterDropDown.lua" },
+    "string:trim": { "callsites": ["AppearanceCollectionMixin.lua:276"], "defined_in_lua": "ui-tree/Interface/SharedXML/TypeExtensions/string.lua" }
+  },
+  "events": {
+    "APPLY_PENDING_APPEARANCE_RESULT": {
+      "registered_at": ["AppearanceCategorySlotButtonMixin.lua:15", "AppearanceModelMixin.lua:47", "AppearancePlayerModelMixin.lua:82"],
+      "handler_args": "(applied:boolean, result:string). PlayerModel:103 shows _G[result] or result in green when applied, red otherwise; result == \"APPLY_APPEARANCES_COSMETIC_PET_APPEARANCE_CONFIRMATION\" (applied=false) opens StaticPopup CONFIRM_APPLY_COSMETIC_PET which re-calls ApplyPendingAppearances(true). SlotButton/Model handlers take no args (just Refresh/UpdateBorder).",
+      "fired_by": "native (reply to C_Appearance.ApplyPendingAppearances; api-surface __EVENT__ NATIVE, in_Extensions.dll=Y). No C_Hook.SendEvent anywhere in the tree."
+    },
+    "PENDING_APPEARANCE_CHANGED": {
+      "registered_at": ["AppearanceCategorySlotButtonMixin.lua:16", "AppearanceModelMixin.lua:48", "AppearancePlayerModelMixin.lua:83"],
+      "handler_args": "none read. Every pending-set mutation (SetPendingAppearance, ClearPendingAppearance(s), ClearInvalidPendingAppearances, SetPendingOutfit) must fire it; the UI never refreshes pending state any other way.",
+      "fired_by": "native (local client state change in Extensions.dll)"
+    },
+    "PLAYER_EQUIPMENT_CHANGED": {
+      "registered_at": ["AppearanceCategorySlotButtonMixin.lua:17"],
+      "handler_args": "stock (slotID, hasItem); none read - slot button Refresh()",
+      "fired_by": "native (stock 3.3.5a event)"
+    },
+    "APPEARANCE_COLLECTED": {
+      "registered_at": ["AppearanceCollectionMixin.lua:323", "ui-tree/Interface/FrameXML/UIParent.lua:252"],
+      "handler_args": "(appearanceID:number) - UIParent.lua:1785 reads arg1 and prints APPEARANCE_COLLECTED_LINK/APPEARANCE_COLLECTED (global strings, absent from stock); this addon plays UI_VOIDSTORAGE_UNLOCK and RefreshCategory()",
+      "fired_by": "native (server pushes a collection update; api-surface NATIVE)"
+    },
+    "APPEARANCE_UNCOLLECTED": {
+      "registered_at": ["AppearanceCollectionMixin.lua:324", "ui-tree/Interface/FrameXML/UIParent.lua:253"],
+      "handler_args": "(appearanceID:number)",
+      "fired_by": "native"
+    },
+    "VIEWABLE_APPEARANCES_RESET": {
+      "registered_at": ["AppearanceCollectionMixin.lua:325", "AppearancePlayerModelMixin.lua:84"],
+      "handler_args": "none read; Collection forces the tab back to APPEARANCE_TYPE_ITEM, PlayerModel refreshes",
+      "fired_by": "native (presumably after the server rebuilds the visible collection / after SetCanSeeAppearances)"
+    },
+    "APPEARANCE_OUTFIT_SAVED_RESULT": {
+      "registered_at": ["AppearancePlayerModelMixin.lua:85"],
+      "handler_args": "(applied:boolean, result:string) shown via _G[result] or result in the ErrorFrame",
+      "fired_by": "native (reply to C_AppearanceOutfit.SaveOutfit / DeleteOutfit from StaticPopup.lua)"
+    },
+    "UNLOCKED_APPEARANCE_ITEM_USED": {
+      "registered_at": ["ui-tree/Interface/FrameXML/UIParent.lua:251 (entry point into this addon, not registered here)"],
+      "handler_args": "(arg1=categoryID, arg2=appearanceType, arg3=appearanceID, arg4=itemName) -> TryOnAppearance(arg2, arg1, arg3, arg4)",
+      "fired_by": "native"
+    },
+    "ITEM_CACHE_REQUEST_SUCCESS / CREATURE_CACHE_REQUEST_SUCCESS": {
+      "registered_at": ["ui-tree/Interface/FrameXML/Objects/AsyncCallbackHandler.lua:15,17 (via EventRegistry; transitive dependency of Item/Creature ContinueOnLoad used throughout AppearanceModelMixin)"],
+      "handler_args": "(assetID:number)",
+      "fired_by": "native (paired with C_AssetQueryService.TryCache*). Stock 3.3.5a has no GET_ITEM_INFO_RECEIVED; the shim must poll GetItemInfo / accept SetCreature's own query."
+    }
+  },
+  "frames": [
+    "AppearanceWardrobeFrame (parent Collections, 1140x606, hidden; RaisedPortraitFrameTemplateNoBackground)",
+    "AppearanceWardrobeFramePlayerModel (DressUpModel)", "AppearanceWardrobeFramePlayerModelApplyError", "AppearanceWardrobeFramePlayerModelApplyButton", "AppearanceWardrobeFramePlayerModelClearInvalidButton", "AppearanceWardrobeFramePlayerModelCancelButton", "AppearanceWardrobeFramePlayerModelSaveOutfitButton", "AppearanceWardrobeFramePlayerModelErrorFrame (MessageFrame)",
+    "AppearanceWardrobeFrameDisableTransmogButton (HelpTip anchor)", "AppearanceWardrobeFrameDisableSpellVisualsButton",
+    "AppearanceWardrobeFrameCollection", "AppearanceWardrobeFrameCollectionPageText", "AppearanceWardrobeFrameCollectionSearchBox", "AppearanceWardrobeFrameCollectionFilter", "AppearanceWardrobeFrameCollectionSorting", "AppearanceWardrobeFrameCollectionCategories", "AppearanceWardrobeFrameCollectionProgress", "AppearanceWardrobeFrameCollectionPageLeftButton", "AppearanceWardrobeFrameCollectionPageRightButton",
+    "AppearanceWardrobeFrameCollectionItem1 .. Item18 (DressUpModel, AppearanceModelTemplate; each with named children <Item>SpellIcon, <Item>DeleteButton, <Item>OverwriteButton, <Item>Textures{Border,StateTexture,NameText,CollectedText,AddIcon,NewString,ViewItemSetButton,Discount{Left,Right,Middle,Text},BazaarButton,StoreButton}, <Item>Loading)",
+    "virtual templates: AppearanceModelURLTemplate, AppearanceModelTemplate, AppearanceTypeTabTemplate, AppearanceCategoryTabTemplate, AppearanceCategorySlotButtonTemplate (slot buttons are pooled/unnamed; their $parentStoreButton/$parentBazaarButton children therefore get no usable global name)",
+    "global Lua tables: AppearanceUI (addon private table exported at AppearanceUI.lua:3), AppearanceWardrobeMixin, AppearanceCollectionMixin, AppearancePlayerModelMixin, AppearanceModelMixin, AppearanceCategoryTabMixin, AppearanceCategorySlotButtonMixin"
+  ],
+  "stock_api_assumptions": [
+    "PlaySound(numericSoundKitID): the Lua wrapper (SharedXML/Util/SharedOverwrites.lua:17) unwraps SOUNDKIT tables but still hands a NUMBER to the native PlaySound; stock 3.3.5a PlaySound takes a sound NAME string (no PlaySoundKitID in 3.3.5a). The shim's PlaySound must map ids to names or swallow numbers.",
+    "ITEM_QUALITY_COLORS[q]:WrapText / :GetRGB and GREEN_FONT_COLOR/RED_FONT_COLOR/HIGHLIGHT_FONT_COLOR:GetRGB() - Ascension replaces the stock plain tables with ColorMixin objects (SharedXML/SharedConstants.lua:95-156). If the compat layer loads SharedConstants verbatim this is covered; if stock FrameXML's versions win, every tooltip here errors.",
+    "DressUpModel:TryOn(link, slotID) with an explicit slot argument and \"item:<id>:<illusion>\" strings (see widget_methods); stock ignores the slot.",
+    "Model:SetCreature(id) is fed a creature ENTRY id taken from GetAppearanceDisplayInfo's displayID for CREATURE-type appearances, and the constant 44472 as a weapon/illusion mannequin (AppearanceModelMixin.lua:301,363). 44472 must exist as a creature on the server and be cacheable, or the shim must substitute another invisible/mannequin creature.",
+    "Model:SetUnit(\"player\") is wrapped by SetModelApplyComponents(false/true) to get an undressed base; stock just applies the equipment (Undress() follows in most paths; DisplayItem's TryOnTransmogGear(slot) calls Undress()).",
+    "Model:SetLight with the 13-argument 3.3.5a signature (AppearanceModelMixin.lua:39) - stock-compatible.",
+    "Model:SetSequenceTime, Model script OnAnimFinished, Texture:SetHorizTile/SetVertTile, SetPortraitToTexture, Texture:SetTexture(path, true) (extra arg ignored) - believed stock 3.3.5a; SetSequenceTime and TryOn each appear once in stock-ui-tree FrameXML.",
+    "XML syntax verified against stock-ui-tree FrameXML: <Size x= y=/> (52 stock files), <Anchor point= x= y=/> shorthand (9 files, x-only form present), <OnEvent function=\"...\"/> (98 files), parentKey (31 files), <Attribute type=\"number\"> (2 files), motionScriptsWhileDisabled (5), maxLines (7), nonspacewrap (13), <Alpha change=> (2). UNVERIFIED on a stock parser: <HitRectInsets left= right= top= bottom=/> shorthand (AppearanceTemplates.xml:622,654; stock always uses <AbsInset>) and the <Scale> animation element (AppearanceTemplates.xml:548,549; zero stock XML uses it although the 3.3.5a animation API has Scale). Worst case is cosmetic (store-button hit rect, glow-transition anim); a PATCHES.md edit to <AbsInset> is the fallback.",
+    "GetItemInfo(itemID) is used as the 'is cached' probe (Item.lua:184); stock behaviour matches, but the completion event ITEM_CACHE_REQUEST_SUCCESS does not exist on stock (no GET_ITEM_INFO_RECEIVED in 3.3.5a either) - the shim's ItemQueryListener needs an OnUpdate poll.",
+    "SendChatMessage(\".collection appearance add <name> <id>\") is only reachable ctrl-clicking as GM (C_AccountInfo.GetGMLevel > 0); the command is Ascension-server-only.",
+    "GetSpellInfo(spellID) 3rd return = icon (AppearanceModelMixin.lua:412) - stock-compatible; only SPELL display type."
+  ],
+  "data_files": [
+    "GlobalStrings additions that live in Ascension's MPQ GlobalStrings.lua (not in any loose file, not in stock 3.3.5a GlobalStrings.lua): APPEARANCE_WARDROBE, DISABLE_TRANSMOG, ENABLE_TRANSMOG, DISABLE_TRANSMOG_TOOLTIP, ENABLE_TRANSMOG_TOOLTIP, DISABLE_SPELLVISUAL_TRANSMOG, ENABLE_SPELLVISUAL_TRANSMOG, DISABLE_SPELLVISUAL_TRANSMOG_TOOLTIP, ENABLE_SPELLVISUAL_TRANSMOG_TOOLTIP, TRANSMOG_COLLECTED (BLOCKING: concatenated at AppearanceCollectionMixin.lua:281 on every refresh), TRANSMOG_NOT_COLLECTED, TRANSMOG_AVAILABLE_ON_WEB, TRANSMOG_AVAILABLE_ON_BAZAAR, TRANSMOGRIFIED_HEADER (format %s), TRANSMOGRIFY_TOOLTIP_APPEARANCE_KNOWN, TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN, TRANSMOG_SHARES_APPEARANCE_TOOLTIP, TIP_APPEARANCE_AVAILABLE_ON_WEB_STORE, TIP_APPEARANCE_AVAILABLE_ON_BAZAAR, TIP_VIEW_FULL_ITEM_SET, NEW_OUTFIT (also the sentinel outfit name returned by GetCategoryAppearances - must be a string), SAVE_OUTFIT, DELETE_OUTFIT, OVERWRITE_OUTFIT, VIEW_ITEM_SET, ON_SALE, OPEN_WEB_STORE, CLICK_TO_OPEN_STORE, CLEAR_INVALID_APPEARANCES, SUMMON_PET, BUILD_ORDER, NEW_CAPS, ORDER_BY_RECENT_COLLECTION, ORDER_BY_OLDEST_COLLECTION, ORDER_BY_ALPHABETICAL_AZ, ORDER_BY_ALPHABETICAL_ZA, ORDER_BY_APPEARANCE_ID_ASC, ORDER_BY_APPEARANCE_ID_DESC, ITEM_SUBCLASS_2_{0,1,2,3,4,5,6,7,8,10,13,14,15,16,17,18,19,20}, ITEM_SUBCLASS_4_{1,2,3,4,6}, APPEARANCE_TYPE_ITEM / _ITEM_SET / _OUTFIT / _ILLUSION / _INCARNATION / _SPELL_VISUAL / _COSMETIC_PET / _COSMETIC / _MOUNT / _COMPANION / _TOY (tab labels; fall back to the token), plus the compat-layer strings WARDROBE, WARDROBE_TOOLTIP (Collections), TIP_WARDROBE_CHANGE_TRANSMOG, TIP_OPEN_WARDROBE_TO_CHANGE_TRANSMOG (HelpTips), CONFIRM_APPLY_COSMETIC_PET, CONFIRM_OPEN_ASCENSION_URL, CONFIRM_OVERWRITE_APPEARANCE_OUTFIT, CONFIRM_DELETE_APPEARANCE_OUTFIT, CONFIRM_SAVE_APPEARANCE_OUTFIT, OVERWRITE, SAVE (StaticPopup), APPEARANCE_COLLECTED, APPEARANCE_COLLECTED_LINK, APPEARANCE_UNCOLLECTED, APPEARANCE_UNCOLLECTED_LINK (UIParent), and every result/reason code returned by CanApplyPendingAppearances / CanSetAppearance / APPLY_PENDING_APPEARANCE_RESULT (looked up as _G[code]). Stock provides only APPLY, CANCEL, QUALITY, INVTYPE_WEAPONMAINHAND/OFFHAND, ITEM_QUALITY0..7_DESC.",
+    "Appearance catalogue (the native's backing data): per appearanceID -> displayType, displayID, uiCamera, displayName, entry, spellVisualID; per categoryID -> name, icon, appearanceType, member appearanceIDs (with collection-order timestamps for SORT_RECENTLY_COLLECTED); appearance types list; item -> appearanceID map (GetItemAppearanceID); alternative item ids per appearance; item sets (displayID -> name, {slotID -> appearanceID}); creature display items per creature appearance; details text. Sources on disk: Ascension's custom DBCs / harvested caches under the archive - none of it ships in this addon.",
+    "Per-character state served over the wire: collected appearance set, applied transmog per category (1..16 + spell/cosmetic categories), pending set (may stay client-side in the shim), saved outfits (name -> {categoryID -> appearanceID}), current outfit name, CanSeeAppearances preference.",
+    "UICamera table: cameraID -> (x, y, z, facing, anim) for C_UICamera.GetCameraInfo and itemID -> cameraID for GetItemCameraID (UICamera.dbc-style; only used for camera framing of weapon/illusion/creature previews - safe to return nil).",
+    "Server config flag CONFIG_THROWN_WEAPON_APPEARANCES_ENABLED (C_Config.GetBoolConfig).",
+    "Mannequin assets: items 135522 (chest), 135548 (legs), 135550 (feet), 135549 (hands) are TryOn'd as the base outfit for item previews (AppearanceModelMixin.lua:16-23; retail-era ids, must exist in item_template / client item cache) and creature 44472 is the weapon/illusion stand.",
+    "Atlas art referenced through SharedXML/AtlasInfo.lua that is NOT in stock 3.3.5a MPQs and must ship in the client package: Interface\\Transmogrify\\Transmogrify.blp, Interface\\Transmogrify\\Textures.blp, Interface\\Transmogrify\\TransmogBackground{Human,Orc,Dwarf,NightElf,Undead,Tauren,Gnome,Troll,BloodElf,Draenei}.blp (AppearanceUtil.GetBackgroundAtlas builds the name from UnitRace - a race outside these ten asserts in AtlasUtil:Unpack), Interface\\Transmogrify\\PurpleIconAlertAnts.blp (direct file, AppearanceTemplates.xml:506), Interface\\Store\\Store-Main.blp, Interface\\Collections\\Collections.blp, Interface\\ContainerFrame\\Bags.blp, Interface\\Garrison\\GarrisonMissionUI2.blp, Interface\\Legionfall\\LegionfallHorizontal.blp, Interface\\SpellActivationOverlay\\IconAlert.blp, Interface\\PaperDollInfoFrame\\PaperDollSideTabs.blp, interface\\minimap\\objecticonsatlas.blp, Interface\\FrameGeneral\\UI-Background-Rock2.blp (AppearanceUI.xml:18). Stock-present: Interface\\FriendsFrame\\UI-Toast-Border, Interface\\Tooltips\\UI-Tooltip-Background, Interface\\Buttons\\UI-Common-MouseHilight, Interface\\Buttons\\WHITE8x8, Interface\\Icons\\inv_arcane_orb.",
+    "Icon names returned by C_AppearanceCollection.GetCategoryInfo and GetItemIconInstant must resolve under Interface\\Icons\\ on the stock client (custom Ascension icons need shipping)."
+  ],
+  "protected_actions": [
+    "None. No CastSpellByID/PickupSpell/SetBinding/RunMacro/UseItem. Side-effecting calls are all Ascension natives (C_Appearance.SetPendingAppearance/ApplyPendingAppearances/ClearPending*, C_AppearanceOutfit.SetPendingOutfit/SaveOutfit/DeleteOutfit, C_Appearance.SetCanSeeAppearances, C_AppearanceCollection.CollectItemAppearance) which on the stock client become shim wire verbs; SendChatMessage(\".collection appearance add ...\") (AppearanceModelMixin.lua:570,574,595) and OpenAscensionURL are insecure-callable but GM/store-only. HideUIPanel(Collections)/ShowUIPanel are fine out of combat (Collections hides itself on PLAYER_REGEN_DISABLED)."
+  ],
+  "blocking_natives": [
+    "C_AssetQueryService.TryCacheItem - called at FILE SCOPE of AppearanceModelMixin.lua:23 via ItemQueryListener:AddCallback (addon load aborts without it)",
+    "C_AppearanceCollection.GetAppearanceTypes - AppearanceCollectionMixin:OnLoad:99 (ipairs, must return a table)",
+    "C_AppearanceCollection.GetCategoriesForType - first show (UpdateCategories:226/228, UpdateSlotLayout:249/251; ipairs unguarded)",
+    "C_AppearanceCollection.GetCategoryInfo - first show (UpdateCategories:241, slot buttons:67)",
+    "C_AppearanceCollection.ApplyCategoryFilter, GetCollectedCount, GetCategoryMaxPages, GetCategoryAppearances - RefreshCategory/UpdatePage on first show (:276-284, :398)",
+    "C_AppearanceCollection.IsAppearanceCollected - every tile (SetAppearanceID:205)",
+    "C_Appearance.CanSeeAppearances - AppearanceWardrobeMixin:OnShow:13",
+    "C_Appearance.HasPendingAppearances, CanApplyPendingAppearances - AppearancePlayerModelMixin:Refresh:346/348 on show",
+    "C_Appearance.GetPendingAppearance, GetAppearanceForCategory, GetAppearanceDisplayInfo (nil-tolerant) - slot buttons and AppearanceUtil on show; every tile (:197)",
+    "C_Appearance.CanSetAppearance, GetActiveDiscount, GetAppearanceItemSet (nil-tolerant) - every tile (:199, :689, :698)",
+    "C_AppearanceOutfit.GetCurrentOutfitName - Refresh:376 on show",
+    "GetItemIconInstant - every equipment slot button (:82); GetItemInventoryType - every item tile (:262); SetModelApplyComponents - every model refresh",
+    "GetCreatureTemplate + C_AssetQueryService.TryCacheCreature - as soon as a weapon/ranged/illusion/creature tile is displayed (SetDisplayInfo)",
+    "Transitive, not this addon's but on its open path: C_Realm.IsDevelopment (SharedXML/SharedConstants.lua:12 at compat load), C_AccountInfo.GetGMLevel (only on click/tooltip), C_UICamera.GetItemCameraID/GetCameraInfo (illusion/weapon tiles; nil-safe), C_Config.GetBoolConfig (ranged category only)"
+  ],
+  "notes": "SCOPE: not part of the CA/Collections-core cluster; it is the Wardrobe tab of the Collections window (transmog + illusions + item sets + outfits + incarnations/spell visuals/cosmetics/mounts/companions/toys). Reasonable P1/P2 target; nothing in it is needed to open the CA tree. LOADING: LoadOnDemand, Dependencies=Ascension_Collections; AppearanceWardrobeFrame is parented to the global Collections frame in XML so Collections must be loaded first (it is, via dependency). The Collections tab lazily loads this addon ONLY through the tab's PreClick (Collections.lua:89); Collections:GoToTab(Collections.Tabs.Wardrobe) (used by ShowAppearanceWardrobe/ShowAppearanceCategory/TryOnAppearance) calls SelectTabID directly, which resolves _G['AppearanceWardrobeFrame'] and silently shows nothing if the addon is not yet loaded - the shim should call AppearanceUI_LoadUI() before GoToTab in those helpers (a compat/FrameXML fix, not an addon edit). NAMESPACE DUMP TRAP: in ext-lua-bindings.tsv the whole appearance block (site_va 0x100cd86a-0x100cdedf) carries namespace labels shifted by one: dump 'C_AppearanceCollection' run 2 (0x100cd9d3-0x100cdb7f) == Lua C_Appearance (24 fns incl. GetItemSetAppearanceID which this addon does not use); dump 'C_Appearance' == Lua C_AppearanceOutfit (GetAppearanceOutfits, GetOutfitInfo, SetPendingOutfit, SaveOutfit, DeleteOutfit, GetCurrentOutfitName); dump 'C_AppearanceOutfit' (IsBound, CanBind, GetScalingLevel) are C_Item members; dump 'C_Item' (GetAppearances, GetSetName, GetItemSetNumCollected) == Lua C_ItemSet; dump 'C_ItemSet' (GetCameraInfo, GetItemCameraID) == Lua C_UICamera. p0-framexml-gap.json's ns_unknown list for C_Appearance/C_AppearanceOutfit/C_ItemSet.GetAppearances is this artifact - all are native. No Lua anywhere defines or aliases C_Appearance, C_AppearanceCollection, C_AppearanceOutfit, C_ItemSet, C_UICamera, C_Config or C_Logger. LATENT BUG: AppearanceUI.OpenToItemSet(number) calls C_ItemSet.GetItemSetName which does not exist (native is GetSetName); only the string path is exercised. STATE MODEL the shim must reproduce: (1) 'current view' is server-state-like in the native: ApplyCategoryFilter(category, search, filter, sort) selects it, GetCategoryMaxPages/GetCategoryAppearances(page) read it (18 tiles/page, Item1..Item18 laid out 6x3); (2) pending set per categoryID with 0 meaning 'strip transmog', mutated only through the C_Appearance calls and observed only through PENDING_APPEARANCE_CHANGED; (3) applied set per category (GetAppearanceForCategory) changed only by APPLY_PENDING_APPEARANCE_RESULT; (4) categories 1..16 map 1:1 to INVSLOTs in FrameXML/Util/AppearanceUtil.lua (13/14 = MH/OH, 15/16 = their illusions, 12 = ranged); categoryID > INVSLOT_LAST_EQUIPPED (19) is treated as a spell/cosmetic category (AppearancePlayerModelMixin.lua:159); INCARNATION categories use CREATURE display type and SetCreature(displayID) on the player model; (5) outfits are keyed by NAME, the tile list for APPEARANCE_TYPE_OUTFIT is a list of strings with the NEW_OUTFIT global string as the 'new' tile. WIRE PROTOCOL: DESIGN.md section 5 has no appearance verbs; a minimal set would be APPEARANCE STATE (collected ids, applied per category, outfits, cansee), APPEARANCE APPLY <cat:id,...> -> EVENT APPLY_PENDING_APPEARANCE_RESULT, APPEARANCE OUTFIT SAVE|DELETE <name> -> EVENT APPEARANCE_OUTFIT_SAVED_RESULT, APPEARANCE CANSEE <item> <spell>; collection pushes as EVENT APPEARANCE_COLLECTED <id>. The catalogue itself (thousands of appearances) belongs in generated data/ tables, not on the wire. RENDERING LIMITS ON STOCK: SetSpellVisual/SetSpell (spell-visual and cosmetic previews) have no stock equivalent -> those tiles render as the undressed player; the SPELL display type uses a plain icon and works; illusion previews rely on TryOn('item:id:enchant') which stock honours. The three EventRegistry/ItemQueryListener async paths need a polling replacement (no cache events on 3.3.5a). ATLAS: all SetAtlas calls are pure Lua over SharedXML/AtlasInfo.lua, but the referenced BLPs are 4.x-7.x art that must ship with the client package (see data_files); AtlasUtil:Unpack asserts on a missing name, so a missing race background (transmog-background-race-<race>) is a hard error in AppearancePlayerModelMixin:OnLoad. GLOBAL STRINGS: ~80 strings come from the MPQ GlobalStrings.lua, not from any loose Lua; TRANSMOG_COLLECTED is concatenated on every refresh and NEW_OUTFIT is compared as a value, so the shim must define them all (list in data_files) before this addon runs. TEMPLATES USED (all SharedXML, load before via compat): RaisedPortraitFrameTemplateNoBackground, NineSlicePanelTemplate2 (layoutType=InsetFrameTemplate), SharedGoldRedButtonTemplate, SharedButtonTemplate, StandardButtonTemplate, CollectionsBackgroundTemplate, SearchBoxTemplate, BetterStatusBarTemplate (bar-atlas/text attributes), LeftButtonTemplate, RightButtonTemplate, ExternalLinkButtonTemplate, InputBlockLoadingTemplate (SharedXML/SharedPanelTemplates.xml), FilterDropDownButtonTemplate (SharedXML/FilterDropDown.xml), TabSystemTopTabTemplate (SharedXML/TabSystem/TabSystemTemplates.xml); fonts GameFontRed, ErrorFont (FrameXML/FontStyles.xml - Ascension's, ErrorFont is not stock), GameFontHighlightOutlineTiny (SharedXML/CustomFontStyles.xml). MISC: AppearanceTemplates.xml lists AppearanceCategoryTabMixin.lua twice (harmless). The collection grid updates one tile per frame via OnUpdate (InternalUpdateAppearances, 10 ms spacing) so a slow native is tolerated. GM ctrl-click shortcut sends '.collection appearance add' chat commands. Ascension_SeasonCollection also calls C_ItemSet.GetAppearances / C_Appearance.* and shares this native surface."
+}

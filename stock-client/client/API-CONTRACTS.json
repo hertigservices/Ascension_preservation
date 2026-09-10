@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "nativeGlobals": {
+    "CreateFrame": "Stock 3.3.5a frame constructor; real frame metatable behavior still needs in-client testing.",
+    "geterrorhandler": "Stock UI error handler getter."
+  },
+  "frameXMLGlobals": {
+    "DEFAULT_CHAT_FRAME": "Stock ChatFrame.lua creates the default chat frame.",
+    "SlashCmdList": "Stock ChatFrame.lua slash-command dispatch table."
+  },
+  "dynamicProviders": {
+    "C_ClassInfo": "api/C_ClassInfo.lua",
+    "C_CharacterAdvancement": "api/C_CharacterAdvancement.lua",
+    "C_BuildCreator": "api/C_BuildCreator.lua"
+  }
+}

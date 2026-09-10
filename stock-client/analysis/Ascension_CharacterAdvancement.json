@@ -1,0 +1,1527 @@
+{
+  "target": "Ascension_CharacterAdvancement",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": ["Ascension_Collections"],
+    "saved_variables": [],
+    "files_in_order": [
+      "Templates/CharacterAdvancementTemplates.xml",
+      "Templates/CAConnectedNodes.lua",
+      "Templates/CABranchTexture.lua",
+      "Templates/CAClassButton.lua",
+      "Templates/CASpellButton.lua",
+      "Templates/CASpecTab.lua",
+      "Templates/CARarityBar.lua",
+      "Templates/CAGate.lua",
+      "Templates/CASpellCategory.lua",
+      "Templates/CATalentBrowser.lua",
+      "Browser/CharacterAdvancementBrowser.xml",
+      "Browser/CharacterAdvancementBrowser.lua",
+      "CharacterAdvancement.xml",
+      "CharacterAdvancement.lua"
+    ]
+  },
+  "entry_points": [
+    "Collections tab: Ascension_Collections/Collections.lua:40-45 does tab = self:AddTab(CHARACTER_ADVANCEMENT, \"CharacterAdvancement\"); tab:SetPreClick(CharacterAdvancement_LoadUI); self.Tabs.CharacterAdvancement = tab:GetTabID(). Selecting the tab (TabSystemMixin:SelectTab, SharedXML/TabSystem/TabSystemMixin.lua:220) runs the preClick loader, then _G[\"CharacterAdvancement\"]:SetShown(true) -> CharacterAdvancementMixin:OnShow.",
+    "Programmatic open: Collections:GoToTab(Collections.Tabs.CharacterAdvancement) (Collections.lua:184; also used by StaticPopup CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES button3 and by Collections PLAYER_LEVEL_UP auto-show via C_PopupQueue:Add). ShowUIPanel(Collections) then SelectTabID.",
+    "Loader: FrameXML/UIParent.lua:327 CharacterAdvancement_LoadUI() -> UIParentLoadAddOn(\"Ascension_CharacterAdvancement\") ONLY when IsDefaultClass() is true, or when C_Config.GetBoolConfig(\"CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED\") == false and CA_FORCE_LEGACY is falsy; IsCustomClass() (CoA) loads Ascension_CoATalents instead; nil/true legacy config loads Ascension_CharacterAdvancementSeason9. ForcedPrimaryStat_LoadUI (UIParent.lua:353) also calls CharacterAdvancement_LoadUI.",
+    "Micro button / keybind: FrameXML/MainMenuBarMicroButtons.xml:265 -> ToggleCollections() (UIParent.lua:655) -> ShowUIPanel(Collections); the CA tab is the default first tab.",
+    "Frame declared in CharacterAdvancement.xml:5 as <Frame name=\"CharacterAdvancement\" parent=\"Collections\" hidden=\"true\" inherits=\"RaisedPortraitFrameTemplate\">; there is no slash command and no self-show on any event (all event handlers early-return when not IsShown, setting needsFullUpdateOnShow).",
+    "In-addon LoadUI calls: WildCard_LoadUI() (CharacterAdvancement.lua:396, UIParent.lua:365 -> Ascension_RandomModeShared + Ascension_WildCard) and ShowForcedPrimaryStat(true, true) (CharacterAdvancement.lua:2773, Templates/CASpellButton.lua:855, CharacterAdvancement.xml:970 -> UIParent.lua:608 -> Ascension_ForcedPrimaryStat)."
+  ],
+  "namespaces": {
+    "C_CharacterAdvancement": {
+      "GetExpectedAE": {
+        "callsites": ["CharacterAdvancement.lua:135"],
+        "args": "(level:number 1..80)",
+        "returns": "number|nil; cached into self.expectedAEByLevel[level] with `or 0`; used for the fake 'next level grants +N AE' tooltip and for the 'Learn spells up to level' header (RefreshHeaderTotal).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetNumFilteredEntries": {
+        "callsites": ["CharacterAdvancement.lua:306", "CharacterAdvancement.lua:1190"],
+        "args": "()",
+        "returns": "number; passed as the ScrollList GetNumResults function for SideBar.SpellList (rows are then filled by FrameXML/SpellListItem.lua via GetFilteredEntryAtIndex(index)).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ClearRecentlyLearnedEntries": {
+        "callsites": ["CharacterAdvancement.lua:307"],
+        "args": "()",
+        "returns": "nothing; called every OnShow when not in Build Creator pick mode.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetLearnedAE": {
+        "callsites": ["CharacterAdvancement.lua:325", "Templates/CASpecTab.lua:11"],
+        "args": "(classDBC:string|nil, specDBC:string|nil) - called with NO args for the character total and with (nil,nil) at addon load from SetupSpecTabs -> tab:UpdateSpellCounts()",
+        "returns": "number|nil (AE spent); `(x or 0) > 0` and `ae and ae > 0` nil-handling; shown as the spec tab count badge.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetLearnedTE": {
+        "callsites": ["Templates/CASpecTab.lua:10"],
+        "args": "(classDBC:string|nil, specDBC:string|nil) - called with (nil,nil) at load",
+        "returns": "number|nil (TE spent in class/spec); nil-tolerant.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetGlobalAEInvestment": {
+        "callsites": ["CharacterAdvancement.lua:471", "Templates/CASpellButton.lua:124", "Templates/CASpellButton.lua:433", "Templates/CASpellButton.lua:621", "Browser/CharacterAdvancementBrowser.lua:404"],
+        "args": "()",
+        "returns": "number (used in subtraction WITHOUT nil check at CASpellButton:124/433/621 and Browser:404; `or 0` only at CA:471). Lua wrapper in GlobalOverwrites.lua:377 returns C_CharacterAdvancement.GetPendingGlobalAEInvestment() when CVar previewCharacterAdvancementChanges is true, else the native of the same name -> BOTH natives are required.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:377 (wrapper over native GetGlobalAEInvestment / GetPendingGlobalAEInvestment)"
+      },
+      "GetGlobalTEInvestment": {
+        "callsites": ["Templates/CAGate.lua:319"],
+        "args": "()",
+        "returns": "number|nil (`or 0`); wrapper GlobalOverwrites.lua:362 -> GetPendingGlobalTEInvestment() in preview mode else native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:362 (wrapper over native GetGlobalTEInvestment / GetPendingGlobalTEInvestment)"
+      },
+      "GetTabTEInvestment": {
+        "callsites": ["Templates/CAGate.lua:320", "Templates/CATalentBrowser.lua:52", "Templates/CATalentBrowser.lua:235", "Templates/CAClassButton.lua:70"],
+        "args": "(classDBC:string, specDBC:string, 0)",
+        "returns": "number|nil (`or 0`); called 30x at ADDON LOAD from CATalentBrowserMixin:OnLoad -> LoadElements(); wrapper GlobalOverwrites.lua:367 -> GetPendingTabTEInvestment(...) in preview mode else native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:367 (wrapper over native GetTabTEInvestment / GetPendingTabTEInvestment)"
+      },
+      "GetClassPointInvestment": {
+        "callsites": ["CharacterAdvancement.lua:1611", "Templates/CASpellButton.lua:432", "Templates/CASpellButton.lua:609", "Templates/CAClassButton.lua:52", "Browser/CharacterAdvancementBrowser.lua:390"],
+        "args": "(classDBC:string, 0)",
+        "returns": "number|nil; `or 0` at CA:1611/CAClassButton:52, raw subtraction at CASpellButton:432/609 and Browser:390; wrapper GlobalOverwrites.lua:372 -> GetPendingClassPointInvestment(...) in preview mode else native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:372 (wrapper over native GetClassPointInvestment / GetPendingClassPointInvestment)"
+      },
+      "IsPending": {
+        "callsites": ["CharacterAdvancement.lua:389", "CharacterAdvancement.lua:1266", "CharacterAdvancement.lua:1267", "CharacterAdvancement.lua:1320", "CharacterAdvancement.lua:2442", "Templates/CASpellButton.lua:95", "Templates/CASpellButton.lua:112", "Templates/CASpellButton.lua:772", "Templates/CASpellButton.lua:861"],
+        "args": "()",
+        "returns": "boolean - true while an unsaved pending build exists; drives Save/Undo buttons, currency display (pending remaining vs GetItemCount) and the CLOSE_..._UNSAVED_PENDING_CHANGES popup on hide.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetFilteredEntries": {
+        "callsites": ["CharacterAdvancement.lua:743", "CharacterAdvancement.lua:749"],
+        "args": "(searchText:string, filters:table<string,true>) - filters keys: FILTER_KNOWN, FILTER_UNKNOWN, FILTER_CAN_LEARN, FILTER_CAN_UNLEARN, FILTER_CAN_ADD, FILTER_CAN_REMOVE, FILTER_QUALITY_NORMAL..LEGENDARY, FILTER_CLASS_<CLASS>/FILTER_CLASS_DEATH_KNIGHT/FILTER_CLASS_GENERAL/FILTER_CLASS_REBORN_*, FILTER_TYPE_ABILITY/TALENT/TRAIT; default {FILTER_KNOWN=true}",
+        "returns": "nothing; results are read immediately via GetNumFilteredEntries / GetFilteredEntryAtIndex (SpellList:RefreshScrollFrame right after).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTalentID": {
+        "callsites": ["CharacterAdvancement.lua:790"],
+        "args": "(entryID:number)",
+        "returns": "boolean (Locate: pick TALENT_BROWSER_TAB).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTalentAbilityID": {
+        "callsites": ["CharacterAdvancement.lua:790"],
+        "args": "(entryID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsMastery": {
+        "callsites": ["CharacterAdvancement.lua:792", "CharacterAdvancement.lua:2377"],
+        "args": "(spellID:number) - entry.Spells[1]",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetMasteriesByClass": {
+        "callsites": ["CharacterAdvancement.lua:854"],
+        "args": "(classDBC:string, specDBC:string)",
+        "returns": "array of entry tables (ipairs); accumulated into self.classMasteries for the MASTERY tab; empty array hides that tab.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetImplicitByClass": {
+        "callsites": ["CharacterAdvancement.lua:858"],
+        "args": "(classDBC:string, specDBC:string)",
+        "returns": "array of entry tables (implicit traits) -> self.classTraits.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntryByInternalID": {
+        "callsites": ["CharacterAdvancement.lua:1254", "CharacterAdvancement.lua:1330", "CharacterAdvancement.lua:1470", "CharacterAdvancement.lua:2783", "CharacterAdvancement.lua:2806", "CharacterAdvancement.lua:2854", "Templates/CASpellButton.lua:67"],
+        "args": "(entryID:number)",
+        "returns": "entry table|nil (nil-checked everywhere). Entry fields read across the addon: ID, Name, Icon (icon file name without path), Spells (array of spellIDs, index = rank), Masteries (array of mastery entryIDs, `next()`), Type (\"Ability\"|\"Talent\"|\"TalentAbility\"), RequiredLevel, RequiredAEInvestment, RequiredTEInvestment, RequiredTabTEInvestment, RequiredClassPoints, Class (DBC class name e.g. \"Hunter\"/\"General\"), Tab (DBC spec name), Row (0-based), Column (1-based), ConnectedNodes (array of PARENT entryIDs), Group, Flags.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingRemainingAE": {
+        "callsites": ["CharacterAdvancement.lua:1266"],
+        "args": "()",
+        "returns": "number (shown instead of GetItemCount(ABILITY_ESSENCE) while IsPending()).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingRemainingTE": {
+        "callsites": ["CharacterAdvancement.lua:1267"],
+        "args": "()",
+        "returns": "number.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanApplyPendingBuild": {
+        "callsites": ["CharacterAdvancement.lua:1321"],
+        "args": "()",
+        "returns": "7 values: canApply:boolean, reason:string (GlobalString key or format string), traversalError:string|nil (GlobalString key), entryID:number|nil, entryRank:number|nil, marksCost:number, goldCost:number (CharacterAdvancementUtil.ConfirmApplyPendingBuild does `marksCost > 0` without nil check).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CancelPendingBuild": {
+        "callsites": ["CharacterAdvancement.lua:1357"],
+        "args": "()",
+        "returns": "nothing; discards the pending build.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "CanUnlearnAllTalents": {
+        "callsites": ["CharacterAdvancement.lua:1456"],
+        "args": "()",
+        "returns": "canReset:boolean, reason:string (GlobalString key) - default-class Reset All Talents button.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanClearPendingBuild": {
+        "callsites": ["CharacterAdvancement.lua:1464"],
+        "args": "(clearType:boolean) - Const.CharacterAdvancement.ClearEverything (= false)",
+        "returns": "canReset:boolean, reason:string, traversalError:string|nil, entryID:number|nil, entryRank:number|nil - hero Reset Build button.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpellsByClass": {
+        "callsites": ["CharacterAdvancement.lua:1846"],
+        "args": "(classDBC:string, specDBC:string|\"None\", includeHidden:false)",
+        "returns": "array of entry tables (ipairs order = grid order; 3 columns per spec, 4 columns when spec==\"None\").",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentsByClass": {
+        "callsites": ["CharacterAdvancement.lua:2014", "Templates/CATalentBrowser.lua:131"],
+        "args": "(classDBC:string, specDBC:string, includeHidden:false)",
+        "returns": "array of entry tables; each needs Row (0-based), Column (1-based), ConnectedNodes (parent IDs), ID, RequiredTEInvestment, RequiredTabTEInvestment (gate conditions from the top-left node of each row).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetKnownSpellEntriesForClass": {
+        "callsites": ["CharacterAdvancement.lua:2105"],
+        "args": "(classDBC:string|\"General\", \"None\") - \"Hero\" is remapped to \"General\" by the caller",
+        "returns": "array of entry tables (# and ipairs) - summary tab.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetKnownTalentEntriesForClass": {
+        "callsites": ["CharacterAdvancement.lua:2153"],
+        "args": "(classDBC:string|\"General\", \"None\")",
+        "returns": "array of entry tables.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTalentSpellID": {
+        "callsites": ["CharacterAdvancement.lua:2202", "Templates/CASpellButton.lua:549"],
+        "args": "(spellID:number)",
+        "returns": "boolean (Build Creator pick mode only).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTalentAbilitySpellID": {
+        "callsites": ["CharacterAdvancement.lua:2204", "Templates/CASpellButton.lua:551"],
+        "args": "(spellID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanAddByEntryID": {
+        "callsites": ["CharacterAdvancement.lua:2320", "Templates/CASpellButton.lua:284", "Templates/CASpellButton.lua:502", "Templates/CASpellButton.lua:574", "Templates/CASpellButton.lua:799", "Templates/CASpellButton.lua:860", "Templates/CABranchTexture.lua:134"],
+        "args": "(entryID:number, numRanks:number)",
+        "returns": "canAdd:boolean, reason:string (an Enum.CALearnResult value, i.e. a GlobalString key such as \"CA_LEARN_LOW_LEVEL\"; Enum.CALearnResult.DisplayEntry means 'show greyed, not learnable'). Preview-mode replacement for CanLearnID.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddByEntryID": {
+        "callsites": ["CharacterAdvancement.lua:2323", "Templates/CASpellButton.lua:504", "Templates/CASpellButton.lua:576", "Templates/CASpellButton.lua:800", "Templates/CASpellButton.lua:863", "Templates/CASpellButton.lua:868"],
+        "args": "(entryID:number, numRanks:number)",
+        "returns": "nothing; adds ranks to the client-side pending build.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "CanLearnID": {
+        "callsites": ["CharacterAdvancement.lua:2326", "Templates/CASpellButton.lua:286", "Templates/CASpellButton.lua:507", "Templates/CASpellButton.lua:578"],
+        "args": "(entryID:number)",
+        "returns": "canLearn:boolean, reason:string (Enum.CALearnResult key). Wrapper GlobalOverwrites.lua:382 returns CanAddByEntryID(id, 1) in preview mode, else the native CanLearnID.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:382 (wrapper over native CanLearnID / CanAddByEntryID)"
+      },
+      "IsKnownID": {
+        "callsites": ["CharacterAdvancement.lua:2333", "Templates/CASpellButton.lua:244", "Templates/CASpellButton.lua:714", "Templates/CASpellButton.lua:765", "Templates/CABranchTexture.lua:132"],
+        "args": "(entryID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsLockedID": {
+        "callsites": ["CharacterAdvancement.lua:2335", "Templates/CASpellButton.lua:241"],
+        "args": "(entryID:number)",
+        "returns": "boolean (WildCard lock).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UnlockID": {
+        "callsites": ["CharacterAdvancement.lua:2342"],
+        "args": "(entryID:number)",
+        "returns": "nothing.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_UNLOCK_ENTRY_RESULT",
+        "defined_in_lua": null
+      },
+      "LockID": {
+        "callsites": ["CharacterAdvancement.lua:2352"],
+        "args": "(entryID:number)",
+        "returns": "nothing.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_LOCK_ENTRY_RESULT",
+        "defined_in_lua": null
+      },
+      "CanRemoveByEntryID": {
+        "callsites": ["CharacterAdvancement.lua:2390", "CharacterAdvancement.lua:2398", "Templates/CASpellButton.lua:255", "Templates/CASpellButton.lua:517"],
+        "args": "(entryID:number)",
+        "returns": "canRemove:boolean, reason:string (Enum.CAUnlearnResult key).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveByEntryID": {
+        "callsites": ["CharacterAdvancement.lua:2394", "Templates/CASpellButton.lua:519"],
+        "args": "(entryID:number)",
+        "returns": "nothing; removes from pending build.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "CanUnlearnID": {
+        "callsites": ["CharacterAdvancement.lua:2405", "Templates/CASpellButton.lua:257", "Templates/CASpellButton.lua:412", "Templates/CASpellButton.lua:419", "Templates/CASpellButton.lua:522"],
+        "args": "(entryID:number)",
+        "returns": "canUnlearn:boolean, reason:string. Wrapper GlobalOverwrites.lua:387 -> CanRemoveByEntryID(id, 1) in preview mode else native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:387 (wrapper over native CanUnlearnID / CanRemoveByEntryID)"
+      },
+      "IsKnownSpellID": {
+        "callsites": ["CharacterAdvancement.lua:2417", "CharacterAdvancement.lua:2489", "CharacterAdvancement.lua:2498"],
+        "args": "(spellID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntriesAvailableForTrade": {
+        "callsites": ["CharacterAdvancement.lua:2429"],
+        "args": "({Entry=entryID:number, NewCARank=#entry.Spells})",
+        "returns": "array of swap-suggestion tables (only `next()` tested here; CharacterAdvancementUtil.IsSwapSuggestion reads v.ExistingEntry.Entry, v.UpdatedEntries[1].Entry and .NewCARank; the whole table is later passed to CanSwapEntriesByID/SwapEntriesByID).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsSuggestionContextOverride": {
+        "callsites": ["CharacterAdvancement.lua:2458", "Browser/CharacterAdvancementBrowser.lua:441"],
+        "args": "(entryID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveSuggestionContextOverride": {
+        "callsites": ["CharacterAdvancement.lua:2461"],
+        "args": "(entryID:number)",
+        "returns": "nothing.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_SUGGESTIONS_UPDATED (inferred: handler re-runs BrowserSearch)",
+        "defined_in_lua": null
+      },
+      "AddSuggestionContextOverride": {
+        "callsites": ["CharacterAdvancement.lua:2466"],
+        "args": "(entryID:number)",
+        "returns": "nothing.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_SUGGESTIONS_UPDATED (inferred)",
+        "defined_in_lua": null
+      },
+      "HasAnySuggestionContextOverrides": {
+        "callsites": ["CharacterAdvancement.lua:2473"],
+        "args": "()",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ClearSuggestionContextOverrides": {
+        "callsites": ["CharacterAdvancement.lua:2478"],
+        "args": "()",
+        "returns": "nothing.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_SUGGESTIONS_UPDATED (inferred)",
+        "defined_in_lua": null
+      },
+      "GetPendingRankByEntryID": {
+        "callsites": ["Templates/CASpellButton.lua:96", "Templates/CASpellButton.lua:98", "Templates/CASpellButton.lua:773", "Templates/CASpellButton.lua:775"],
+        "args": "(entryID:number)",
+        "returns": "rank:number, maxRank:number (rank fed to math.max -> must be a number, not nil).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentRankByID": {
+        "callsites": ["Templates/CASpellButton.lua:103", "Templates/CASpellButton.lua:780", "Templates/CASpellButton.lua:796", "Templates/CASpellButton.lua:807"],
+        "args": "(entryID:number)",
+        "returns": "currentRank:number, maxRank:number (0 when unknown; rank indexes entry.Spells).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsPendingEntryID": {
+        "callsites": ["Templates/CASpellButton.lua:228", "Templates/CABranchTexture.lua:133"],
+        "args": "(entryID:number)",
+        "returns": "boolean - entry is part of the pending build (AutoCastShine + branch highlight).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "PickupSpell": {
+        "callsites": ["Templates/CASpellButton.lua:466"],
+        "args": "(entryID:number)",
+        "returns": "nothing; puts the entry's current-rank spell on the cursor (OnDragStart). Stock equivalent: PickupSpell(spellName) with the resolved spellID (allowed from insecure code in 3.3.5a).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ApplyPendingBuild": {
+        "callsites": ["Templates/CASpellButton.lua:869"],
+        "args": "()",
+        "returns": "nothing; commits the pending build to the server (primary-stat quick pick path; normal path is CharacterAdvancementUtil.ConfirmApplyPendingBuild).",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT (then CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED)",
+        "defined_in_lua": null
+      },
+      "KnowsConnectedNodesFor": {
+        "callsites": ["Templates/CASpellButton.lua:768"],
+        "args": "(entryID:number)",
+        "returns": "boolean - all parent nodes known (talent button enabled visual).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetClassInfo": {
+        "callsites": ["Templates/CASpellButton.lua:438"],
+        "args": "(spellID:number)",
+        "returns": "classFile:string|nil, specFile:string|nil (upper-cased by caller; nil -> \"GENERAL\") - gate tooltip only.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetQualityCount": {
+        "callsites": ["Templates/CARarityBar.lua:47"],
+        "args": "(quality:Enum.SpellQuality number 2..5)",
+        "returns": "number of known spells of that quality; wrapper GlobalOverwrites.lua:409 maps quality through Enum.QualityToCAQuality before calling the native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:409 (wrapper over native GetQualityCount)"
+      },
+      "GetQualityLimit": {
+        "callsites": ["Templates/CARarityBar.lua:49"],
+        "args": "(quality:Enum.SpellQuality)",
+        "returns": "number|nil (`limit or amount`); wrapper GlobalOverwrites.lua:414 over the native.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:414 (wrapper over native GetQualityLimit)"
+      },
+      "GetSpellTagTypeDisplayInfo": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:119"],
+        "args": "(tagID:number)",
+        "returns": "name:string|nil, icon (falls back to the raw id). Also called at addon LOAD via CharacterAdvancementUtil.InitializeSpellTagFilter (CharacterAdvancement.lua:114).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategoryDisplayInfo": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:510", "Browser/CharacterAdvancementBrowser.lua:575", "Browser/CharacterAdvancementBrowser.lua:636", "Browser/CharacterAdvancementBrowser.lua:729"],
+        "args": "(categoryID:number)",
+        "returns": "reqLevel:number (compared to UnitLevel without nil check), name:string|nil, icon:string (Interface\\\\Icons\\\\ prefix added by caller), description:string|nil, shouldStaggerDisplayingEntries:boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetFilteredEntryAtIndexByCategory": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:523", "Browser/CharacterAdvancementBrowser.lua:598"],
+        "args": "(categoryID:number, index:number 1-based)",
+        "returns": "entry:table|nil, isSuggested:boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetCategories": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:629", "Browser/CharacterAdvancementBrowser.lua:721"],
+        "args": "(includeHidden:true)",
+        "returns": "array of categoryIDs in display order (numbers). Hard-coded semantics in Browser lua: 31 = 'recently unlocked' header, 42 = 'soon unlocked' (both hidden), 32..41 = per-class recently-unlocked buckets, 43..52 = per-class locked/soon buckets.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetNumFilteredEntriesByCategory": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:634"],
+        "args": "(categoryID:number)",
+        "returns": "number.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetFilteredEntriesByCategory": {
+        "callsites": ["Browser/CharacterAdvancementBrowser.lua:733"],
+        "args": "(categoryID:number, spellTagIDs:array<number>, searchText:string, filters:table<string,true>)",
+        "returns": "nothing; BuildCategoryMap reads counts immediately afterwards.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetQualityInfo": {
+        "callsites": ["SharedXML/SharedTemplates.lua:450 (SpellIconTemplateMixin:SetCharacterAdvancementEntry, reached from every CA button's Icon:SetCharacterAdvancementEntry because OnLoad calls Icon:UseQuality(true))", "FrameXML/SpellListItem.lua:357"],
+        "args": "(spellID:number)",
+        "returns": "quality:string|number, qualityCount:number; wrapper GlobalOverwrites.lua:392 maps the native's quality name through Enum.SpellQuality (and in WildCard mode substitutes talent rank). INDIRECT call (not in the addon's own files) but on the OnShow path.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:392 (wrapper over native GetQualityInfo)"
+      },
+      "GetFilteredEntryAtIndex": {
+        "callsites": ["FrameXML/SpellListItem.lua:70 (SpellListItemTemplate rows of SideBar.SpellList)"],
+        "args": "(index:number 1-based)",
+        "returns": "entry table|nil. INDIRECT (FrameXML template used by this addon).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntryBySpellID": {
+        "callsites": ["SharedXML/SharedTemplates.lua:485 (SpellIconTemplateMixin:OnDragStart)", "FrameXML/Util/CharacterAdvancementUtil.lua:30,55,90,482,491"],
+        "args": "(spellID:number)",
+        "returns": "entry table|nil. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingGlobalAEInvestment": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:378"],
+        "args": "()",
+        "returns": "number - used instead of GetGlobalAEInvestment whenever CVar previewCharacterAdvancementChanges == 1 (always true for heroes without CONFIG_CHARACTER_ADVANCEMENT_QUALITIES_ENABLED and for default classes). INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingGlobalTEInvestment": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:363"],
+        "args": "()",
+        "returns": "number. INDIRECT (preview mode).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingTabTEInvestment": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:368"],
+        "args": "(classDBC, specDBC, 0)",
+        "returns": "number. INDIRECT (preview mode).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingClassPointInvestment": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:373"],
+        "args": "(classDBC, 0)",
+        "returns": "number. INDIRECT (preview mode).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsPendingBuildAvailable": {
+        "callsites": ["FrameXML/Util/C_PrimaryStat.lua:101 (C_PrimaryStat:GetActivePrimaryStat, called from CharacterAdvancement.lua:1240 RefreshPrimaryStats at OnLoad for heroes)"],
+        "args": "()",
+        "returns": "boolean. INDIRECT, hero only.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ShouldConfirmLearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:151 (ConfirmOrLearnID, from CharacterAdvancement.lua:2328 and CASpellButton.lua:508/579/813)"],
+        "args": "(entryID:number|array<number>)",
+        "returns": "shouldConfirm:boolean, reasons:array of {Error=Enum.CAConfirmReason, Arg1, Arg2}. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "LearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:156", "FrameXML/StaticPopup.lua:610 (CONFIRM_LEARN_S)"],
+        "args": "(entryID:number|array<number>)",
+        "returns": "nothing; server learn request. INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_LEARN_RESULT",
+        "defined_in_lua": null
+      },
+      "ShouldConfirmUnlearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:321 (ConfirmOrUnlearnID)"],
+        "args": "(entryID:number)",
+        "returns": "shouldConfirm:boolean, reasons:array. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UnlearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:326", "FrameXML/StaticPopup.lua:640 (CONFIRM_UNLEARN_S)"],
+        "args": "(entryID:number)",
+        "returns": "boolean accepted (false = dropped while a WildCard reveal is pending). INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_UNLEARN_RESULT",
+        "defined_in_lua": null
+      },
+      "ShouldConfirmUnlearnAllTalents": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:381 (ConfirmOrUnlearnAllTalents, from CharacterAdvancement.xml:357 default-class Reset button)"],
+        "args": "()",
+        "returns": "shouldConfirm:boolean, reasons:array. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UnlearnAllTalents": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:383,394"],
+        "args": "()",
+        "returns": "nothing. INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PURGE_TALENTS_RESULT",
+        "defined_in_lua": null
+      },
+      "ClearPendingBuild": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:358 (ConfirmClearBuild, from CharacterAdvancement.xml:359 hero Reset Build button)"],
+        "args": "(clearType:boolean)",
+        "returns": "nothing. INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "ExportBuild": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:517 (GetBuildWebURL, from CharacterAdvancement.xml:467 Share Build button)"],
+        "args": "(true)",
+        "returns": "buildLink:string|nil (URL path token). INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ImportPendingBuild": {
+        "callsites": ["FrameXML/StaticPopup.lua:78,83 (CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD, opened from CharacterAdvancement.xml:485)"],
+        "args": "(buildString:string)",
+        "returns": "success:boolean, traversalError, entryID, entryRank. INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "GetRootSpellTagTypes": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:657 (InitializeSpellTagFilter, called at addon LOAD from CharacterAdvancement.lua:114 and again on SPELL_TAG_TYPES_CHANGED at :2767)"],
+        "args": "()",
+        "returns": "array of root tagIDs (pairs). INDIRECT but LOAD-TIME.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpellTagTypes": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:668,681"],
+        "args": "(parentTagID:number)",
+        "returns": "array of child tagIDs|nil. INDIRECT, LOAD-TIME.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntriesAvailableForSwapInClass": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:225 (UpdateSwapSuggestionsForClass, from CharacterAdvancement.lua:867 SelectClass while a swap is marked)"],
+        "args": "({Entry=entryID, NewCARank=0}, classDBC)",
+        "returns": "array of swap-suggestion tables. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSwapEntriesByID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:246 (AttemptSwap)"],
+        "args": "(swapData:table)",
+        "returns": "boolean. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SwapEntriesByID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:247"],
+        "args": "(swapData:table)",
+        "returns": "nothing (then ConfirmApplyPendingBuild). INDIRECT.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "GetAbilityEssenceCost": {
+        "callsites": ["FrameXML/SpellListItem.lua:286", "FrameXML/Util/CharacterAdvancementUtil.lua:75,83,99,106"],
+        "args": "(spellID:number)",
+        "returns": "number|nil (`or 0`). INDIRECT (SpellList rows).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentEssenceCost": {
+        "callsites": ["FrameXML/SpellListItem.lua:287", "FrameXML/Util/CharacterAdvancementUtil.lua:76,84,100,107"],
+        "args": "(spellID:number)",
+        "returns": "number|nil. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentRankBySpellID": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:398 (GetQualityInfo wrapper, WildCard only)", "FrameXML/Util/CharacterAdvancementUtil.lua:96"],
+        "args": "(spellID:number)",
+        "returns": "currentRank:number, maxRank:number. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_BuildEditor": {
+      "GetNumFilteredEntries": {
+        "callsites": ["CharacterAdvancement.lua:298"],
+        "args": "()",
+        "returns": "number (SpellList row count while BuildCreatorUtil.IsPickingSpells()).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetFilteredEntries": {
+        "callsites": ["CharacterAdvancement.lua:741", "CharacterAdvancement.lua:747"],
+        "args": "(searchText:string, filters:table<string,true>)",
+        "returns": "nothing.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEssenceForLevel": {
+        "callsites": ["CharacterAdvancement.lua:1262"],
+        "args": "(level:number) - BuildCreatorUtil.GetPickLevel()",
+        "returns": "4 values; caller keeps #2 remainingAE and #4 remainingTE.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DoesBuildHaveSpellID": {
+        "callsites": ["CharacterAdvancement.lua:2211", "CharacterAdvancement.lua:2288", "Templates/CASpellButton.lua:86", "Templates/CASpellButton.lua:171", "Templates/CASpellButton.lua:530", "Templates/CASpellButton.lua:753"],
+        "args": "(spellID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpellByID": {
+        "callsites": ["CharacterAdvancement.lua:2217", "CharacterAdvancement.lua:2231", "CharacterAdvancement.lua:2246", "CharacterAdvancement.lua:2261", "CharacterAdvancement.lua:2276", "Templates/CASpellButton.lua:561"],
+        "args": "(spellID:number)",
+        "returns": "spellInfo table|nil (caller then sets .Spell, .Level, .IsCoreAbility/.IsOptimalAbility/.IsEmpoweringAbility/.IsSynergisticAbility and passes it to AddSpell); nil -> BuildCreatorUtil.CreateSpellInfo().",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddSpell": {
+        "callsites": ["CharacterAdvancement.lua:2220", "CharacterAdvancement.lua:2235", "CharacterAdvancement.lua:2250", "CharacterAdvancement.lua:2265", "CharacterAdvancement.lua:2280", "Templates/CASpellButton.lua:564"],
+        "args": "(spellInfo:table)",
+        "returns": "nothing (followed by BuildCreatorUtil.EditorSpellsChanged() -> OnEditorSpellsChanged callback).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveSpell": {
+        "callsites": ["CharacterAdvancement.lua:2294", "Templates/CASpellButton.lua:531"],
+        "args": "(spellID:number)",
+        "returns": "nothing.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanAddSpell": {
+        "callsites": ["Templates/CASpellButton.lua:179"],
+        "args": "(spellInfo:table from BuildCreatorUtil.CreateSpellInfo(spellID, level))",
+        "returns": "canAdd:boolean, reason:TABLE (reason[1] is the Enum.CALearnResult key) - note the table shape differs from C_CharacterAdvancement.CanAddByEntryID.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetQualityInfoForLevel": {
+        "callsites": ["Templates/CARarityBar.lua:45"],
+        "args": "()",
+        "returns": "multiple numbers, one per quality index (select(quality, ...)).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Config": {
+      "GetBoolConfig": {
+        "callsites": ["CharacterAdvancement.lua:213", "CharacterAdvancement.lua:683", "CharacterAdvancement.lua:704", "CharacterAdvancement.lua:1402", "CharacterAdvancement.lua:1438", "FrameXML/Util/CharacterAdvancementUtil.lua:700 (CanUseBrowser)", "FrameXML/UIParent.lua:337 (LoadUI routing)"],
+        "args": "(key:string) - keys used: CONFIG_CHARACTER_ADVANCEMENT_QUALITIES_ENABLED, CONFIG_WILDCARD_QUICK_ROLLING_ENABLED, CONFIG_ABILITY_BROWSER_ENABLED, CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED, CONFIG_USE_CUSTOM_BASE_MISS_CHANCE (FrameXML/Constants.lua)",
+        "returns": "boolean|nil (LoadUI treats nil as legacy=true).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_ClassInfo": {
+      "GetSpecInfo": {
+        "callsites": ["CharacterAdvancement.lua:849", "Templates/CAGate.lua:166", "Templates/CAGate.lua:177", "Templates/CAGate.lua:192", "Templates/CATalentBrowser.lua:117", "Templates/CASpecTab.lua:45", "Templates/CASpecTab.lua:58"],
+        "args": "(classFile:string e.g. \"WARRIOR\", specFile:string e.g. \"ARMS\")",
+        "returns": "table {Name:string, SpecFilename:string (icon file name)}; NOT nil-checked at CharacterAdvancement.lua:850, CASpecTab.lua:46/59, CAGate.lua:167 -> must return a table for every (class, spec) pair in CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Wildcard": {
+      "CanUseRapidRolling": {
+        "callsites": ["CharacterAdvancement.lua:1404"],
+        "args": "()",
+        "returns": "enabled:boolean, reason:string|nil (GlobalString key) - WildCard mode only.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AccountInfo": {
+      "GetGMLevel": {
+        "callsites": ["CharacterAdvancement.lua:2485"],
+        "args": "()",
+        "returns": "number; > 0 adds '(GM) Learn/Unlearn' menu items that SendChatMessage('.ca2 player addentry|removeentry <name> <entryID>').",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Realm": {
+      "IsDevelopment": {
+        "callsites": ["Templates/CASpellButton.lua:411", "Templates/CASpellButton.lua:418"],
+        "args": "()",
+        "returns": "boolean; adds 'Error Key' tooltip line.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Spell": {
+      "GetMaxLearnableRank": {
+        "callsites": ["Templates/CASpellButton.lua:265"],
+        "args": "(spellID:number, level:number)",
+        "returns": "maxSpellID:number|nil (nil-checked) - rank-up indicator for known Ability/TalentAbility entries.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTrainerSpell": {
+        "callsites": ["Templates/CASpellButton.lua:267"],
+        "args": "(spellID:number)",
+        "returns": "boolean. (FrameXML/Util/C_Spell.lua:470 aliases it to the global IsTrainerSpell if the native is absent.)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["Templates/CAConnectedNodes.lua:208", "Templates/CAConnectedNodes.lua:256"],
+        "args": "(fmt:string, ...) printf-style",
+        "returns": "nothing; logs unroutable / unknown-parent talent connections.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Aura": {
+      "UnitHasAura": {
+        "callsites": ["FrameXML/Util/C_Player.lua:63 (C_Player:HasAura, from C_Player:IsPrestiged called at CharacterAdvancement.lua:259 and :1068)"],
+        "args": "(\"player\", auraSpellID:number) - 9930831 = Prestiged",
+        "returns": "boolean. INDIRECT.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Player": {
+      "IsHero": {
+        "callsites": ["CharacterAdvancement.lua:10", "CharacterAdvancement.lua:212", "CharacterAdvancement.lua:242", "CharacterAdvancement.lua:679", "CharacterAdvancement.lua:789", "CharacterAdvancement.lua:887", "CharacterAdvancement.lua:1063", "CharacterAdvancement.lua:1089", "CharacterAdvancement.lua:1224", "Templates/CASpellButton.lua:136"],
+        "args": "()",
+        "returns": "boolean = IsHeroClass(\"player\") = select(2, UnitClassBase(\"player\")) == \"HERO\".",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua"
+      },
+      "IsDefaultClass": {
+        "callsites": ["CharacterAdvancement.lua:49", "CharacterAdvancement.lua:65", "CharacterAdvancement.lua:148", "CharacterAdvancement.lua:203", "CharacterAdvancement.lua:491", "CharacterAdvancement.lua:1273", "CharacterAdvancement.lua:1386", "CharacterAdvancement.lua:1449", "CharacterAdvancement.lua:1613", "CharacterAdvancement.lua:2206", "Templates/CASpellButton.lua:553", "Templates/CAConnectedNodes.lua:216"],
+        "args": "()",
+        "returns": "boolean = IsDefaultClass(\"player\") = bit.contains(Enum.ClassMask.DEFAULT, UnitClassMask(\"player\")).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua"
+      },
+      "GetClass": {
+        "callsites": ["CharacterAdvancement.lua:207", "CharacterAdvancement.lua:316", "CharacterAdvancement.lua:938"],
+        "args": "()",
+        "returns": "classFile:string (2nd return of the UnitClassBase override, incl. \"HERO\"), classID, classMask.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua"
+      },
+      "IsPrestiged": {
+        "callsites": ["CharacterAdvancement.lua:259", "CharacterAdvancement.lua:1068"],
+        "args": "()",
+        "returns": "boolean via C_Aura.UnitHasAura(\"player\", 9930831).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua"
+      },
+      "GetLevel": {
+        "callsites": ["Templates/CASpellButton.lua:115", "Templates/CASpellButton.lua:265", "Templates/CASpellButton.lua:685", "Templates/CASpellButton.lua:785"],
+        "args": "()",
+        "returns": "number (cached currentLevel or UnitLevel(\"player\")).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua"
+      }
+    },
+    "C_GameMode": {
+      "IsGameModeActive": {
+        "callsites": ["CharacterAdvancement.lua:54", "CharacterAdvancement.lua:177", "CharacterAdvancement.lua:186", "CharacterAdvancement.lua:224", "CharacterAdvancement.lua:324", "CharacterAdvancement.lua:462", "CharacterAdvancement.lua:675", "CharacterAdvancement.lua:696", "CharacterAdvancement.lua:1080", "CharacterAdvancement.lua:1224", "CharacterAdvancement.lua:1438", "CharacterAdvancement.lua:1835", "CharacterAdvancement.lua:1881", "CharacterAdvancement.lua:2002", "CharacterAdvancement.lua:2333", "CharacterAdvancement.lua:2387", "Browser/CharacterAdvancementBrowser.lua:53"],
+        "args": "(...Enum.GameMode bit flags)",
+        "returns": "boolean; Lua: bit.contains(GetCustomGameMode(), mode) for each arg -> requires NATIVE global GetCustomGameMode() returning the mode bitmask (Enum.GameMode.None=0, Draft=0x08, WildCard=0x40, BuildDraft=0x800, ...).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_GameMode.lua"
+      },
+      "RegisterCallback": {
+        "callsites": ["CharacterAdvancement.lua:120"],
+        "args": "(\"OnGameModeChanged\", closure)",
+        "returns": "CallbackRegistryMixin; fired from C_GameMode:ASCENSION_CUSTOM_GAME_MODE_CHANGED (event via C_Hook) and once on PLAYER_ENTERING_WORLD.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_GameMode.lua (CallbackRegistryMixin)"
+      }
+    },
+    "C_CVar": {
+      "Get": {
+        "callsites": ["CharacterAdvancement.lua:248", "CharacterAdvancement.lua:249", "CharacterAdvancement.lua:314", "CharacterAdvancement.lua:315", "CharacterAdvancement.lua:460", "CharacterAdvancement.lua:511", "CharacterAdvancement.lua:559", "CharacterAdvancement.lua:565", "CharacterAdvancement.lua:869", "CharacterAdvancement.lua:918", "CharacterAdvancement.lua:1165", "CharacterAdvancement.lua:1282", "CharacterAdvancement.lua:1482", "CharacterAdvancement.lua:1501", "CharacterAdvancement.lua:1628", "CharacterAdvancement.lua:1646", "CharacterAdvancement.lua:1647", "CharacterAdvancement.lua:2359", "CharacterAdvancement.lua:2544", "CharacterAdvancement.lua:2683", "CharacterAdvancement.lua:2705"],
+        "args": "(cvar:string) - \"caLastClass\" (class token or \"BROWSER\"), \"caLastSpec\" (spec token, \"SUMMARY\", \"MASTERY\", \"TALENTBROWSER\", \"SPELLBROWSER\")",
+        "returns": "string|nil = GetCVar(cvar); string.isNilOrEmpty guards.",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:108"
+      },
+      "Set": {
+        "callsites": ["CharacterAdvancement.lua:175", "CharacterAdvancement.lua:184", "CharacterAdvancement.lua:205", "CharacterAdvancement.lua:217", "CharacterAdvancement.lua:807", "CharacterAdvancement.lua:812", "CharacterAdvancement.lua:817", "CharacterAdvancement.lua:910", "CharacterAdvancement.lua:912", "CharacterAdvancement.lua:914", "CharacterAdvancement.lua:916", "CharacterAdvancement.lua:918", "CharacterAdvancement.lua:1166"],
+        "args": "(cvar:string, value:string)",
+        "returns": "nothing = SetCVar(cvar, value). The three CVars are registered natively (RegisterSavedCVar, FrameXML/GameCVars.lua:61-62 character-scoped, :114 account-scoped); on a stock client an unregistered CVar cannot be set, so the shim must back C_CVar.Get/Set for these names with SavedVariables.",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:120"
+      },
+      "GetBool": {
+        "callsites": ["CharacterAdvancement.lua:2318", "CharacterAdvancement.lua:2389", "CharacterAdvancement.lua:2419", "CharacterAdvancement.lua:2427", "Templates/CASpellButton.lua:500", "Templates/CASpellButton.lua:516", "Templates/CASpellButton.lua:567", "Templates/CASpellButton.lua:795", "Templates/CAClassButton.lua:45", "Templates/CASpecTab.lua:4"],
+        "args": "(\"previewCharacterAdvancementChanges\")",
+        "returns": "boolean = toboolean(GetCVar(cvar)); this flag selects 'pending build' preview mode (also consulted by the GlobalOverwrites wrappers).",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:116"
+      }
+    },
+    "C_PrimaryStat": {
+      "GetActivePrimaryStat": {
+        "callsites": ["CharacterAdvancement.lua:1240"],
+        "args": "()",
+        "returns": "id:number|nil (1..4,6); Lua over C_CharacterAdvancement.IsPendingBuildAvailable/GetPendingRankByEntryID and IsSpellKnown(PRIMARY_STATS[id]).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_PrimaryStat.lua:100"
+      },
+      "GetInternalID": {
+        "callsites": ["CharacterAdvancement.lua:1241"],
+        "args": "(id:number)",
+        "returns": "CA entryID (1149 Strength, 1150 Agility, 1151 Intellect, 1152 Spirit, 18149 Duality).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_PrimaryStat.lua:87"
+      },
+      "GetPrimaryStatInfo": {
+        "callsites": ["CharacterAdvancement.lua:1248"],
+        "args": "(id:number)",
+        "returns": "spellId, internalId, icon, statName (4th used), spellName; uses GetSpellInfo(PRIMARY_STATS[id]).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_PrimaryStat.lua:131"
+      }
+    },
+    "C_Quest": {
+      "SendPathToAscensionEvent": {
+        "callsites": ["CharacterAdvancement.xml:59"],
+        "args": "(\"ACTION_OPEN_PET_TALENTS\")",
+        "returns": "nothing; Lua: SendAddonMessage(\"ASC_PATH_TO_ASCENSION\", msg, \"WHISPER\", UnitName(\"player\")).",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Quest.lua:253"
+      }
+    }
+  },
+  "globals": {
+    "CharacterAdvancementUtil": {
+      "callsites": ["CharacterAdvancement.lua:113", "CharacterAdvancement.lua:114", "CharacterAdvancement.lua:331", "CharacterAdvancement.lua:383", "CharacterAdvancement.lua:470", "CharacterAdvancement.lua:787", "CharacterAdvancement.lua:847", "CharacterAdvancement.lua:852", "CharacterAdvancement.lua:867", "CharacterAdvancement.lua:1339", "CharacterAdvancement.lua:1356", "CharacterAdvancement.lua:1361", "CharacterAdvancement.lua:2306", "CharacterAdvancement.lua:2309", "CharacterAdvancement.lua:2328", "CharacterAdvancement.lua:2401", "CharacterAdvancement.lua:2447", "CharacterAdvancement.xml:357", "CharacterAdvancement.xml:359", "CharacterAdvancement.xml:467", "Templates/CASpellButton.lua:78", "Templates/CASpellButton.lua:123", "Templates/CASpellButton.lua:188", "Templates/CASpellButton.lua:195", "Templates/CASpellButton.lua:260", "Templates/CASpellButton.lua:569", "Templates/CAGate.lua:346", "Templates/CATalentBrowser.lua:31", "Templates/CAClassButton.lua:21", "Browser/CharacterAdvancementBrowser.lua:388", "Browser/CharacterAdvancementBrowser.lua:598"],
+      "args": "members used: InitializeFilter(filterButton, closure), InitializeSpellTagFilter(filterButton, closure), CanUseBrowser(), MarkForSwap(entryID|nil, suggestions, inverted), IsSwapping(), IsSwapSuggestion(entryID), AttemptSwap(entryID), UpdateSwapSuggestionsForClass(classDBC), AreTalentGatesEnabled(), GetClassFileForEntry(entry), GetClassDBCByFile(classFile), GetSpecDBCByFile(specFile), ConfirmApplyPendingBuild(), ConfirmOrLearnID(entryID|array), ConfirmOrUnlearnID(entryID), ConfirmOrUnlearnAllTalents(), ConfirmClearBuild(), GetSpellErrorColor(reason), GetLearnErrorText(reason, entry), IsReasonRandomMode(reason), GetBuildWebURL()",
+      "returns": "pure-Lua FrameXML util (1009 lines) that owns swap state on the CharacterAdvancement frame (markedForSwap, swapSuggestions), the ClassConversions tables (class/spec file token <-> DBC name, e.g. \"DEATHKNIGHT\"<->\"Death Knight\"), and the confirm popups; it reaches the natives listed as INDIRECT above plus C_Realm.IsLive, C_BuildCreator.ActivateBuild, C_Wildcard.WillRollStartingAbilities, Item:CreateFromID.",
+      "defined_in_lua": "FrameXML/Util/CharacterAdvancementUtil.lua"
+    },
+    "CA_USE_GATES_DEBUG": {
+      "callsites": ["CharacterAdvancement.lua:11", "CharacterAdvancement.lua:174", "CharacterAdvancement.lua:183", "CharacterAdvancement.lua:204", "CharacterAdvancement.lua:216"],
+      "args": "global boolean flag written by THIS addon (true for heroes at file load; recomputed in OnGameModeChanged)",
+      "returns": "read by CharacterAdvancementUtil.AreTalentGatesEnabled() = CA_USE_GATES_DEBUG and not WildCard; enables the whole talent-gate / class-points UI.",
+      "defined_in_lua": "CharacterAdvancement.lua:11 (this addon)"
+    },
+    "BuildCreatorUtil": {
+      "callsites": ["CharacterAdvancement.lua:297", "CharacterAdvancement.lua:301", "CharacterAdvancement.lua:370", "CharacterAdvancement.lua:371", "CharacterAdvancement.lua:740", "CharacterAdvancement.lua:1261", "CharacterAdvancement.lua:1262", "CharacterAdvancement.lua:2198", "CharacterAdvancement.lua:2203", "CharacterAdvancement.lua:2217", "CharacterAdvancement.lua:2221", "CharacterAdvancement.lua:2222", "Templates/CASpellButton.lua:84", "Templates/CASpellButton.lua:156", "Templates/CASpellButton.lua:179", "Templates/CASpellButton.lua:465", "Templates/CASpellButton.lua:547", "Templates/CARarityBar.lua:44", "Browser/CharacterAdvancementBrowser.lua:425"],
+      "args": "IsPickingSpells(), RegisterCallbackWithHandle(\"OnEditorSpellsChanged\", fn) -> handle:Unregister(), SetPickMode(nil), GetPickLevel(), GetNextTalentSpellID(spellID), CreateSpellInfo(spellID, level), RefreshFinishPickingPopup(), EditorSpellsChanged()",
+      "returns": "Hero Architect (build editor) pick-mode glue; CallbackRegistryMixin object.",
+      "defined_in_lua": "FrameXML/Util/BuildCreatorUtil.lua"
+    },
+    "SpecializationUtil": {
+      "callsites": ["CharacterAdvancement.lua:1212", "CharacterAdvancement.lua:1398", "CharacterAdvancement.lua:2530"],
+      "args": "GetNumSpecializations() (function ref for SpecList rows), GetActiveSpecialization() -> specID",
+      "returns": "Lua; listens to ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED via EventRegistry.",
+      "defined_in_lua": "FrameXML/Util/SpecializationUtil.lua"
+    },
+    "TokenUtil": {
+      "callsites": ["CharacterAdvancement.lua:1399", "CharacterAdvancement.lua:1400"],
+      "args": "GetScrollOfFortuneForSpec(specID), GetScrollOfFortuneTalentsForSpec(specID) -> token type strings for RarityCurrencyBar:AddToken",
+      "returns": "WildCard-only; listens to TOKEN_UPDATED.",
+      "defined_in_lua": "FrameXML/Util/TokenUtil.lua"
+    },
+    "DraftUtil": {
+      "callsites": ["CharacterAdvancement.lua:1377"],
+      "args": "HasAnyPicks() -> boolean (shows Navigation.DraftButton)",
+      "returns": "Draft-mode only.",
+      "defined_in_lua": "FrameXML/Util/DraftUtil.lua"
+    },
+    "LinkUtil": {
+      "callsites": ["CharacterAdvancement.lua:2307", "Templates/CASpellButton.lua:407", "Templates/CASpellButton.lua:478", "Templates/CASpellButton.lua:900"],
+      "args": "LinkUtil:GetSpellLink(spellID) -> \"|Hspell:ID|h[name]|h\" style link fed to GameTooltip:SetHyperlink / ChatEdit_InsertLink; LinkUtil:GetSpellLinkInternalID(entryID)",
+      "returns": "Lua hyperlink helpers.",
+      "defined_in_lua": "SharedXML/Util/HyperlinkUtil.lua:69"
+    },
+    "AtlasUtil": {
+      "callsites": ["CharacterAdvancement.lua:1798", "Templates/CASpecTab.lua:89", "Templates/CASpecTab.lua:90", "Browser/CharacterAdvancementBrowser.lua:418"],
+      "args": "AtlasUtil:AtlasExists(name), AtlasUtil:GetAtlasInfo(name)",
+      "returns": "Lua atlas registry (AtlasInfo table, ~4900 lines) backing Texture:SetAtlas; all 32 ca-* atlases and the ~30 others this addon names exist in it.",
+      "defined_in_lua": "SharedXML/AtlasInfo.lua:4904"
+    },
+    "AccessibilityUtil": {
+      "callsites": ["Templates/CAGate.lua:197"],
+      "args": "GetClassPointsMarkup(classFile)",
+      "returns": "string markup for tooltips.",
+      "defined_in_lua": "SharedXML/Util/AccessibilityUtil.lua"
+    },
+    "ClassInfoUtil": {
+      "callsites": ["Browser/CharacterAdvancementBrowser.lua:80-89", "Browser/CharacterAdvancementBrowser.lua:282"],
+      "args": "GetColoredClassName(classToken)",
+      "returns": "colored class name string (needs RAID_CLASS_COLORS + LOCALIZED_CLASS_NAMES_MALE for the token).",
+      "defined_in_lua": "SharedXML/Util/ClassInfoUtil.lua"
+    },
+    "Timer": {
+      "callsites": ["CharacterAdvancement.lua:1820", "CharacterAdvancement.lua:2663"],
+      "args": "Timer.After(seconds, fn)",
+      "returns": "Lua OnUpdate timer.",
+      "defined_in_lua": "SharedXML/Util/Timer.lua:6"
+    },
+    "MApprox": {
+      "callsites": ["Templates/CATalentBrowser.lua:79"],
+      "args": "(a, b, tolerance)",
+      "returns": "boolean (= math.NearlyEquals).",
+      "defined_in_lua": "SharedXML/TypeExtensions/math.lua:21"
+    },
+    "IsDefaultClass": {
+      "callsites": ["CharacterAdvancement.lua:318", "CharacterAdvancement.lua:937", "CharacterAdvancement.lua:1455", "CharacterAdvancement.xml:344", "CharacterAdvancement.xml:356"],
+      "args": "(unit|nil)",
+      "returns": "boolean = bit.contains(Enum.ClassMask.DEFAULT, UnitClassMask(unit)); UnitClassMask (GlobalOverwrites.lua:104) derives the mask from the 2nd return of stock UnitClassBase via Enum.ClassMask.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:47"
+    },
+    "IsHeroClass": {
+      "callsites": ["Templates/CASpellButton.lua:717"],
+      "args": "(\"player\")",
+      "returns": "boolean = select(2, UnitClassBase(unit)) == \"HERO\".",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:55"
+    },
+    "ShowForcedPrimaryStat": {
+      "callsites": ["CharacterAdvancement.lua:2773", "Templates/CASpellButton.lua:855", "CharacterAdvancement.xml:970"],
+      "args": "(skipCheck:boolean, crossLayout:boolean)",
+      "returns": "boolean; loads Ascension_ForcedPrimaryStat (which re-enters CharacterAdvancement_LoadUI) and anchors ForcedPrimaryStatFrame under SideBar.SpellList.Header.NineSlice.PrimaryStat1; hero only.",
+      "defined_in_lua": "FrameXML/UIParent.lua:608"
+    },
+    "ForcedPrimaryStatFrame": {
+      "callsites": ["CharacterAdvancement.lua:86", "CharacterAdvancement.lua:385", "CharacterAdvancement.lua:2774", "Templates/CASpellButton.lua:849", "CharacterAdvancement.xml:967"],
+      "args": "frame global from Ascension_ForcedPrimaryStat; methods OnPrimaryStatSelected(bool), CheckSuggestions()",
+      "returns": "nil-guarded everywhere except CheckSuggestions (guarded by ShowForcedPrimaryStat's return).",
+      "defined_in_lua": "AddOns/Ascension_ForcedPrimaryStat (separate LoD addon)"
+    },
+    "WildCard_LoadUI": {
+      "callsites": ["CharacterAdvancement.lua:396"],
+      "args": "()",
+      "returns": "loads Ascension_RandomModeShared + Ascension_WildCard (WildCardRapidRollingFrame).",
+      "defined_in_lua": "FrameXML/UIParent.lua:365"
+    },
+    "WildCardRapidRollingFrame": {
+      "callsites": ["CharacterAdvancement.lua:378", "CharacterAdvancement.lua:395", "CharacterAdvancement.lua:399"],
+      "args": "frame global (nil-guarded)",
+      "returns": "WildCard-only.",
+      "defined_in_lua": "AddOns/Ascension_WildCard (separate LoD addon)"
+    },
+    "GetMaxLevel": {
+      "callsites": ["CharacterAdvancement.lua:439", "CharacterAdvancement.lua:448", "CharacterAdvancement.lua:1410"],
+      "args": "()",
+      "returns": "number = GetRealmMaxLevel() or 60 -> NATIVE global GetRealmMaxLevel (Extensions.dll) behind it.",
+      "defined_in_lua": "FrameXML/Util/GlobalFunctions.lua:11"
+    },
+    "IsSpellIDKnown": {
+      "callsites": ["Templates/CASpellButton.lua:266"],
+      "args": "(spellID:number)",
+      "returns": "boolean (NATIVE, Extensions.dll; used alongside stock IsSpellKnown to decide the rank-up indicator).",
+      "defined_in_lua": null
+    },
+    "Internal_CopyToClipboard": {
+      "callsites": ["CharacterAdvancement.xml:469"],
+      "args": "(text:string)",
+      "returns": "nothing (NATIVE, Extensions.dll; also exposed as C_ClassInfo/C_Realm.Internal_CopyToClipboard). No stock equivalent - Share Build must fall back to a selectable EditBox.",
+      "defined_in_lua": null
+    },
+    "SendSystemMessage": {
+      "callsites": ["CharacterAdvancement.lua:2790", "CharacterAdvancement.lua:2798", "CharacterAdvancement.lua:2813", "CharacterAdvancement.lua:2821", "CharacterAdvancement.lua:2834", "CharacterAdvancement.lua:2846", "CharacterAdvancement.lua:2867", "CharacterAdvancement.xml:470"],
+      "args": "(message:string)",
+      "returns": "nothing; prints a system-channel chat line. No Lua definition anywhere in the tree and absent from both api-surface.tsv and ext-lua-bindings.tsv -> treat as native (Ascension.exe side); shim: DEFAULT_CHAT_FRAME:AddMessage(msg, ChatTypeInfo.SYSTEM colour).",
+      "defined_in_lua": null
+    },
+    "GetCustomGameMode": {
+      "callsites": ["FrameXML/Util/C_GameMode.lua:12,24,32 (behind every C_GameMode:IsGameModeActive call)"],
+      "args": "()",
+      "returns": "number bitmask of Enum.GameMode (NATIVE, Extensions.dll). INDIRECT but on the load path.",
+      "defined_in_lua": null
+    },
+    "RegisterSavedCVar": {
+      "callsites": ["SharedXML/Util/C_CVar.lua:40,56 (from FrameXML/GameCVars.lua:61,62,114 registering caLastClass, caLastSpec, previewCharacterAdvancementChanges)"],
+      "args": "(cvar:string, default:string, perCharacter:boolean)",
+      "returns": "NATIVE (Extensions.dll). INDIRECT; without it the three custom CVars do not exist on a stock client.",
+      "defined_in_lua": null
+    },
+    "dprint": {
+      "callsites": ["Templates/CASpellButton.lua:72", "Browser/CharacterAdvancementBrowser.lua:355", "Browser/CharacterAdvancementBrowser.lua:562"],
+      "args": "(...)",
+      "returns": "no-op unless the dev console addon redefines it.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:13 (= nop)"
+    },
+    "nop": {
+      "callsites": ["Templates/CASpellButton.lua:823"],
+      "args": "()",
+      "returns": "no-op.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:9"
+    },
+    "OnEventToMethod": {
+      "callsites": ["CharacterAdvancement.xml:1224", "Templates/CASpellButton.lua:2", "Templates/CABranchTexture.lua:2"],
+      "args": "(self, event, ...) -> self[event](self, ...)",
+      "returns": "OnEvent dispatcher; every custom event handler is a method named after the event.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:87"
+    },
+    "MixinAndLoadScripts": {
+      "callsites": ["CharacterAdvancement.lua:107", "CharacterAdvancement.lua:108", "CharacterAdvancement.lua:1086", "CharacterAdvancement.lua:1174", "CharacterAdvancement.xml:1222", "Templates/CharacterAdvancementTemplates.xml (every template OnLoad)", "Templates/CATalentBrowser.lua:12", "Templates/CATalentBrowser.lua:13"],
+      "args": "(frame, mixinName:string|table, ...)",
+      "returns": "Mixin + calls OnLoad and binds OnShow/OnHide/OnEvent/OnClick/... script handlers to mixin methods.",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:152 (with Mixin :1, MixinAndLoad :37, CreateFromMixins :177, CreateFromMixinsAndLoad :181)"
+    },
+    "CreateFromMixins": {
+      "callsites": ["Templates/CASpellButton.lua:662", "Templates/CASpellButton.lua:700", "Templates/CASpellButton.lua:822", "Templates/CASpellButton.lua:910", "Templates/CASpellButton.lua:922", "Templates/CASpecTab.lua:1", "Templates/CASpellCategory.lua:1", "Templates/CATalentBrowser.lua:4", "Templates/CATalentBrowser.lua:213", "Browser/CharacterAdvancementBrowser.lua:98", "Browser/CharacterAdvancementBrowser.lua:151", "Browser/CharacterAdvancementBrowser.lua:244", "Browser/CharacterAdvancementBrowser.lua:450", "Browser/CharacterAdvancementBrowser.lua:621"],
+      "args": "(mixin|mixinGlobalName:string, ...) - accepts STRING names (\"CASpellButtonBaseMixin\", \"CallbackRegistryMixin\") resolved via _G",
+      "returns": "new table.",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:177"
+    },
+    "CreateFromMixinsAndLoad": {
+      "callsites": ["Templates/CAGate.lua:61", "Templates/CAGate.lua:63", "Templates/CAGate.lua:273"],
+      "args": "(mixin)",
+      "returns": "table with OnLoad already called.",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:181"
+    },
+    "GenerateClosure": {
+      "callsites": ["CharacterAdvancement.lua:113", "CharacterAdvancement.lua:114", "CharacterAdvancement.lua:115", "CharacterAdvancement.lua:119", "CharacterAdvancement.lua:120", "CharacterAdvancement.lua:138", "CharacterAdvancement.lua:139", "CharacterAdvancement.lua:1156", "CharacterAdvancement.lua:2663", "CharacterAdvancement.lua:2767", "Templates/CASpellButton.lua:29", "Templates/CARarityBar.lua:11", "Browser/CharacterAdvancementBrowser.lua:270", "Browser/CharacterAdvancementBrowser.lua:456", "Browser/CharacterAdvancementBrowser.lua:711"],
+      "args": "(fn, ...)",
+      "returns": "closure.",
+      "defined_in_lua": "SharedXML/Util/FunctionUtil.lua:100"
+    },
+    "CreateFramePool": {
+      "callsites": ["CharacterAdvancement.lua:96", "CharacterAdvancement.lua:97", "CharacterAdvancement.lua:98", "CharacterAdvancement.lua:99", "CharacterAdvancement.lua:101", "CharacterAdvancement.lua:102", "CharacterAdvancement.lua:104", "CharacterAdvancement.lua:105", "Templates/CAGate.lua:80", "Templates/CAGate.lua:268", "Templates/CAConnectedNodes.lua:100", "Templates/CAClassButton.lua:13", "Templates/CATalentBrowser.lua:8", "Templates/CATalentBrowser.lua:9", "Browser/CharacterAdvancementBrowser.lua:160", "Browser/CharacterAdvancementBrowser.lua:454"],
+      "args": "(frameType, parent, template, resetterFunc)",
+      "returns": "pool with Acquire()/ReleaseAll()/EnumerateActive(); template OnLoad natives therefore run lazily at first Acquire (OnShow), not at addon load.",
+      "defined_in_lua": "SharedXML/Pools.lua:197"
+    },
+    "PortraitFrame_SetTitle": {
+      "callsites": ["CharacterAdvancement.lua:82", "CharacterAdvancement.lua:179", "CharacterAdvancement.lua:188", "CharacterAdvancement.lua:202"],
+      "args": "(frame, text)",
+      "returns": "= BasicFrame_SetTitle.",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1119"
+    },
+    "PortraitFrame_SetIcon": {
+      "callsites": ["CharacterAdvancement.lua:83", "CharacterAdvancement.lua:180", "CharacterAdvancement.lua:189", "CharacterAdvancement.lua:209"],
+      "args": "(frame, iconPath)",
+      "returns": "nothing.",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1103"
+    },
+    "PortraitFrame_SetClassIcon": {
+      "callsites": ["CharacterAdvancement.lua:207"],
+      "args": "(frame, classToken)",
+      "returns": "nothing.",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1092"
+    },
+    "AttributesToKeyValues": {
+      "callsites": ["Templates/CARarityBar.lua:14"],
+      "args": "(frame) - copies XML <Attribute name=\"quality\" type=\"number\"> into self.quality",
+      "returns": "nothing.",
+      "defined_in_lua": "SharedXML/Util/Util.lua:96"
+    },
+    "HybridScrollFrame_CreateButtons": {
+      "callsites": ["Templates/CATalentBrowser.lua:332"],
+      "args": "(scrollFrame, template, -8, -58, nil, nil, nil, nil, \"LEFT\", \"RIGHT\") with scrollFrame.isHorizontal = true",
+      "returns": "Ascension's SharedXML HybridScrollFrame (horizontal list support); also HybridScrollFrame_SetDoNotHideScrollBar (:338) and HybridScrollFrame_ScrollToIndex (:365).",
+      "defined_in_lua": "SharedXML/Scroll/HybridScrollFrame.lua:259"
+    },
+    "GameTooltip_GenericTooltip": {
+      "callsites": ["CharacterAdvancement.xml:316", "CharacterAdvancement.xml:363"],
+      "args": "(frame, anchor) - reads frame.tooltipTitle/tooltipText",
+      "returns": "nothing.",
+      "defined_in_lua": "FrameXML/GameTooltip.lua:1264"
+    },
+    "SearchBoxTemplate_OnTextChanged": {
+      "callsites": ["CharacterAdvancement.xml:562", "CharacterAdvancement.xml:1016"],
+      "args": "(editBox)",
+      "returns": "nothing.",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:281"
+    },
+    "ScrollFrameTemplate_OnMouseWheel": {
+      "callsites": ["CharacterAdvancement.xml:825"],
+      "args": "(scrollFrame, delta)",
+      "returns": "nothing.",
+      "defined_in_lua": "SharedXML/Scroll/ScrollFrame.lua:28"
+    },
+    "HideUIPanel": {
+      "callsites": ["CharacterAdvancement.lua:93"],
+      "args": "(Collections)",
+      "returns": "Ascension override (also handles non-UIPanel frames).",
+      "defined_in_lua": "FrameXML/UIParent.lua:2669"
+    },
+    "ToggleTalentFrame": {
+      "callsites": ["CharacterAdvancement.xml:60"],
+      "args": "()",
+      "returns": "Ascension override: only opens the PET talent frame (HasPetUI and PetCanBeAbandoned).",
+      "defined_in_lua": "FrameXML/UIParent.lua:646"
+    },
+    "PlaySound": {
+      "callsites": ["CharacterAdvancement.lua:1355", "Templates/CASpellButton.lua:692", "Templates/CASpellButton.lua:792", "Templates/CASpellButton.lua:847", "Templates/CASpellButton.lua:931", "Templates/CAClassButton.lua:126", "Templates/CAGate.lua:384", "Browser/CharacterAdvancementBrowser.lua:134", "Browser/CharacterAdvancementBrowser.lua:253", "CharacterAdvancement.xml:466", "CharacterAdvancement.xml:484"],
+      "args": "(SOUNDKIT.X) where X is a NUMBER or a TABLE of numeric sound-kit ids, or a stock name string (\"gsCharacterCreationCancel\")",
+      "returns": "Lua override that round-robins table entries and forwards the numeric id to the original PlaySound - numeric kit ids are NOT accepted by stock 3.3.5a PlaySound; the shim must map SOUNDKIT ids to 3.3.5 sound names or no-op.",
+      "defined_in_lua": "SharedXML/Util/SharedOverwrites.lua:17"
+    },
+    "SOUNDKIT": {
+      "callsites": ["CharacterAdvancement.lua:1096", "CharacterAdvancement.lua:1178", "Templates/CAGate.lua:384", "Templates/CASpellButton.lua:692", "CharacterAdvancement.xml:466"],
+      "args": "keys used: UCHATSCROLLBUTTON (table of 19 ids), CHARACTER_SHEET_TAB (841), COMMON_UI_MISSION_SELECT (table), CHAT_SCROLL_BUTTON (table)",
+      "returns": "table of numeric sound-kit ids.",
+      "defined_in_lua": "SharedXML/Util/SoundKit.lua:1"
+    },
+    "ItemData": {
+      "callsites": ["CharacterAdvancement.lua:437", "CharacterAdvancement.lua:1266", "CharacterAdvancement.lua:1267", "CharacterAdvancement.lua:1284", "CharacterAdvancement.lua:1287", "CharacterAdvancement.lua:1297", "CharacterAdvancement.lua:1300", "CharacterAdvancement.lua:1387", "CharacterAdvancement.lua:1389", "CharacterAdvancement.lua:1392", "CharacterAdvancement.lua:1420", "CharacterAdvancement.lua:1422", "CharacterAdvancement.lua:1423", "CharacterAdvancement.lua:1424", "CharacterAdvancement.xml:56", "CharacterAdvancement.xml:169", "CharacterAdvancement.xml:224", "CharacterAdvancement.xml:282", "Templates/CharacterAdvancementTemplates.xml:56"],
+      "args": "ABILITY_ESSENCE=383080, TALENT_ESSENCE=383081, MARK_OF_ASCENSION=375250, SCROLL_OF_UNLEARNING=1101243",
+      "returns": "item ids fed to GetItemCount() and GameTooltip:SetHyperlink(\"item:\"..id).",
+      "defined_in_lua": "FrameXML/Data/Items.lua:1"
+    },
+    "Const": {
+      "callsites": ["CharacterAdvancement.lua:127", "CharacterAdvancement.lua:1464", "Templates/CASpellButton.lua:13", "Templates/CharacterAdvancementTemplates.xml:66"],
+      "args": "Const.TextureKit.UseAtlasSize (true) / IgnoreAtlasSize (false); Const.CharacterAdvancement.ClearEverything (false)",
+      "returns": "constants table.",
+      "defined_in_lua": "SharedXML/Util/Const.lua:1"
+    },
+    "Enum": {
+      "callsites": ["CharacterAdvancement.lua:54", "CharacterAdvancement.lua:95", "CharacterAdvancement.lua:1416", "Templates/CASpellButton.lua:194", "Templates/CASpellButton.lua:290", "Browser/CharacterAdvancementBrowser.lua:53"],
+      "args": "Enum.GameMode.{None,Draft,WildCard,BuildDraft} (bit flags 0,0x08,0x40,0x800), Enum.SpellQuality.{Uncommon=2,Rare=3,Epic=4,Legendary=5}, Enum.CALearnResult.DisplayEntry (string key); indirectly Enum.ClassMask, Enum.Class, Enum.CAUnlearnResult, Enum.CAConfirmReason, Enum.QualityToCAQuality, Enum.PrimaryStat, Enum.CharacterAdvancementGroup",
+      "returns": "enum tables.",
+      "defined_in_lua": "SharedXML/Enum.lua:34"
+    },
+    "CHARACTER_ADVANCEMENT_CLASS_ORDER": {
+      "callsites": ["CharacterAdvancement.lua:964", "CharacterAdvancement.lua:1167", "Templates/CATalentBrowser.lua:228"],
+      "args": "array of 10 class tokens (DEATHKNIGHT..WARRIOR)",
+      "returns": "navigation order.",
+      "defined_in_lua": "FrameXML/Constants.lua:39"
+    },
+    "CHARACTER_ADVANCEMENT_SUMMARY_CLASS_ORDER": {
+      "callsites": ["CharacterAdvancement.lua:2099", "CharacterAdvancement.lua:2147"],
+      "args": "the 10 classes + \"HERO\"",
+      "returns": "summary order (HERO -> DBC \"Hero\" -> remapped to \"General\").",
+      "defined_in_lua": "FrameXML/Constants.lua:52"
+    },
+    "CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER": {
+      "callsites": ["CharacterAdvancement.lua:835", "CharacterAdvancement.lua:848", "CharacterAdvancement.lua:891", "CharacterAdvancement.lua:918", "CharacterAdvancement.lua:1492", "Templates/CAClassButton.lua:46", "Templates/CATalentBrowser.lua:230"],
+      "args": "map classToken -> {spec1, spec2, spec3} tokens",
+      "returns": "spec tab order.",
+      "defined_in_lua": "FrameXML/Constants.lua:66"
+    },
+    "LOCALIZED_CLASS_SPEC_NAMES": {
+      "callsites": ["Templates/CASpellButton.lua:443"],
+      "args": "[classToken][specToken] -> localized name",
+      "returns": "custom table.",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:614"
+    },
+    "BROWSER_TAB": {
+      "callsites": ["CharacterAdvancement.lua:1077", "CharacterAdvancement.lua:1113", "CharacterAdvancement.lua:1161"],
+      "args": "UNDEFINED global in this addon (only Ascension_CharacterAdvancementSeason9 declares a local of that name)",
+      "returns": "always nil -> HideTabID(nil) is a harmless no-op and the tabID == BROWSER_TAB branch never fires; do not define it in the shim.",
+      "defined_in_lua": null
+    },
+    "HelpTip": {
+      "callsites": ["Templates/CASpellButton.lua:393", "Templates/CASpellButton.lua:394"],
+      "args": "HelpTip:CanShow(\"SPELL_HINT_LEARN_HOTKEYS1\"), HelpTip:Show(id, frame)",
+      "returns": "Lua help-tip system.",
+      "defined_in_lua": "SharedXML/HelpTip.lua:7"
+    },
+    "Collections": {
+      "callsites": ["CharacterAdvancement.lua:93", "CharacterAdvancement.lua:141", "CharacterAdvancement.xml:5"],
+      "args": "parent frame + Collections:HookScript(\"OnHide\") + HideUIPanel(Collections)",
+      "returns": "frame from Ascension_Collections (TabSystemMixin).",
+      "defined_in_lua": "AddOns/Ascension_Collections/Collections.xml"
+    },
+    "StaticPopup_Show/StaticPopup_Hide": {
+      "callsites": ["CharacterAdvancement.lua:295", "CharacterAdvancement.lua:382", "CharacterAdvancement.lua:390", "CharacterAdvancement.lua:2443", "CharacterAdvancement.xml:485"],
+      "args": "dialogs CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES (StaticPopup.lua:102: Apply/Discard/Go Back -> ConfirmApplyPendingBuild / CancelPendingBuild / Collections:GoToTab), CONFIRM_LEAVING_PENDING (StaticPopup.lua:614: data {entryID, swapSuggestions} -> MarkForSwap), CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD (StaticPopup.lua:66: wide edit box -> ImportPendingBuild)",
+      "returns": "stock API, custom dialog table entries (Ascension FrameXML/StaticPopup.lua supports button3 and hasWideEditBox).",
+      "defined_in_lua": "FrameXML/StaticPopup.lua:66,102,614 (dialog definitions)"
+    },
+    "toboolean": {
+      "callsites": ["SharedXML/Util/C_CVar.lua:117 (C_CVar.GetBool)"],
+      "args": "(value)",
+      "returns": "boolean.",
+      "defined_in_lua": "SharedXML/TypeExtensions/string.lua:56"
+    },
+    "string.isNilOrEmpty / math.clamp": {
+      "callsites": ["CharacterAdvancement.lua:251", "CharacterAdvancement.lua:255", "CharacterAdvancement.lua:330", "CharacterAdvancement.lua:343", "CharacterAdvancement.lua:739", "CharacterAdvancement.lua:2657", "CharacterAdvancement.xml:822"],
+      "args": "string.isNilOrEmpty(s), math.clamp(v, min, max)",
+      "returns": "TypeExtensions on the stock string/math libraries (str:trim() is stock WoW string.trim).",
+      "defined_in_lua": "SharedXML/TypeExtensions/string.lua:138, SharedXML/TypeExtensions/math.lua:34"
+    }
+  },
+  "widget_methods": {
+    "SetCharacterAdvancementEntry": {
+      "callsites": ["Templates/CASpellButton.lua:142"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:398 (SpellIconTemplateMixin; reads entry.Spells/Type/Icon/ID, calls C_CharacterAdvancement.GetEntryByInternalID, GetTalentRankByID, GetQualityInfo, C_BuildEditor.DoesBuildHaveSpellID, Spell:CreateFromID)"
+    },
+    "UseQuality": {
+      "callsites": ["Templates/CASpellButton.lua:10"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:505 (SpellIconTemplateMixin)"
+    },
+    "SetOverlayBlendMode": {
+      "callsites": ["Templates/CASpellButton.lua:11"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:163 (BorderIconTemplateMixin)"
+    },
+    "SetIconDesaturated": {
+      "callsites": ["Templates/CASpellButton.lua:176", "Templates/CASpellButton.lua:185", "Templates/CASpellButton.lua:191", "Templates/CASpellButton.lua:207", "Templates/CASpellButton.lua:249", "Templates/CASpellButton.lua:316", "Templates/CASpellButton.lua:373", "Browser/CharacterAdvancementBrowser.lua:272", "Browser/CharacterAdvancementBrowser.lua:430"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:52 and :328 (BorderIconTemplateMixin / SpellIconTemplateMixin)"
+    },
+    "SetIconColor": {
+      "callsites": ["Templates/CASpellButton.lua:177", "Templates/CASpellButton.lua:186", "Templates/CASpellButton.lua:208", "Templates/CASpellButton.lua:250", "Templates/CASpellButton.lua:307", "Templates/CASpellButton.lua:374"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:56"
+    },
+    "SetIcon": {
+      "callsites": ["CharacterAdvancement.lua:954", "CharacterAdvancement.lua:977", "CharacterAdvancement.lua:1285", "CharacterAdvancement.lua:1288", "CharacterAdvancement.lua:2117", "Templates/CASpellButton.lua:372", "Templates/CASpellButton.lua:613", "Templates/CAClassButton.lua:88", "Browser/CharacterAdvancementBrowser.lua:348", "CharacterAdvancement.xml:55"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua (BorderIconTemplateMixin:SetIcon)"
+    },
+    "SetIconAtlas": {
+      "callsites": ["Templates/CASpellButton.lua:834", "Templates/CAClassButton.lua:23", "Templates/CharacterAdvancementTemplates.xml:376"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:41"
+    },
+    "SetBorderSize / SetBorderOffset / SetBorderAtlas / SetRounded": {
+      "callsites": ["Templates/CASpellButton.lua:27", "Templates/CASpellButton.lua:667", "Templates/CASpellButton.lua:705", "Templates/CharacterAdvancementTemplates.xml:69-72", "CharacterAdvancement.xml:51-54", "Browser/CharacterAdvancementBrowser.lua:334"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:280 / :285 / :91 / :3 (BorderIconTemplateMixin)"
+    },
+    "SetOverlaySize / SetBackgroundSize / SetBackgroundTexture / SetBackgroundOffset": {
+      "callsites": ["Templates/CASpellButton.lua:668", "Templates/CASpellButton.lua:676-678", "Templates/CASpellButton.lua:708-710", "Templates/CASpellButton.lua:917-919", "Browser/CharacterAdvancementBrowser.lua:265-267"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:292 / :304 / :185 / :309"
+    },
+    "SetAtlas (Texture)": {
+      "callsites": ["CharacterAdvancement.lua:127-129", "CharacterAdvancement.lua:504", "CharacterAdvancement.lua:1687", "Templates/CABranchTexture.lua:51-63", "Templates/CAGate.lua:124", "Templates/CARarityBar.lua:4-7", "Templates/CharacterAdvancementTemplates.xml:66", "Browser/CharacterAdvancementBrowser.lua:420"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:3 (Lua on the Texture metatable; looks up SharedXML/AtlasInfo.lua then SetTexture+SetTexCoord)"
+    },
+    "SetPortraitTexture (Texture)": {
+      "callsites": ["Templates/CAGate.lua:137", "Templates/CAGate.lua:241", "Templates/CAGate.lua:246", "CharacterAdvancement.xml:88"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:34"
+    },
+    "SetPointOffset (Texture)": {
+      "callsites": ["Templates/CABranchTexture.lua:97", "Templates/CABranchTexture.lua:101", "Templates/CABranchTexture.lua:110", "Templates/CABranchTexture.lua:114"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:112"
+    },
+    "ClearAndSetPoint (Region)": {
+      "callsites": ["CharacterAdvancement.lua:157", "CharacterAdvancement.lua:425", "CharacterAdvancement.lua:1864", "CharacterAdvancement.lua:2038", "Templates/CAGate.lua:117", "Templates/CATalentBrowser.lua:62", "Browser/CharacterAdvancementBrowser.lua:171"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:36"
+    },
+    "SetShown (Region)": {
+      "callsites": ["CharacterAdvancement.lua:400", "CharacterAdvancement.lua:462", "CharacterAdvancement.lua:1377", "Templates/CASpellButton.lua:204", "Templates/CASpellButton.lua:237", "Templates/CASpellButton.lua:241", "Templates/CASpecTab.lua:18"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28"
+    },
+    "SetEnabled (Button/EditBox)": {
+      "callsites": ["CharacterAdvancement.lua:1322", "CharacterAdvancement.lua:1457", "CharacterAdvancement.lua:1465"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:13 / EditBox.lua:18"
+    },
+    "WrapText / GetRGB (ColorMixin on RED_FONT_COLOR, HIGHLIGHT_FONT_COLOR, NORMAL_FONT_COLOR, ITEM_QUALITY_COLORS[q], RAID_CLASS_COLORS[class])": {
+      "callsites": ["CharacterAdvancement.lua:2788", "Templates/CASpellButton.lua:118", "Templates/CASpellButton.lua:674", "Templates/CARarityBar.lua:36", "Templates/CASpecTab.lua:48", "Browser/CharacterAdvancementBrowser.lua:75"],
+      "defined_in_lua": "SharedXML/Util/ColorUtil.lua:88 / :43 (colors are CreateColor objects redefined in SharedXML/SharedConstants.lua)"
+    },
+    "RegisterCallback / RegisterCallbackWithHandle / TriggerEvent / GenerateCallbackEvents (CallbackRegistryMixin)": {
+      "callsites": ["CharacterAdvancement.lua:115", "CharacterAdvancement.lua:120", "CharacterAdvancement.lua:301", "CharacterAdvancement.lua:1155", "Browser/CharacterAdvancementBrowser.lua:163", "Browser/CharacterAdvancementBrowser.lua:201"],
+      "defined_in_lua": "SharedXML (CallbackRegistryMixin)"
+    },
+    "TabSystemMixin: SetTabTemplate/SetTabPoint/SetTabWidthConstraints/SetTabSelectedSound/SetTabPadding/GetTabPadding/SetTabLayout/AddTab/HideTabID/ShowTabs/HideTabs/SelectTabID/SetTabEnabled/GetTabByID/GetCurrentTabID/UpdateTabText/UpdateTabLayout": {
+      "callsites": ["CharacterAdvancement.lua:1086-1161", "CharacterAdvancement.lua:1174-1216", "CharacterAdvancement.lua:791-813", "CharacterAdvancement.lua:1051-1082"],
+      "defined_in_lua": "SharedXML/TabSystem/TabSystemMixin.lua (the addon monkey-patches self.Content:UpdateTabLayout at CharacterAdvancement.lua:1100 and relies on self.tabs / self.tabPoint / self.tabLayout internals)"
+    },
+    "TabSystemTabMixin: SetTextPadding/SetTabText/UpdateWidth/SetTooltip/SetTooltipAnchor/GetTabID/SetPreClick": {
+      "callsites": ["CharacterAdvancement.lua:1128", "CharacterAdvancement.lua:1134", "CharacterAdvancement.lua:1185-1188", "Templates/CASpecTab.lua:1"],
+      "defined_in_lua": "SharedXML/TabSystem/TabSystemTabMixin.lua"
+    },
+    "ScrollListMixin: SetGetNumResultsFunction/SetTemplate/GetSelectedHighlight/RefreshScrollFrame/UpdateButtonsAndRefresh/IsInitialized/GetSelectedButton/SetSelectedIndex/Init/GetDataForIndex; ScrollListItemBaseMixin": {
+      "callsites": ["CharacterAdvancement.lua:298", "CharacterAdvancement.lua:306", "CharacterAdvancement.lua:405-406", "CharacterAdvancement.lua:752-757", "CharacterAdvancement.lua:1190-1214", "Templates/CATalentBrowser.lua:4", "Templates/CATalentBrowser.lua:213-342", "Browser/CharacterAdvancementBrowser.lua:450", "Browser/CharacterAdvancementBrowser.lua:621-716"],
+      "defined_in_lua": "SharedXML/Scroll/ScrollList.lua (CATalentBrowserMixin overrides Init to build a horizontal HybridScrollFrame)"
+    },
+    "FilterDropDownButtonMixin: HasAnyFilters/GetFilter/SetFilter/ClearFilters/ClearDropDown/AddFilterOption/AddCategoryOption/AddSubFilterOption/AddOptionSpacer/CreateFilterInfo": {
+      "callsites": ["CharacterAdvancement.lua:738", "CharacterAdvancement.lua:747", "CharacterAdvancement.lua:762", "CharacterAdvancement.lua:775", "CharacterAdvancement.lua:777", "CharacterAdvancement.lua:2766", "CharacterAdvancement.lua:2769"],
+      "defined_in_lua": "SharedXML/FilterDropDown.lua:61-146 (GetFilter is re-defined per instance by CharacterAdvancementUtil.InitializeSpellTagFilter to return filters, spellTagIDs)"
+    },
+    "CurrencyBarMixin: SetJustify/AddCurrency/ClearCurrencies/AddQuality/AddToken/Update/PlayCountAnimation/StopCountAnimation": {
+      "callsites": ["CharacterAdvancement.lua:122", "CharacterAdvancement.lua:123", "CharacterAdvancement.lua:1385-1429", "CharacterAdvancement.lua:2532", "CharacterAdvancement.lua:2538", "CharacterAdvancement.lua:2742"],
+      "defined_in_lua": "FrameXML/CurrencyBar.lua:90-160 (uses GetItemCount(itemID) and C_CharacterAdvancement.GetQualityCount/GetQualityLimit internally)"
+    },
+    "RarityGemContainerMixin: SetGemSize/SetOrientation/SetGemClickHandler/SetGemOnEnterHandler/SetGemOnLeaveHandler/SetGemQuality/SetNumGems": {
+      "callsites": ["Templates/CARarityBar.lua:8-13", "Templates/CARarityBar.lua:35", "Templates/CARarityBar.lua:50"],
+      "defined_in_lua": "FrameXML/UIPanelTemplates.lua:587-674"
+    },
+    "AnimatedRankMixin: SetRank/SetMaxRank/UpdateVisual (Icon.RankFrame) + RankBorder:GetVertexColor": {
+      "callsites": ["Templates/CASpellButton.lua:722-724", "Templates/CASpellButton.lua:731"],
+      "defined_in_lua": "FrameXML/UIPanelTemplates.lua:811-843"
+    },
+    "ThreeSliceMixin (CASpellCategoryMixin base)": {
+      "callsites": ["Templates/CASpellCategory.lua:1", "Templates/CASpellCategory.lua:4"],
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1231"
+    },
+    "NineSlicePanelMixin": {
+      "callsites": ["CharacterAdvancement.xml:548", "CharacterAdvancement.xml:935", "CharacterAdvancement.xml:1001", "CharacterAdvancement.xml:1157"],
+      "defined_in_lua": "SharedXML/NineSlice.lua"
+    },
+    "LayoutFrame: MarkDirty / layoutIndex / defaultAlign / spacing (VerticalLayoutFrame)": {
+      "callsites": ["CharacterAdvancement.lua:928-944", "CharacterAdvancement.lua:1042"],
+      "defined_in_lua": "SharedXML/LayoutFrame.lua / LayoutFrame.xml"
+    },
+    "SetCount (CASpellCountTemplate / CATalentCountTemplate)": {
+      "callsites": ["CharacterAdvancement.lua:1529", "Templates/CASpecTab.lua:12", "Templates/CASpecTab.lua:13"],
+      "defined_in_lua": "Templates/CharacterAdvancementTemplates.xml:315 and :335 (inline OnLoad in this addon)"
+    },
+    "AutoCastShine_AutoCastStart / AutoCastShine_AutoCastStop": {
+      "callsites": ["Templates/CASpellButton.lua:202", "Templates/CASpellButton.lua:215", "Templates/CASpellButton.lua:232", "Templates/CASpellButton.lua:234", "Templates/CASpellButton.lua:365"],
+      "defined_in_lua": "stock FrameXML (AutoCastShineTemplate, 3.3.5a signature (frame, r, g, b))"
+    }
+  },
+  "events": {
+    "ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED": {
+      "registered_at": ["CharacterAdvancement.lua:74", "CharacterAdvancement.xml:1203 (SideBar.SpecList OnShow)"],
+      "handler_args": "(specID) - handler ignores it and calls FullUpdate() if shown; SpecList handler calls RefreshScrollFrame().",
+      "fired_by": "native (Extensions.dll; api-surface __EVENT__ NATIVE). Also consumed via EventRegistry in FrameXML/Util/SpecializationUtil.lua:5 and C_Hook buckets in Ascension_WildCard."
+    },
+    "CHARACTER_ADVANCEMENT_LEARN_RESULT": {
+      "registered_at": ["CharacterAdvancement.lua:75"],
+      "handler_args": "(success:boolean, result:string GlobalString key or format with %s, entryID:number, rank:number) - on failure formats _G[result] with entry.Name (via GetEntryByInternalID) into UIErrorsFrame + SendSystemMessage.",
+      "fired_by": "native (reply to C_CharacterAdvancement.LearnID)"
+    },
+    "CHARACTER_ADVANCEMENT_UNLEARN_RESULT": {
+      "registered_at": ["CharacterAdvancement.lua:76"],
+      "handler_args": "(success:boolean, result:string, entryID:number)",
+      "fired_by": "native (reply to UnlearnID)"
+    },
+    "CHARACTER_ADVANCEMENT_PURGE_ABILITIES_RESULT": {
+      "registered_at": ["CharacterAdvancement.lua:77"],
+      "handler_args": "(success:boolean, result:string)",
+      "fired_by": "native (reply to UnlearnAllSpells)"
+    },
+    "CHARACTER_ADVANCEMENT_PURGE_TALENTS_RESULT": {
+      "registered_at": ["CharacterAdvancement.lua:78"],
+      "handler_args": "(success:boolean, result:string)",
+      "fired_by": "native (reply to UnlearnAllTalents)"
+    },
+    "CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT": {
+      "registered_at": ["CharacterAdvancement.lua:79"],
+      "handler_args": "(success:boolean, result:string, traversalResult:string|nil, entryID:number, rank:number) - failure text = _G[result]:format(entry.Name, rank, _G[traversalResult]).",
+      "fired_by": "native (reply to ApplyPendingBuild / ImportPendingBuild)"
+    },
+    "WILDCARD_ENTRY_LEARNED": {
+      "registered_at": ["CharacterAdvancement.lua:80"],
+      "handler_args": "(internalID, newRank, preRollRank) per Ascension_WildCard/WildCard.lua:325; this addon ignores args and re-searches/refreshes.",
+      "fired_by": "native (WildCard roll result); also handled in FrameXML/UIParent.lua:1763"
+    },
+    "CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED": {
+      "registered_at": ["CharacterAdvancement.lua:81", "Templates/CASpellButton.lua:40 (every spell/talent button OnShow)", "Templates/CABranchTexture.lua:38 (every branch OnShow)", "Templates/CARarityBar.lua:22"],
+      "handler_args": "() no payload used - buttons call Refresh() (re-run SetEntry), main frame re-runs Search/Refresh/FullUpdate and RefreshCurrencies/RefreshSaveChangesButton/RefreshPrimaryStats; also invoked directly as a method by Ascension_WildCard/RapidRolling.lua:93 and by SPELL_TAGS_CHANGED.",
+      "fired_by": "native, after every pending-build mutation (AddByEntryID, RemoveByEntryID, CancelPendingBuild, ClearPendingBuild, SwapEntriesByID, ImportPendingBuild, ApplyPendingBuild). Also listened to by FrameXML/PlayerFrame.lua:270, Ascension_CoAResources/ClassResources.lua:461, DraftUtil.lua:154, Ascension_BuildCreator/BuildSpell.lua:124."
+    },
+    "TOKEN_UPDATED": {
+      "registered_at": ["CharacterAdvancement.lua:270 (while shown)"],
+      "handler_args": "(tokenType:string, oldAmount:number, newAmount:number) per FrameXML/Util/TokenUtil.lua:79; addon refreshes SpecList and RarityCurrencyBar.",
+      "fired_by": "native (WildCard/Draft token counts); TokenUtil.lua:194 and ToastNotificationSystem.lua:398 also listen."
+    },
+    "CHARACTER_ADVANCEMENT_SUGGESTIONS_UPDATED": {
+      "registered_at": ["CharacterAdvancement.lua:272 (while shown)"],
+      "handler_args": "() - re-runs BrowserSearch when the ability browser is visible.",
+      "fired_by": "native"
+    },
+    "SPELL_TAGS_CHANGED": {
+      "registered_at": ["CharacterAdvancement.lua:273 (while shown)"],
+      "handler_args": "() - delegates to the PENDING_BUILD_UPDATED handler.",
+      "fired_by": "native"
+    },
+    "SPELL_TAG_TYPES_CHANGED": {
+      "registered_at": ["CharacterAdvancement.lua:274 (while shown)"],
+      "handler_args": "() - rebuilds the spell-tag filter dropdown (GetRootSpellTagTypes/GetSpellTagTypes again).",
+      "fired_by": "native"
+    },
+    "STAT_SUGGESTIONS_UPDATED": {
+      "registered_at": ["CharacterAdvancement.lua:275 (while shown)"],
+      "handler_args": "() - if ShowForcedPrimaryStat(false) then ForcedPrimaryStatFrame:CheckSuggestions().",
+      "fired_by": "native"
+    },
+    "CHARACTER_ADVANCEMENT_BUILD_LEVEL_UPDATED": {
+      "registered_at": ["CharacterAdvancement.lua:276 (while shown)"],
+      "handler_args": "() - RefreshCurrencies (Build Creator pick level changed).",
+      "fired_by": "native"
+    },
+    "CHARACTER_ADVANCEMENT_LOCK_ENTRY_RESULT": {
+      "registered_at": ["Templates/CASpellButton.lua:38 (button OnShow)"],
+      "handler_args": "(result, internalID:number) - button refreshes if internalID == self.entry.ID.",
+      "fired_by": "native (reply to LockID)"
+    },
+    "CHARACTER_ADVANCEMENT_UNLOCK_ENTRY_RESULT": {
+      "registered_at": ["Templates/CASpellButton.lua:39 (button OnShow)"],
+      "handler_args": "(result, internalID:number)",
+      "fired_by": "native (reply to UnlockID)"
+    },
+    "PET_TALENT_UPDATE": {
+      "registered_at": ["CharacterAdvancement.lua:265 (while shown)"],
+      "handler_args": "() - Refresh (pet talent button).",
+      "fired_by": "native (stock 3.3.5a event)"
+    },
+    "PLAYER_REGEN_DISABLED": {
+      "registered_at": ["CharacterAdvancement.lua:266 (while shown)"],
+      "handler_args": "() - FullUpdate (Collections itself hides on this event).",
+      "fired_by": "native (stock)"
+    },
+    "PLAYER_REGEN_ENABLED": {
+      "registered_at": ["CharacterAdvancement.lua:267 (while shown)"],
+      "handler_args": "() - FullUpdate.",
+      "fired_by": "native (stock)"
+    },
+    "PLAYER_LEVEL_UP": {
+      "registered_at": ["CharacterAdvancement.lua:268 (while shown)"],
+      "handler_args": "(level) ignored - FullUpdate + RefreshCurrencies.",
+      "fired_by": "native (stock)"
+    },
+    "CURRENCY_DISPLAY_UPDATE": {
+      "registered_at": ["CharacterAdvancement.lua:271 (while shown)"],
+      "handler_args": "() - RefreshCurrencies (essence item counts).",
+      "fired_by": "native (stock 3.3.5a event)"
+    },
+    "ASCENSION_CUSTOM_GAME_MODE_CHANGED": {
+      "registered_at": ["FrameXML/Util/C_GameMode.lua:53 via C_Hook (not by this addon)"],
+      "handler_args": "() - C_GameMode fires the OnGameModeChanged callback the addon registered at CharacterAdvancement.lua:120 -> CharacterAdvancementMixin:OnGameModeChanged (re-titles, sets preview CVar, FullUpdate).",
+      "fired_by": "native; C_GameMode also fires the callback once on PLAYER_ENTERING_WORLD"
+    }
+  },
+  "frames": [
+    "CharacterAdvancement (parent Collections; RaisedPortraitFrameTemplate -> CharacterAdvancementNineSlice, CharacterAdvancementCloseButton, portrait/title regions)",
+    "CharacterAdvancementInputBlocker",
+    "CharacterAdvancementPetTalents (+ CharacterAdvancementPetTalentsUnspentPoints, ...Glow, ...Text)",
+    "CharacterAdvancementNavigation (+ CharacterAdvancementNavigationDraftButton)",
+    "CharacterAdvancementNavigation2 (+ ...Currency, ...Currency2, ...NineSlice (+CornerR/CornerL), ...Background, ...Crystals)",
+    "CharacterAdvancementNavigation2ButtonLayout (CreateFrame at CharacterAdvancement.lua:928, VerticalLayoutFrame) with children ...ButtonLayoutBrowser, ...ButtonLayoutClassButton1..10 (hero) or ...ButtonLayoutClassButton1 (default class), ...ButtonLayoutSummary (CAClassButtonTemplate)",
+    "CharacterAdvancementContent (ScrollFrame) + CharacterAdvancementContentHeaderSpells (+Total, SubText, TotalShadow, AbilityEssence), ...HeaderTalents (+Total, SubText, TotalShadow, TalentEssence), ...WCRapidRollButton, ...Footer (+ResetBuildButton, SpellCurrencyBar, TalentCurrencyBar, SaveChangesButton (+ErrorText, YellowGlow*, Shadow), UndoButton, ShareBuildButton, ImportBuildButton), ...LockTalentsFrame, ...NineSlice, ...NineSliceShadow, ...SearchBox, ...AbilityBrowser (ScrollListTemplate, CABrowserMixin), ...TalentBrowser (ScrollListTemplateNoScrollBar, CATalentBrowserMixin, +TalentGlobalLockFrame), ...Filter, ...SpellTagFrame, ...ScrollChild (+Spells, +Talents (+GateDisappearanceFrame))",
+    "CharacterAdvancementContentTab1..Tab7 (TabSystem AddTab with CASpecTabTemplate; 1-3 spec tabs, 4 Abilities/SPELLBROWSER, 5 Talents/TALENTBROWSER, 6 Mastery, 7 Summary; each with $parentSpellCount/$parentTalentCount)",
+    "CharacterAdvancementSideBar (+ ...SideBarSpellList (StandardProportionalScrollListTemplate; +NineSlice, Header (+NineSlice (+PrimaryStat1 CAPrimaryStatButtonTemplate, HintText, SelectedStatText), SearchBox, Filter), Footer (+FlyoutButton, RarityCurrencyBar, RarityFlyout (+Uncommon, Rare, Epic, Legendary CARarityBarTemplate))), ...SideBarSpecList (+NineSlice, IconSelector, SelectFrame (+CloseButton, ScrollList)))",
+    "CharacterAdvancementSpellDropDownMenu (UIDropDownMenuTemplate)",
+    "Pooled (unnamed, created lazily): CASpellCategoryTemplate, CASpellButtonTemplate, CACompactSpellButtonTemplate, CATalentButtonTemplate, CASummaryClassIconTemplate, CATalentGateCounterTemplate, CATalentGateTemplate, CATalentBranchTemplate, CATalentsClassTemplate (HybridScrollFrame rows), CABrowserRowTemplate rows, CABrowserSpellButtonTemplate, CASpellTagTemplate, ClassPointsTemplate"
+  ],
+  "stock_api_assumptions": [
+    "UnitClass / UnitClassBase return FOUR values (className, classFile, classID, classMask) - overridden in FrameXML/Util/GlobalOverwrites.lua:88-96 from Enum.Class/Enum.ClassMask; class file tokens include \"HERO\" (Ascension hero class) and IsHeroClass/IsDefaultClass/C_Player:GetClass depend on it. LOCALIZED_CLASS_NAMES_MALE[\"HERO\"] and RAID_CLASS_COLORS[\"HERO\"] are indexed (CharacterAdvancement.lua:2118, Templates/CAClassButton.lua:24/32).",
+    "GetSpellInfo(spellID) is called inside pcall (Templates/CASpellButton.lua:349) - the code expects it may THROW for spell ids the client cannot resolve, and every entry's Spells[rank] must resolve via GetSpellInfo (custom Ascension spell ids far above the stock Spell.dbc range).",
+    "GetItemCount(itemID) and GameTooltip:SetHyperlink(\"item:\"..id) are used with custom item ids 383080, 383081, 375250, 1101243 (ItemData) - the items must exist in the stock client's item cache / server item_template or the CurrencyBar and essence tooltips show nothing.",
+    "PlaySound receives NUMERIC sound-kit ids and tables of ids (SOUNDKIT, SharedXML/Util/SoundKit.lua) through the Lua override in SharedXML/Util/SharedOverwrites.lua:17, which forwards the number to the original PlaySound; stock 3.3.5a PlaySound only accepts sound names.",
+    "GetCVar/SetCVar are used on custom CVars caLastClass, caLastSpec (per-character) and previewCharacterAdvancementChanges, which exist only because FrameXML/GameCVars.lua registers them through the native RegisterSavedCVar; stock 3.3.5a cannot register CVars, so C_CVar.Get/Set/GetBool must be re-backed for these names.",
+    "Frame:RegisterEvent is called with 16 non-stock event names and handled with a plain OnEvent -> OnEventToMethod dispatcher; the events are delivered as ordinary frame events by Extensions.dll (and mirrored to C_Hook through a RegisterAllEvents frame).",
+    "HybridScrollFrame_CreateButtons(scrollFrame, template, -8, -58, nil, nil, nil, nil, \"LEFT\", \"RIGHT\") plus scrollFrame.isHorizontal = true (Templates/CATalentBrowser.lua:331-332) - relies on Ascension's SharedXML/Scroll/HybridScrollFrame.lua horizontal support, not stock FrameXML.",
+    "Texture:SetAtlas / SetPortraitTexture / SetPointOffset, Region:SetShown / ClearAndSetPoint, Button:SetEnabled, EditBox:SetEnabled are TypeExtensions (SharedXML/TypeExtensions/*) on the widget metatables - fine on stock as long as the shim loads them first.",
+    "Colour globals (RED_FONT_COLOR, HIGHLIGHT_FONT_COLOR, NORMAL_FONT_COLOR, ITEM_QUALITY_COLORS[q], RAID_CLASS_COLORS[c]) must be CreateColor objects with :WrapText()/:GetRGB() (SharedXML/SharedConstants.lua + Util/ColorUtil.lua), not the stock plain {r,g,b} tables.",
+    "CreateFromMixins accepts STRING mixin names (\"CASpellButtonBaseMixin\", \"CallbackRegistryMixin\") - Ascension's SharedXML/Util/Mixin.lua:177 resolves them via _G; stock-style CreateFromMixins would fail.",
+    "StaticPopupDialogs entries use button3 and hasWideEditBox / wideEditBox (Ascension FrameXML/StaticPopup.lua); the popups are looked up by name so the shim must ship those three dialog tables.",
+    "GetUnspentTalentPoints(false, true), GetNumTalents(1, false, true), HasPetUI(), PetCanBeAbandoned(), ToggleTalentFrame() are used for the PET talent button only; ToggleTalentFrame is the Ascension override (FrameXML/UIParent.lua:646) that opens only the pet talent frame.",
+    "IsSpellKnown(spellID) (stock) is used together with the native IsSpellIDKnown(spellID) (Templates/CASpellButton.lua:266); both must agree for rank-up indicators.",
+    "SendChatMessage(\".ca2 player addentry <name> <entryID>\") (CharacterAdvancement.lua:2491/2500) assumes the server accepts dot-commands from the default chat type; GM-only.",
+    "UIDropDownMenu_SetAnchor(dropdown, x, y, point, relativeTo, relativePoint) and UIDropDownMenu_Initialize(frame, fn, \"MENU\") match stock 3.3.5a; the dropdown code itself is Ascension's SharedXML/UIDropDownMenu.lua (supports info.iconAtlas).",
+    "str:trim() on strings is stock WoW string.trim (strtrim); string.isNilOrEmpty, math.clamp, toboolean, bit.contains are Ascension TypeExtensions.",
+    "Frame names use CreateFrame(\"Frame\", \"$parentButtonLayout\", parent, template) - $parent expansion in CreateFrame names is stock behaviour."
+  ],
+  "data_files": [
+    "CA entry records (C_CharacterAdvancement.GetEntryByInternalID / GetSpellsByClass / GetTalentsByClass / GetMasteriesByClass / GetImplicitByClass / GetKnownSpellEntriesForClass / GetKnownTalentEntriesForClass / GetFilteredEntryAtIndex(ByCategory) / GetEntryBySpellID) with fields ID, Name, Icon, Spells[], Masteries[], Type, RequiredLevel, RequiredAEInvestment, RequiredTEInvestment, RequiredTabTEInvestment, RequiredClassPoints, Class (DBC name), Tab (DBC name), Row, Column, ConnectedNodes[] (parent IDs), Group, Flags - i.e. DESIGN.md section 4 data/entries/<Class>.lua.",
+    "Class/spec name mapping: CharacterAdvancementUtil.ClassConversions (FrameXML/Util/CharacterAdvancementUtil.lua:849+, file token <-> DBC name, incl. \"Hero\"/\"General\") and C_ClassInfo.GetSpecInfo(classFile, specFile) -> {Name, SpecFilename} for every entry of CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER (FrameXML/Constants.lua:66) - a ChrSpecialization-style table.",
+    "Essence curve: C_CharacterAdvancement.GetExpectedAE(level) for levels 1..80 (DESIGN.md ca_essence); talent/ability essence costs per spell (GetAbilityEssenceCost/GetTalentEssenceCost, reached through SpellListItem rows).",
+    "Investment counters: GetGlobalAEInvestment/GetGlobalTEInvestment/GetTabTEInvestment(class, spec)/GetClassPointInvestment(class) AND their GetPending* twins (preview mode) - derived from the known set + entry costs.",
+    "Spell tag taxonomy: GetRootSpellTagTypes(), GetSpellTagTypes(parentID), GetSpellTagTypeDisplayInfo(id) -> (name, icon) - custom SpellTag DBC; queried at addon load.",
+    "Ability-browser categories: GetCategories(true) ordered ids + GetCategoryDisplayInfo(id) -> (reqLevel, name, icon, description, stagger); ids 31, 32-52, 42 carry hard-coded meaning in Browser/CharacterAdvancementBrowser.lua:6-46.",
+    "Spell quality data: GetQualityInfo(spellID) -> quality name/number (Enum.SpellQuality), GetQualityCount/GetQualityLimit per quality (Enum.QualityToCAQuality), C_BuildEditor.GetQualityInfoForLevel.",
+    "Config flags via C_Config.GetBoolConfig: CONFIG_CHARACTER_ADVANCEMENT_QUALITIES_ENABLED, CONFIG_WILDCARD_QUICK_ROLLING_ENABLED, CONFIG_ABILITY_BROWSER_ENABLED, CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED (must be false to load this addon for heroes), CONFIG_USE_CUSTOM_BASE_MISS_CHANCE.",
+    "Game-mode bitmask from native GetCustomGameMode() (Enum.GameMode); realm max level from native GetRealmMaxLevel(); GM level from C_AccountInfo.GetGMLevel(); C_Realm.IsDevelopment()/IsLive().",
+    "Item ids ItemData.ABILITY_ESSENCE=383080, TALENT_ESSENCE=383081, MARK_OF_ASCENSION=375250, SCROLL_OF_UNLEARNING=1101243 (GetItemCount + item tooltips); aura 9930831 = Prestiged (C_Aura.UnitHasAura); primary-stat entry ids 1149-1152/18149 and PRIMARY_STATS spell ids (FrameXML/Util/C_PrimaryStat.lua).",
+    "Atlas table SharedXML/AtlasInfo.lua entries: ca-background, ca-background-browser, ca-background-talents, ca-background-header(-cut), ca-background-<class> x10, ca-navigation-bigRing/smallRing/bookmark/bookmark-highlight/corner-ring(-r)/illustration-gems-blue/-purple, ca-spellcount-bg, ca-talentcount-bg, ca-tab-left/right, ca_known_glow, plus spell-list-locked, common-shadow-circle, category-icon-ring, levelup-line-white, talents-node-choiceflyout-circle-shadow, search-highlight, collapse-button-left/middle/right, bags-roundhighlight, pta-icon-border, realm-select-icon-bg, emptyslot(-disabled), spellbook-text-background, professions-specializations-background-footer, talents-search-notonactionbar(hidden), talents-button-reset, communities-icon-lock, wow-tab-highlight, newplayertutorial-yellowGlow-redbutton-left/middle/right, GarrMission_PortraitRing, services-ring-large-glowspin, _ui-talentbranch-horizontal(-disabled), !ui-talentbranch-vertical(-disabled), ui-talentbranch-arrow-{left,right,up,down}(-disabled), ui-talentbranch-{bl,tl,br,tr}(-disabled), groupfinder-icon-class-<class>, class-round-<CLASS> - and the texture files they reference.",
+    "Loose texture files: Interface\\CharacterAdvancement\\caCorner, Interface\\AddOns\\AwAddons\\Textures\\Collections\\Shadow, Interface\\Pictures\\artifactbook-<CLASS>-cover, Interface\\callboard\\atlas_10, Interface\\Icons\\inv_custom_abilityessence, inv_custom_talentessence, classicon_hero, classicon_<class>, trade_archaeology_draenei_tome, inv_misc_spyglass_02, inv_misc_dmc_destructiondeck, misc_rune_pvp_random, SPELLS\\7fx_flash_shard, SPELLS\\7fx_alphamask_shockwavesoft_contrast_256, Interface\\FrameGeneral\\UI-Background-Marble, UI-Background-Rock2, Interface\\LFGFRAME\\UI-LFG-ICON-LOCK.",
+    "Custom GlobalStrings referenced: CHARACTER_ADVANCEMENT, ABILITY_ESSENCE_TOTAL, TALENT_ESSENCE_TOTAL, ABILITIES, TALENTS, MASTERY, BROWSE, LEARN, UNLEARN, REROLL, LOCATE, LOCK_SPELL, UNLOCK_SPELL, SHOW_POSSIBLE_SWAPS, CA_MARK_FOR_SWAP, CA_SWAP_BLUE, CA_CANNOT_LEARN_S, CA_CANNOT_UNLEARN_S, CA_CANNOT_PURGE_TALENTS_S, CA_CANNOT_RESET_BUILD_S, CA_TALENTS_UNLOCK_AT_LEVEL, CA_GATE_TOOLTIP_FORMAT_GLOBAL, CA_GATE_TOOLTIP_FORMAT_LOCAL, CA_GATE_INFO, CA_GATE_INFO_CLASS_POINTS, CA_GATE_INFO_CLASS_POINTS_HINT, CA_GATE_INFO_GLOBAL_AE, CA_GATE_TOOLTIP_FORMAT_CLASS_POINTS, CA_GATE_TOOLTIP_FORMAT_ABILITY_ESSENCE, CA_RAPID_ROLLING(_TEXT), CA_FILTER_* (KNOWN, UNKNOWN, CAN_ADD, CAN_REMOVE, CAN_LEARN, CAN_UNLEARN, TYPE_ABILITY, TYPE_TALENT, TYPE_TRAIT, *_IN_BUILD, CLASS_GENERAL, CLASS_REBORN_GENERAL), CA_LEARN_*/CA_UNLEARN_* result keys (Enum.CALearnResult/CAUnlearnResult values), MY_SPELLS_TAB(_TITLE/_TOOLTIP), MY_SPECS_TAB(_TITLE/_TOOLTIP), ENTER_SPEC_NAME_HELP, SHOW_RARITIES, HIDE_RARITIES, RESET_BUILD(_TOOLTIP), RESET_ALL_TALENTS(_TOOLTIP), SAVE_CHANGES, SHARE_BUILD(_TOOLTIP), IMPORT_BUILD, BUILD_URL_COPIED_TO_CLIPBOARD, CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES, CONFIRM_LEAVING_PENDING, CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD, DRAFT_MODE, WILDCARD_MODE, TOGGLE_DRAFT_CARDS(_TOOLTIP), RAPID_ROLL_UNAVAILABLE, NO_PRIMARY_STAT, CHOOSE_A_PRIMARY_STAT, PRIMARY_STAT, SUGGESTED_ABILITY(_TOOLTIP), SPELL_AVAILABLE(_FIND_TRAINER), SPELL_RANK_AVAILABLE, SPELL_RANK_FIND_TRAINER, S_ABILITIES, S_TALENTS, D_ABILITIES_KNOWN, D_TALENTS_KNOWN, ENCHANT_COLLECTION_EMPTY_SEARCH, FEATURE_BECOMES_AVAILABLE_AT_LEVEL, FRIENDS_LEVEL_TEMPLATE, UNSPENT_TALENT_POINTS, ADD_CORE/ADD_OPTIMAL/ADD_EMPOWERING/ADD_SYNERGISTIC, ACHIEVEMENT_SUMMARY_CATEGORY, UNKNOWN_OBJECT, FILTERS, plus the CA_* strings this addon self-defaults at the top of CharacterAdvancement.lua/CAGate.lua/CharacterAdvancementBrowser.lua.",
+    "No LoadAscensionContentJSON / C_Content usage in this addon."
+  ],
+  "protected_actions": [
+    "C_CharacterAdvancement.PickupSpell(entryID) at Templates/CASpellButton.lua:466 (OnDragStart) - places a spell on the cursor; stock equivalent PickupSpell(spellName) is callable from insecure code in 3.3.5a, so the shim needs the entry->current-rank-spell resolution only.",
+    "Internal_CopyToClipboard(link) at CharacterAdvancement.xml:469 - native-only clipboard write; no stock API exists (shim must replace Share Build with a selectable EditBox popup).",
+    "SendChatMessage(\".ca2 player addentry|removeentry <player> <entryID>\") at CharacterAdvancement.lua:2491/2500 - GM dot-commands (menu items only when C_AccountInfo.GetGMLevel() > 0).",
+    "C_Quest:SendPathToAscensionEvent(\"ACTION_OPEN_PET_TALENTS\") at CharacterAdvancement.xml:59 -> SendAddonMessage(\"ASC_PATH_TO_ASCENSION\", ..., \"WHISPER\", self) - addon-message channel, fine on stock.",
+    "Server-authoritative mutations that become wire commands in the shim (not secure-protected, but not doable client-side): LearnID/UnlearnID (via CharacterAdvancementUtil.ConfirmOrLearnID/ConfirmOrUnlearnID), ApplyPendingBuild (CASpellButton.lua:869 and CharacterAdvancementUtil.ConfirmApplyPendingBuild), UnlearnAllTalents/UnlearnAllSpells, LockID/UnlockID, SwapEntriesByID, ImportPendingBuild, C_BuildEditor.AddSpell/RemoveSpell, C_BuildCreator.ActivateBuild.",
+    "No CastSpellByID, SetBinding, RunMacro, or other secure-only calls anywhere in the addon."
+  ],
+  "blocking_natives": [
+    "ADDON LOAD (file top level / CharacterAdvancementMixin:OnLoad / template OnLoads): GetCustomGameMode (behind C_GameMode:IsGameModeActive), GetRealmMaxLevel (behind GetMaxLevel, first used in tooltips but Constants need it), RegisterSavedCVar-backed GetCVar/SetCVar for caLastClass/caLastSpec/previewCharacterAdvancementChanges, C_Config.GetBoolConfig, C_CharacterAdvancement.GetExpectedAE(1..80), C_CharacterAdvancement.GetLearnedAE(nil,nil) and GetLearnedTE(nil,nil) (SetupSpecTabs -> tab:UpdateSpellCounts()), C_CharacterAdvancement.GetTabTEInvestment x30 (CATalentBrowserMixin:OnLoad -> LoadElements; GetPendingTabTEInvestment when preview CVar = 1), C_CharacterAdvancement.GetRootSpellTagTypes / GetSpellTagTypes / GetSpellTagTypeDisplayInfo (CharacterAdvancementUtil.InitializeSpellTagFilter), C_CharacterAdvancement.IsPending (+ CanApplyPendingBuild if pending), GetItemCount(383080/383081); hero only: C_CharacterAdvancement.IsPendingBuildAvailable, GetPendingRankByEntryID, GetEntryByInternalID and the full button SetEntry chain below for PrimaryStat1.",
+    "ONSHOW / first FullUpdate: C_CharacterAdvancement.ClearRecentlyLearnedEntries, C_ClassInfo.GetSpecInfo, C_CharacterAdvancement.GetMasteriesByClass, GetImplicitByClass, GetSpellsByClass, GetTalentsByClass, GetEntryByInternalID, IsKnownID, IsPendingEntryID, IsLockedID, CanLearnID / CanUnlearnID (or CanAddByEntryID / CanRemoveByEntryID in preview mode), GetTalentRankByID, KnowsConnectedNodesFor, GetQualityInfo, GetGlobalAEInvestment / GetGlobalTEInvestment / GetClassPointInvestment / GetTabTEInvestment (+ GetPending* twins), SetFilteredEntries / GetNumFilteredEntries / GetFilteredEntryAtIndex (SideBar spell list), CanUnlearnAllTalents (default class) or CanClearPendingBuild (hero), GetLearnedAE/GetLearnedTE(class, spec), C_Aura.UnitHasAura (IsPrestiged, level<10 lock check), C_Spell.GetMaxLearnableRank + C_Spell.IsTrainerSpell + IsSpellIDKnown (known Ability entries), GetSpellInfo for every displayed spell id, C_Config.GetBoolConfig(CONFIG_ABILITY_BROWSER_ENABLED / CONFIG_CHARACTER_ADVANCEMENT_QUALITIES_ENABLED).",
+    "SUMMARY tab: GetKnownSpellEntriesForClass, GetKnownTalentEntriesForClass. ABILITY BROWSER (only when CanUseBrowser()): GetCategories, GetCategoryDisplayInfo, SetFilteredEntriesByCategory, GetNumFilteredEntriesByCategory, GetFilteredEntryAtIndexByCategory. RARITY flyout (hero + qualities config): GetQualityCount, GetQualityLimit.",
+    "Bare globals with no Lua definition that the open path touches: SendSystemMessage (error paths only), IsSpellIDKnown, GetCustomGameMode, GetRealmMaxLevel, RegisterSavedCVar, Internal_CopyToClipboard (Share Build click only)."
+  ],
+  "notes": "1) LOADER ROUTING: FrameXML/UIParent.lua:327 only loads THIS addon for default (stock) classes, or for heroes when C_Config.GetBoolConfig(\"CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED\") == false and CA_FORCE_LEGACY is not set; nil/true routes to Ascension_CharacterAdvancementSeason9 and CoA classes (IsCustomClass) to Ascension_CoATalents. The shim's C_Config must answer false for that key (or the shim pins CharacterAdvancement_LoadUI) to get this UI for a Hero character. 2) TWO CHARACTER AXES drive every branch: C_Player:IsHero() (classFile == \"HERO\" via the 4-return UnitClassBase override) vs C_Player:IsDefaultClass() (Enum.ClassMask.DEFAULT) - default classes get a 70px shorter frame, no class navigation, Reset All Talents instead of Reset Build, previewCharacterAdvancementChanges forced to 1 (pending-build editing) and CA_USE_GATES_DEBUG = true; heroes get the class bookmark navigation, Abilities/Talents/Mastery/Summary tabs, the rarity flyout when CONFIG_CHARACTER_ADVANCEMENT_QUALITIES_ENABLED else preview mode + gates. 3) PREVIEW MODE: CVar previewCharacterAdvancementChanges == \"1\" switches learn/unlearn to the client-side pending build (CanAddByEntryID/AddByEntryID/CanRemoveByEntryID/RemoveByEntryID, Save = CharacterAdvancementUtil.ConfirmApplyPendingBuild -> ApplyPendingBuild, Undo = CancelPendingBuild) and, through the wrappers in FrameXML/Util/GlobalOverwrites.lua:355-420, silently redirects GetGlobalAEInvestment/GetGlobalTEInvestment/GetTabTEInvestment/GetClassPointInvestment/CanLearnID/CanUnlearnID to their GetPending*/CanAdd/CanRemove counterparts - the shim must implement BOTH names of each pair, and the wrappers themselves live in compat/FrameXML (GlobalOverwrites.lua). Non-preview mode goes straight to LearnID/UnlearnID with the CONFIRM_LEARN_S/CONFIRM_UNLEARN_S popups (ShouldConfirmLearnID/ShouldConfirmUnlearnID reasons). 4) GAME MODES: every Draft/WildCard/BuildDraft path is guarded by C_GameMode:IsGameModeActive (GetCustomGameMode bitmask); returning Enum.GameMode.None (0) keeps WildCard_LoadUI, TokenUtil, C_Wildcard, DraftUtil.HasAnyPicks and the rapid-roll button off the critical path. CharacterAdvancementUtil.CanUseBrowser() needs CONFIG_ABILITY_BROWSER_ENABLED AND IsAnyGameModeActive(), so with mode None the ability browser (caLastClass == \"BROWSER\") is unreachable and the addon falls back to SelectClass(\"WARRIOR\") - but InitializeSpellTagFilter still calls GetRootSpellTagTypes/GetSpellTagTypes at OnLoad, so those must at least return empty tables. 5) EVENT DELIVERY: all 16 custom events are native frame events (api-surface __EVENT__ NATIVE) registered with Frame:RegisterEvent and dispatched by OnEventToMethod; SharedXML/C_Hook.lua additionally mirrors every event to C_Hook listeners from a RegisterAllEvents frame, and TokenUtil/SpecializationUtil consume TOKEN_UPDATED / ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED via EventRegistry - the DESIGN EventBus must feed frames that registered the name (per-frame OnEvent) and also C_Hook:SendEvent. CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED is registered by EVERY visible spell/talent button and branch texture (OnShow) - firing it re-runs SetEntry on all of them, so batch it. 6) ENTRY RECORD CONTRACT: see GetEntryByInternalID; talents are laid out at x = -84 + (Column-1)*52 (+shift), y = yStart + Row*44 with Row 0-based and Column 1-based; entry.ConnectedNodes lists PARENT entry ids (child -> parent) and CATalentFrameGatesMixin derives each row's gate thresholds from the top-left node's RequiredTEInvestment/RequiredTabTEInvestment; unroutable or unknown parents are logged with C_Logger.Error, never fatal. Icons are file names without the Interface\\\\Icons\\\\ prefix; entry.Class/Tab are DBC display names mapped by CharacterAdvancementUtil.ClassConversions. 7) C_ClassInfo.GetSpecInfo(classFile, specFile) is dereferenced without nil checks for all 30 (class,spec) pairs and must return {Name, SpecFilename}. 8) SPELL RESOLUTION: every button pcall's GetSpellInfo(entry.Spells[rank]) and the tooltip is GameTooltip:SetHyperlink(\"spell:ID\"); if the stock client lacks those spell ids in Spell.dbc the buttons render as 'Broken Spell' - either ship the CA spell DBC patch or override GetSpellInfo/tooltips from the generated tables (Name/Icon are already in the entry record). 9) CVARS: caLastClass/caLastSpec (character) and previewCharacterAdvancementChanges are created by native RegisterSavedCVar (FrameXML/GameCVars.lua:61-62,114); on stock, back C_CVar.Get/Set/GetBool for these names with SavedVariables - the addon writes them dozens of times per session and reads them in every FullUpdate. 10) SOUND: PlaySound is fed numeric SOUNDKIT ids/tables through the SharedOverwrites.lua override; map to 3.3.5 names (e.g. UCHATSCROLLBUTTON -> igMainMenuOptionCheckBoxOn, CHARACTER_SHEET_TAB -> igCharacterInfoTab) or no-op. 11) MISSING-ON-STOCK GLOBALS: SendSystemMessage (no Lua definition anywhere; not in either inventory -> provide via DEFAULT_CHAT_FRAME:AddMessage), Internal_CopyToClipboard (native-only; degrade Share Build), IsSpellIDKnown, GetCustomGameMode, GetRealmMaxLevel, RegisterSavedCVar, C_Aura.UnitHasAura (Prestige aura 9930831 -> UnitBuff scan). 12) ITEMS: essence/mark/scroll counts come from GetItemCount on custom item ids and their tooltips from item hyperlinks - if the stock client cannot resolve the items, override CurrencyBarMixin/RefreshCurrencies to read the ESSENCE budget from the shim (DESIGN section 5 ESSENCE line) instead. 13) FRAME POOLS: all spell/talent/branch/gate/browser buttons are created lazily by CreateFramePool on first Acquire, so their template OnLoad code (UseQuality, SetAtlas, BorderIcon setup) and the SetEntry native chain run at first FullUpdate (OnShow), not at addon load; PrimaryStat1 (hero) and the tab/currency widgets are the only XML-instantiated CA buttons. 14) BROWSER_TAB is an undefined global (nil) in this addon - the HideTabID(nil)/tabID == nil comparisons are inert; leave it undefined. 15) The addon writes CA_USE_GATES_DEBUG and relies on CharacterAdvancementUtil holding swap state (markedForSwap/swapSuggestions) on the CharacterAdvancement frame; CharacterAdvancementUtil, BuildCreatorUtil, SpecializationUtil, TokenUtil, DraftUtil, C_Player, C_GameMode, C_PrimaryStat, C_Spell, C_Quest, GlobalOverwrites, GameCVars, CurrencyBar, SpellListItem, SpecListItem, UIPanelTemplates (RarityGem/AnimatedRank/AutoCastShine/UINewSpellRankIndicator/CollapsibleHeader), CharacterAdvancement/CharacterAdvancementBaseTemplates.xml (LocationIndicatorTemplate), IconSelectorFrame, MainMenuBarMicroButtons (DraftModeMicroButtonTemplate), StaticPopup, GameTooltip (GameTooltip_GenericTooltip), Constants, Data/Items and UIParent (LoadUI/ShowForcedPrimaryStat/HideUIPanel/ToggleTalentFrame) are the FrameXML files this addon needs in compat/FrameXML; SharedXML needs TypeExtensions, Mixin, Pools, FunctionUtil, CallbackRegistry, ColorUtil, HyperlinkUtil, Timer, Const, Enum, SoundKit, SharedOverwrites, SharedConstants, AtlasInfo, HelpTip, C_CVar, C_Hook, NineSlice, LayoutFrame, FilterDropDown, UIDropDownMenu, Scroll/*, TabSystem/*, SharedTemplates(.xml), SharedPanelTemplates(.xml), CustomFonts/CustomFontStyles. 16) The frame is parent=\"Collections\" and is shown/hidden by TabSystemMixin:SelectTab via Region:SetShown; Collections:HookScript(\"OnHide\") clears the search, and OnHide raises CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES when IsPending(). 17) Timer.After(0.2) post-layout scroll fixups and a 3-retry ScrollToLocate depend on GetVerticalScrollRange being populated after UpdateScrollChildRect - stock ScrollFrame behaviour, fine."
+}

@@ -1,0 +1,487 @@
+{
+  "target": "Ascension_SeasonCollection",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": [],
+    "saved_variables": [],
+    "files_in_order": [
+      "SeasonProgressBarMixin.lua",
+      "SeasonInfoMixin.lua",
+      "SeasonRewardMixin.lua",
+      "SeasonTaskMixin.lua",
+      "SeasonCollectionTemplates.xml",
+      "SeasonCollectionUI.xml",
+      "SeasonCollectionMixin.lua (pulled in by <Script file=> at SeasonCollectionUI.xml:3, before the SeasonCollectionFrame definition)"
+    ],
+    "implicit_dependencies_not_declared": [
+      "Ascension_Collections (SeasonCollectionUI.xml:5 parent=\"Collections\"; SeasonCollectionMixin.lua:13 HideUIPanel(Collections)) - the .toc has no ## Dependencies line, so load order is only guaranteed because the sole loader is UIParent's SeasonCollection_LoadUI",
+      "!AscensionShim (compat SharedXML: TypeExtensions, AtlasInfo, C_Hook, Mixin, ModelMixin, SoundKit, Const, Enum; compat FrameXML: Objects/Item.lua, Objects/Creature.lua, Objects/AsyncCallbackHandler.lua, Util/GameEventUtil.lua, Util/GlobalFunctions.lua, Util/GlobalOverwrites.lua, Data/Items.lua, Constants.lua INVTYPE_INDEX_TO_SLOT, GameTooltip.lua GameTooltip_AddSpacer)"
+    ]
+  },
+  "entry_points": [
+    "SeasonCollection_LoadUI() defined at FrameXML/UIParent.lua:429-431 -> UIParentLoadAddOn(\"Ascension_SeasonCollection\"). NOTHING in the tree calls it (grep over ui-tree: only the definition).",
+    "No Collections tab: AddOns/Ascension_Collections/Collections.lua:SetupTabSystem registers CharacterAdvancement, HeroArchitect, SkillCards, Vanity, MysticEnchants, Wardrobe - no Season tab, no Collections.Tabs.Season id, and no other file references SeasonCollectionFrame. The UI is ORPHANED in this tree.",
+    "No slash command, no micro button, no event handler shows the frame. SeasonCollectionFrame is created hidden=\"true\" with parent=\"Collections\"; the only way to see it is manual: SeasonCollection_LoadUI(); ShowUIPanel(Collections); SeasonCollectionFrame:Show().",
+    "Close: SeasonCollectionMixin.lua:12-14 CloseButton OnClick -> HideUIPanel(Collections) (closes the whole Collections panel, not just this child).",
+    "Outbound: SeasonCollectionUI.xml:152 UnlockButton -> OpenAscensionURL(\"store/elune\") (external browser); SeasonRewardMixin.lua:227 CollectButton -> OpenStoreCollectionToCategory(Enum.VanityCategory.Seasonal, displayName) (Lua, UIParent.lua:422 -> loads Ascension_VanityCollection and switches Collections to the Vanity tab)."
+  ],
+  "namespaces": {
+    "C_AppearanceCollection": {
+      "GetAvailableSeasons": {
+        "callsites": ["SeasonRewardMixin.lua:17"],
+        "args": "()",
+        "returns": "list (array) of season ids or nil; caller reads only [1] with `season and season[1] or 0` - tolerates nil and empty",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetAvailableChapters": {
+        "callsites": ["SeasonRewardMixin.lua:19"],
+        "args": "(seasonID:number)",
+        "returns": "list (array) of chapter ids or nil; caller reads only [1] with `chapter and chapter[1] or 0`",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSeasonalItems": {
+        "callsites": ["SeasonRewardMixin.lua:22"],
+        "args": "(seasonID:number, chapterID:number)",
+        "returns": "list (array) of appearanceIDs (numbers) or nil; caller uses `#`, `[index]`, iterates by page; nil/empty -> C_Logger.Error and rewards = {}",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Appearance": {
+      "GetAppearanceDisplayInfo": {
+        "callsites": ["SeasonRewardMixin.lua:51", "SeasonRewardMixin.lua:184"],
+        "args": "(appearanceID:number)",
+        "returns": "6 values: displayType:string (one of \"APPEARANCE_DISPLAY_TYPE_ITEM\", \"APPEARANCE_DISPLAY_TYPE_CREATURE\", \"APPEARANCE_DISPLAY_TYPE_ITEM_ENCHANT\", \"APPEARANCE_DISPLAY_TYPE_SPELL\", \"APPEARANCE_DISPLAY_TYPE_STATIC_SPELL_VISUAL\", \"APPEARANCE_DISPLAY_TYPE_ANIMATED_SPELL_VISUAL\", \"APPEARANCE_DISPLAY_TYPE_ITEM_SET\" - plain strings compared with ==, not Enum members), displayID:number (itemID for ITEM, creature displayID for CREATURE, enchantID for ITEM_ENCHANT, spell/visual id for *_SPELL_VISUAL, itemSetID for ITEM_SET), uiCamera (stored, unused here), displayName:string (shown as Title and passed to the store search), entry (stored, unused), spellVisualID:number|nil (used as `self.spellVisualID or 0` for SetSpellVisual/SetSpell). At :184 only the first two returns are read and nil displayID is tolerated.",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "binding_note": "ext-lua-bindings.tsv lists this function under C_AppearanceCollection (fn 0x100c8090), not C_Appearance; no Lua alias `C_Appearance = ...` exists anywhere under Interface, so Extensions.dll registers it into both tables. The shim must expose it as C_Appearance.GetAppearanceDisplayInfo."
+      },
+      "GetCreatureDisplayItems": {
+        "callsites": ["SeasonRewardMixin.lua:106"],
+        "args": "(appearanceID:number) - NOTE the caller passes self.appearanceID, which SeasonRewardMixin never assigns (ShowReward keeps it in a local), so in practice this is called with nil",
+        "returns": "list (array) of itemIDs to TryOn onto the creature model, or nil; guarded by `displayItems and #displayItems > 0`",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "binding_note": "registered under C_AppearanceCollection in ext-lua-bindings.tsv (fn 0x100c9de0); same aliasing situation as GetAppearanceDisplayInfo"
+      }
+    },
+    "C_ItemSet": {
+      "GetAppearances": {
+        "callsites": ["SeasonRewardMixin.lua:178"],
+        "args": "(itemSetID:number)",
+        "returns": "table keyed slotID -> appearanceID, iterated with pairs(); value 0 means empty slot; each non-zero appearanceID is resolved through C_Appearance.GetAppearanceDisplayInfo to an itemID and tried on with TryOn(itemID, slotID)",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "binding_note": "ext-lua-bindings.tsv has C_Item.GetAppearances (0x100c8af0) and C_ItemSet.GetCameraInfo/GetItemCameraID, but no C_ItemSet.GetAppearances row; api-surface.tsv marks C_ItemSet.GetAppearances NATIVE (Extensions.dll). No Lua alias for C_ItemSet exists. Expose it under C_ItemSet."
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["SeasonRewardMixin.lua:24", "SeasonRewardMixin.lua:134"],
+        "args": "(format:string, ...) - printf-style, e.g. (\"... season %d, chapter %d\", season, chapter)",
+        "returns": "nothing; side effect only (native log). Called on the empty-rewards path of RewardModel OnShow, so it must exist or OnShow errors.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Realm": {
+      "IsSeasonal": {
+        "callsites": ["SeasonCollectionUI.xml:158", "SeasonCollectionUI.xml:171"],
+        "args": "()",
+        "returns": "boolean; true enables the Unlock Now button (when the pass is not owned), false disables it and the tooltip shows SEASONAL_ACHIEVEMENTS_UNAVAILABLE",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AssetQueryService": {
+      "TryCacheItem": {
+        "callsites": [
+          "FrameXML/Objects/AsyncCallbackHandler.lua:42 (compat Lua; reached from SeasonInfoMixin.lua:21, SeasonRewardMixin.lua:88, SeasonRewardMixin.lua:113, SeasonRewardMixin.lua:128, SeasonRewardMixin.lua:196 via Item:CancelableContinueOnLoad / ItemQueryListener:AddCancelableCallback when GetItemInfo(itemID) is nil)"
+        ],
+        "args": "(itemID:number)",
+        "returns": "truthy when the item is cached / a cache request was issued; the Lua listener then waits for ITEM_CACHE_REQUEST_SUCCESS(itemID) and fires the queued callbacks with (itemID)",
+        "sync": "async-with-event ITEM_CACHE_REQUEST_SUCCESS",
+        "defined_in_lua": null
+      },
+      "TryCacheCreature": {
+        "callsites": [
+          "FrameXML/Objects/AsyncCallbackHandler.lua:46 (compat Lua; reached from SharedXML/TypeExtensions/Model.lua:23 SetDisplayInfo <- SeasonRewardMixin.lua:105 DisplayCreature, only when Creature:CreateFromID(displayID):IsCached() is false)"
+        ],
+        "args": "(creatureID:number)",
+        "returns": "truthy when a request was issued; callbacks fire on CREATURE_CACHE_REQUEST_SUCCESS(creatureID)",
+        "sync": "async-with-event CREATURE_CACHE_REQUEST_SUCCESS",
+        "defined_in_lua": null
+      }
+    }
+  },
+  "globals": {
+    "GetSeasonalCollectionInfo": {
+      "callsites": ["SeasonCollectionMixin.lua:16"],
+      "args": "()",
+      "returns": "table or nil. Fields read: .names[1] (draft title), .names[2] (overwritten at :23 with SEASONAL_POINTS_AVAILABLE:format(GetItemCount(97397))), .icons[1], .icons[2] (icon file names WITHOUT path - SeasonInfoMixin.lua:7 prefixes \"Interface\\\\Icons\\\\\"), .descriptions[1], .descriptions[2]. nil -> dprint and return: the panel loads with empty Unlock/Draft/Points boxes but no Lua error. Called at OnLoad (LoadAddOn time). Only caller in the whole tree.",
+      "defined_in_lua": null
+    },
+    "IsSeasonalCollectionUnlocked": {
+      "callsites": ["SeasonProgressBarMixin.lua:222", "SeasonProgressBarMixin.lua:290", "SeasonCollectionUI.xml:156"],
+      "args": "()",
+      "returns": "boolean (does the character own the Seasonal Pass, item 97398). Drives Tier0:SetEnabled, the Tier0 tooltip line and the Unlock Now button state. Called in OnShow paths - a nil function is a hard error.",
+      "defined_in_lua": null
+    },
+    "SetModelApplyComponents": {
+      "callsites": ["SeasonRewardMixin.lua:94", "SeasonRewardMixin.lua:97", "SeasonRewardMixin.lua:141", "SeasonRewardMixin.lua:144", "SeasonRewardMixin.lua:155", "SeasonRewardMixin.lua:158", "SeasonRewardMixin.lua:170", "SeasonRewardMixin.lua:173"],
+      "args": "(apply:boolean)",
+      "returns": "nothing. Global toggle bracketing SetUnit(\"player\")+Undress() so the model is built without the player's equipped components; shim may implement as a no-op (stock Undress() already strips gear).",
+      "defined_in_lua": null
+    },
+    "GetItemInventoryType": {
+      "callsites": ["SeasonRewardMixin.lua:75"],
+      "args": "(itemID:number)",
+      "returns": "inventory type INDEX (number 1..28, the key of INVTYPE_INDEX_TO_SLOT at FrameXML/Constants.lua:479), NOT the \"INVTYPE_*\" string that stock GetItemInfo's 9th return gives. Shim: derive from GetItemInfo's equipLoc via a reverse table; nil when uncached (then slot is nil and the facing falls through to -0.65).",
+      "defined_in_lua": null
+    },
+    "GetItemName": {
+      "callsites": ["SeasonProgressBarMixin.lua:291", "SeasonProgressBarMixin.lua:293", "FrameXML/Util/GlobalFunctions.lua:165 (compat Lua, GetInstantItemLink <- SeasonCollectionUI.xml:168, SeasonCollectionUI.xml:172)"],
+      "args": "(itemID:number)",
+      "returns": "item name string, expected to work WITHOUT the item being in the client cache (native reads the server-provided name table); nil tolerated in GetInstantItemLink but :format()ed unguarded at :291/:293 (nil -> \"nil\" text, no error).",
+      "defined_in_lua": null
+    },
+    "GetItemQuality": {
+      "callsites": ["FrameXML/Util/GlobalFunctions.lua:163 (compat Lua, GetInstantItemLink <- SeasonCollectionUI.xml:168, :172)"],
+      "args": "(itemID:number)",
+      "returns": "quality index 0..7 or nil (used as ITEM_QUALITY_COLORS[quality or 1]); only reached when GetItemInfo(itemID) is nil",
+      "defined_in_lua": null
+    },
+    "OpenAscensionURL": {
+      "callsites": ["SeasonCollectionUI.xml:152"],
+      "args": "(path:string) e.g. \"store/elune\" (relative to the Ascension website)",
+      "returns": "nothing; opens the system browser. A stock client cannot open URLs; shim should raise a StaticPopup with a selectable EditBox holding the URL.",
+      "defined_in_lua": null
+    },
+    "GetGameEventInfo": {
+      "callsites": ["FrameXML/Util/GameEventUtil.lua:8 IsEventActive (compat Lua) <- SeasonProgressBarMixin.lua:113, :239, :297, :314, :318, :322 and :224 via GetCurrentChapter", "FrameXML/Util/GameEventUtil.lua:31 GetTimeUntil <- SeasonProgressBarMixin.lua:298"],
+      "args": "(gameEventID:number) - ids are Enum.GameEvent.Chapter{1..4}Tier{1..7} = 455-461, 463-469, 470-476, 477-483 (SharedXML/Enum.lua:855-883); these are server game_event ids",
+      "returns": "table {active:boolean, startTime:number (seconds until start, fed to SecondsToTime), endTime:number, eventState} or nil; nil is tolerated (IsEventActive returns nil -> tier disabled, GetTimeUntil nil -> SecondsToTime(nil) would error in the locked-tier tooltip). Native in Extensions.dll (0x10257110), absent from stock 12340.",
+      "defined_in_lua": null
+    },
+    "GetAchievementCriteriaInfo": {
+      "callsites": ["SeasonProgressBarMixin.lua:115", "SeasonProgressBarMixin.lua:300"],
+      "args": "(criteriaID:number) - ONE argument, an Achievement_Criteria.dbc id (10007..10113). Stock 12340 signature is (achievementID, criteriaIndex) and every other call site in the tree uses that two-arg form; no Lua override exists.",
+      "returns": "reads returns 4 and 5: quantity, reqQuantity (stock positions). See stock_api_assumptions.",
+      "defined_in_lua": null
+    },
+    "PlaySound": {
+      "callsites": ["SeasonProgressBarMixin.lua:278", "SeasonRewardMixin.lua:226", "SeasonCollectionUI.xml:153", "SeasonCollectionUI.xml:275", "SeasonCollectionUI.xml:290"],
+      "args": "(SOUNDKIT entry) where entries are numeric SoundEntries ids or arrays of ids: UI_70_ARTIFACT_FORGE_TRAIT_UNLOCK={54127,89643,89685,90080,90093}, GUILD_VAULT_OPEN=12188, CHARACTER_SHEET_OPEN=839, CHAT_SCROLL_BUTTON_50={80,83,111,687,...}",
+      "returns": "nothing. Ascension's Lua wrapper (SharedXML/Util/SharedOverwrites.lua:17) unwraps the array and calls the native with a NUMBER; stock PlaySound takes a SoundEntries name string and stock has no PlaySoundKitID.",
+      "defined_in_lua": "SharedXML/Util/SharedOverwrites.lua:17 (wrapper only; underlying native _PlaySound(number) is the non-stock part)"
+    },
+    "dprint": {
+      "callsites": ["SeasonCollectionMixin.lua:19", "SeasonInfoMixin.lua:23", "SeasonProgressBarMixin.lua:258", "SeasonProgressBarMixin.lua:264"],
+      "args": "(...)",
+      "returns": "nothing (nop unless the dev console is enabled)",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:13 (dprint = nop); redefined by AddOns/Ascension_UIDevelopmentTools/Console/DevConsole.lua:27"
+    },
+    "MixinAndLoad": {
+      "callsites": ["SeasonCollectionTemplates.xml:146", "SeasonCollectionTemplates.xml:221", "SeasonCollectionTemplates.xml:285", "SeasonCollectionUI.xml:125", "SeasonCollectionUI.xml:334", "SeasonCollectionUI.xml:345"],
+      "args": "(frame, mixinTableOrGlobalName, ...) copies the mixin then calls frame:OnLoad()",
+      "returns": "nothing",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:37"
+    },
+    "CreateFromMixins": {
+      "callsites": ["SeasonRewardMixin.lua:1", "SeasonTaskMixin.lua:1"],
+      "args": "(...mixins)",
+      "returns": "new table",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:177"
+    },
+    "SetParentArray": {
+      "callsites": ["SeasonProgressBarMixin.lua:212"],
+      "args": "(frame, key, pos) -> frame:GetParent()[key][pos] = frame (builds ProgressBar.Tiers[1..7])",
+      "returns": "nothing",
+      "defined_in_lua": "SharedXML/Util/Util.lua:11"
+    },
+    "RunNextFrame": {
+      "callsites": ["SeasonRewardMixin.lua:112"],
+      "args": "(callback)",
+      "returns": "nothing",
+      "defined_in_lua": "SharedXML/Util/FunctionUtil.lua:117"
+    },
+    "GetInstantItemLink": {
+      "callsites": ["SeasonCollectionUI.xml:168", "SeasonCollectionUI.xml:172"],
+      "args": "(itemID)",
+      "returns": "item link from GetItemInfo, else a synthesized |Hitem:id|h[name]|h using native GetItemQuality + GetItemName",
+      "defined_in_lua": "FrameXML/Util/GlobalFunctions.lua:158"
+    },
+    "GetInventoryItemTrueID": {
+      "callsites": ["SeasonRewardMixin.lua:126"],
+      "args": "(unit, slot)",
+      "returns": "itemID parsed from GetInventoryItemLink (stock) via GetItemInfoFromHyperlink (Lua, GlobalFunctions.lua:41); falls back to 25 (Worn Shortsword) when empty",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:339"
+    },
+    "OpenStoreCollectionToCategory": {
+      "callsites": ["SeasonRewardMixin.lua:227"],
+      "args": "(category = Enum.VanityCategory.Seasonal (0x20000000), searchText = displayName)",
+      "returns": "nothing; loads Ascension_VanityCollection and calls VanityCollectionUtil.OpenToCategory",
+      "defined_in_lua": "FrameXML/UIParent.lua:422"
+    },
+    "GameTooltip_AddSpacer": {
+      "callsites": ["SeasonProgressBarMixin.lua:305"],
+      "args": "(tooltip)",
+      "returns": "nothing",
+      "defined_in_lua": "FrameXML/GameTooltip.lua:1144 (Ascension FrameXML; not in stock 12340 GameTooltip.lua - needs compat)"
+    },
+    "SecondsToTime": {
+      "callsites": ["SeasonProgressBarMixin.lua:298"],
+      "args": "(seconds) - stock function exists; Ascension's SharedXML/Util/TimeUtil.lua:38 version adds args",
+      "returns": "string",
+      "defined_in_lua": "SharedXML/Util/TimeUtil.lua:38 (stock FrameXML also defines it)"
+    },
+    "HideUIPanel": {
+      "callsites": ["SeasonCollectionMixin.lua:13"],
+      "args": "(Collections)",
+      "returns": "nothing; stock",
+      "defined_in_lua": "FrameXML/UIParent.lua:2669 (stock FrameXML has it)"
+    },
+    "MClamp / MApprox / EaseOut / math.lerp / floor": {
+      "callsites": ["SeasonProgressBarMixin.lua:133 MClamp", "SeasonProgressBarMixin.lua:159 MApprox", "SeasonProgressBarMixin.lua:168 math.lerp + EaseOut", "SeasonProgressBarMixin.lua:184 floor (stock global alias)"],
+      "args": "MClamp(v,min,max); MApprox(a,b,tolerance); EaseOut(t[,exp]); math.lerp(a,b,t)",
+      "returns": "numbers",
+      "defined_in_lua": "SharedXML/TypeExtensions/math.lua:21,24,41,71 (floor is a stock WoW global)"
+    },
+    "GameEventUtil": {
+      "callsites": ["SeasonProgressBarMixin.lua:113", "SeasonProgressBarMixin.lua:239", "SeasonProgressBarMixin.lua:297", "SeasonProgressBarMixin.lua:298", "SeasonProgressBarMixin.lua:314", "SeasonProgressBarMixin.lua:318", "SeasonProgressBarMixin.lua:322"],
+      "args": "IsEventActive(eventID) -> event and event.active; GetTimeUntil(eventID) -> event.startTime",
+      "returns": "thin Lua over native GetGameEventInfo (see above)",
+      "defined_in_lua": "FrameXML/Util/GameEventUtil.lua:7,30"
+    },
+    "Enum": {
+      "callsites": ["SeasonProgressBarMixin.lua:5-74 Enum.GameEvent.Chapter{1-4}Tier{1-7}", "SeasonProgressBarMixin.lua:314,318,322", "SeasonRewardMixin.lua:227 Enum.VanityCategory.Seasonal"],
+      "args": "constants table",
+      "returns": "GameEvent ids 455-483 (Enum.lua:855-883), VanityCategory.Seasonal = 0x20000000 (Enum.lua:940)",
+      "defined_in_lua": "SharedXML/Enum.lua:34"
+    },
+    "Const": {
+      "callsites": ["SeasonCollectionMixin.lua:4,8,10", "SeasonInfoMixin.lua:8", "SeasonTaskMixin.lua:11-13", "SeasonProgressBarMixin.lua:203-209"],
+      "args": "Const.TextureKit.UseAtlasSize = true, IgnoreAtlasSize = false (2nd arg of Texture:SetAtlas)",
+      "returns": "booleans",
+      "defined_in_lua": "SharedXML/Util/Const.lua:3"
+    },
+    "SOUNDKIT": {
+      "callsites": ["SeasonProgressBarMixin.lua:278", "SeasonRewardMixin.lua:226", "SeasonCollectionUI.xml:153,275,290"],
+      "args": "constants",
+      "returns": "numeric SoundEntries ids / arrays (see PlaySound)",
+      "defined_in_lua": "SharedXML/Util/SoundKit.lua:1"
+    },
+    "ItemData": {
+      "callsites": ["SeasonCollectionMixin.lua:23 SEASONAL_POINTS", "SeasonCollectionMixin.lua:26 SEASONAL_PASS", "SeasonProgressBarMixin.lua:291,293 SEASONAL_PASS", "SeasonCollectionUI.xml:168,172 SEASONAL_PASS"],
+      "args": "constants",
+      "returns": "SEASONAL_POINTS = 97397, SEASONAL_PASS = 97398 (item_template ids)",
+      "defined_in_lua": "FrameXML/Data/Items.lua:33-34"
+    },
+    "INVTYPE_INDEX_TO_SLOT": {
+      "callsites": ["SeasonRewardMixin.lua:76"],
+      "args": "table invTypeIndex -> INVSLOT_*",
+      "returns": "slot id",
+      "defined_in_lua": "FrameXML/Constants.lua:479 (Ascension FrameXML; not stock)"
+    },
+    "Item / ItemMixin": {
+      "callsites": ["SeasonInfoMixin.lua:14,21,22,29", "SeasonRewardMixin.lua:73,88,110,113,127,128"],
+      "args": "Item:CreateFromID(itemID); item:CancelableContinueOnLoad(fn(itemID)) -> cancel function or nil when already cached (fn runs synchronously then); item:IsCached() = GetItemInfo ~= nil; item:GetInfo() = GetItemInfo(itemID)",
+      "returns": "see args",
+      "defined_in_lua": "FrameXML/Objects/Item.lua:8,51,182,202"
+    },
+    "ItemQueryListener": {
+      "callsites": ["SeasonRewardMixin.lua:196"],
+      "args": "AddCancelableCallback(listOfItemIDs, fn) -> cancel function; queries each uncached id through C_AssetQueryService.TryCacheItem and fires fn per id on ITEM_CACHE_REQUEST_SUCCESS",
+      "returns": "cancel function",
+      "defined_in_lua": "FrameXML/Objects/AsyncCallbackHandler.lua:111,193"
+    },
+    "ModelMixin": {
+      "callsites": ["SeasonRewardMixin.lua:1,5,6,7,8,44"],
+      "args": "OnLoad (installs OnUpdate/mouse scripts; stock GetPosition/GetFacing/SetPosition/SetFacing), SetMinMaxDistance, SetEnableDragRotation, SetEnableScrollZoom, ResetValues; uses Lua GetScaledCursorPosition (UIParent.lua:3953)",
+      "returns": "n/a",
+      "defined_in_lua": "SharedXML/Util/ModelMixin.lua:1"
+    },
+    "ScrollListItemBaseMixin": {
+      "callsites": ["SeasonTaskMixin.lua:1,54"],
+      "args": "Init(args) (dead template, see notes)",
+      "returns": "n/a",
+      "defined_in_lua": "SharedXML/Scroll/ScrollListItemBase.lua:1"
+    },
+    "AtlasUtil": {
+      "callsites": ["SharedXML/TypeExtensions/Texture.lua:11 (under every SetAtlas call in this addon)"],
+      "args": "Unpack(atlasName) -> file, width, height, left, right, top, bottom, horizTile, vertTile from the AtlasInfo table",
+      "returns": "see args",
+      "defined_in_lua": "SharedXML/AtlasInfo.lua:4904"
+    },
+    "Collections": {
+      "callsites": ["SeasonCollectionUI.xml:5 parent=", "SeasonCollectionMixin.lua:13"],
+      "args": "global frame (TabSystemMixin) created by AddOns/Ascension_Collections/Collections.xml:31",
+      "returns": "n/a",
+      "defined_in_lua": "AddOns/Ascension_Collections/Collections.xml:31"
+    }
+  },
+  "widget_methods": {
+    "Texture:SetAtlas": {
+      "callsites": ["SeasonCollectionMixin.lua:4,8,10", "SeasonInfoMixin.lua:8", "SeasonTaskMixin.lua:11,12,13", "SeasonProgressBarMixin.lua:203-209", "SharedXML/SharedPanelTemplates.lua:804,821,827 via BetterStatusBarTemplate attributes"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:3 (uses stock SetTexture/SetTexCoord/SetHorizTile/SetVertTile - all four names present in the stock 12340 Wow.exe string table)"
+    },
+    "Texture:SetPortraitTexture": {
+      "callsites": ["SeasonCollectionMixin.lua:6", "SeasonInfoMixin.lua:7,28", "SeasonProgressBarMixin.lua:204,227"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:34 (calls stock global SetPortraitToTexture)"
+    },
+    "Texture:FlipX": {
+      "callsites": ["SeasonCollectionMixin.lua:9"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:62"
+    },
+    "Region:SetShown": {
+      "callsites": ["SeasonTaskMixin.lua:23", "SeasonProgressBarMixin.lua:283"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28"
+    },
+    "Region:HookEvent": {
+      "callsites": ["SeasonProgressBarMixin.lua:83"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:41 -> C_Hook:Register (SharedXML/C_Hook.lua:171)"
+    },
+    "Region:HookBucketEvent": {
+      "callsites": ["SeasonProgressBarMixin.lua:84"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:53 -> C_Hook:RegisterBucket (SharedXML/C_Hook.lua:218)"
+    },
+    "C_Hook:Unregister": {
+      "callsites": ["SeasonProgressBarMixin.lua:89"],
+      "defined_in_lua": "SharedXML/C_Hook.lua:246"
+    },
+    "Button:SetEnabled": {
+      "callsites": ["SeasonProgressBarMixin.lua:222,239"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:5-14 (Enable/Disable)"
+    },
+    "Button:SetNormalAtlas / SetHighlightAtlas": {
+      "callsites": ["SeasonTaskMixin.lua:7,9 (dead template)"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25-41"
+    },
+    "CheckButton:GetBoolValue": {
+      "callsites": ["SeasonRewardMixin.lua:90,138,152,167"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:44"
+    },
+    "DressUpModel:SetDisplayInfo": {
+      "callsites": ["SeasonRewardMixin.lua:105 (displayID, callback)"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Model.lua:7 (Creature:CreateFromID -> C_AssetQueryService.TryCacheCreature / CREATURE_CACHE_REQUEST_SUCCESS, then stock SetCreature)"
+    },
+    "Model:SetSpellVisual": {
+      "callsites": ["SeasonRewardMixin.lua:148 (displayID, spellVisualID)"],
+      "defined_in_lua": null,
+      "note": "NATIVE Extensions.dll model method (ext-lua-bindings.tsv _G? SetSpellVisual 0x10a6ca30); no stock equivalent"
+    },
+    "Model:SetSpell": {
+      "callsites": ["SeasonRewardMixin.lua:161 (displayID, spellVisualID)"],
+      "defined_in_lua": null,
+      "note": "NATIVE Extensions.dll model method (0x10a6c1c0); no stock equivalent"
+    },
+    "DressUpModel:TryOn": {
+      "callsites": ["SeasonRewardMixin.lua:99 TryOn(itemID)", "SeasonRewardMixin.lua:117 TryOn(itemID)", "SeasonRewardMixin.lua:129 TryOn(\"item:<id>:<enchantID>\", INVSLOT_MAINHAND)", "SeasonRewardMixin.lua:198,204 TryOn(itemID, slotID)"],
+      "defined_in_lua": null,
+      "note": "stock native exists (TryOn(item)); Ascension widened it with a second slot argument. Stock ignores the extra arg."
+    },
+    "DressUpModel:Undress / SetUnit / SetCamera / SetFacing / ClearModel / SetCreature": {
+      "callsites": ["SeasonRewardMixin.lua:44-47,79-85,92-96,139-147,151-160,166-176"],
+      "defined_in_lua": null,
+      "note": "stock 12340 model methods"
+    },
+    "BetterStatusBar (Frame) SetSparkColor / SetValue / GetValue": {
+      "callsites": ["SeasonProgressBarMixin.lua:78,79,102,159,161,168,176"],
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:957,978,1000 (BetterStatusBarMixin on a plain Frame; not a StatusBar widget)"
+    },
+    "ModelMixin:SetMinMaxDistance / SetEnableDragRotation / SetEnableScrollZoom / ResetValues": {
+      "callsites": ["SeasonRewardMixin.lua:6,7,8,44"],
+      "defined_in_lua": "SharedXML/Util/ModelMixin.lua:95,138,172,130"
+    },
+    "ItemMixin:CancelableContinueOnLoad / IsCached / GetInfo": {
+      "callsites": ["SeasonInfoMixin.lua:21,22,29", "SeasonRewardMixin.lua:88,113,128"],
+      "defined_in_lua": "FrameXML/Objects/Item.lua:202,182,51"
+    },
+    "ColorMixin:WrapText": {
+      "callsites": ["SeasonTaskMixin.lua:29,32 (GREEN/NORMAL/DISABLED_FONT_COLOR)"],
+      "defined_in_lua": "SharedXML/Util/ColorUtil.lua:88"
+    },
+    "SeasonRewardMixin:UpdateBorder": {
+      "callsites": ["SeasonRewardMixin.lua:162"],
+      "defined_in_lua": null,
+      "note": "NOT DEFINED anywhere in this mixin's chain (ModelMixin has no UpdateBorder; the grep only finds it on AppearanceModelMixin/CompactRaid/AtlasBrowser mixins). Calling it errors - latent bug on the ANIMATED_SPELL_VISUAL reward path."
+    },
+    "Button:IsEnabled() == 1": {
+      "callsites": ["SeasonCollectionUI.xml:166"],
+      "defined_in_lua": null,
+      "note": "stock 3.3.5 returns 1/nil, so the == 1 test is stock-correct"
+    }
+  },
+  "events": {
+    "ACHIEVEMENT_EARNED": {
+      "registered_at": ["SeasonProgressBarMixin.lua:83 self:HookEvent(\"ACHIEVEMENT_EARNED\") (C_Hook Lua; the actual native registration is HookHandler:RegisterAllEvents() at SharedXML/C_Hook.lua:149); unregistered at :89 C_Hook:Unregister(self) on hide"],
+      "handler_args": "SeasonProgressBarMixin:ACHIEVEMENT_EARNED() - payload ignored; calls UpdateProgress()",
+      "fired_by": "native (stock 3.3.5 event)"
+    },
+    "CRITERIA_UPDATE": {
+      "registered_at": ["SeasonProgressBarMixin.lua:84 self:HookBucketEvent(\"CRITERIA_UPDATE\", 0.1) - bucketed 0.1 s by C_Hook"],
+      "handler_args": "SeasonProgressBarMixin:CRITERIA_UPDATE() - payload ignored; calls UpdateProgress()",
+      "fired_by": "native (stock 3.3.5 event)"
+    },
+    "ITEM_CACHE_REQUEST_SUCCESS": {
+      "registered_at": ["FrameXML/Objects/AsyncCallbackHandler.lua:15 EventRegistry:RegisterFrameEventAndCallback (compat Lua; frame RegisterEvent underneath) - indirect dependency of every Item:CancelableContinueOnLoad in this addon"],
+      "handler_args": "arg1 = itemID (MainHandler:CacheSuccess(queryType, asset)); fires the queued callbacks with (itemID)",
+      "fired_by": "native (Ascension client, after C_AssetQueryService.TryCacheItem; no Lua C_Hook.SendEvent of this name exists in the tree). Stock has no item-cache event at all (GET_ITEM_INFO_RECEIVED is 4.x) - the shim must synthesize it."
+    },
+    "CREATURE_CACHE_REQUEST_SUCCESS": {
+      "registered_at": ["FrameXML/Objects/AsyncCallbackHandler.lua:17 (compat Lua) - reached only via SetDisplayInfo for CREATURE-type rewards"],
+      "handler_args": "arg1 = creatureID",
+      "fired_by": "native (Ascension client, after C_AssetQueryService.TryCacheCreature)"
+    }
+  },
+  "frames": [
+    "SeasonCollectionFrame (parent Collections, inherits RaisedPortraitFrameTemplateNoBackground -> also creates SeasonCollectionFrameTitleBg, ...TitleText, ...TopTileStreaks, ...NineSlice, ...PortraitFrame, ...PortraitFramePortrait, ...CloseButton)",
+    "SeasonCollectionFrameProgressBar (BetterStatusBarTemplate: ...Background, ...BarTexture, ...Spark, ...Text + one anonymous backdrop child frame)",
+    "SeasonCollectionFrameProgressBarTier0 .. SeasonCollectionFrameProgressBarTier7 (SeasonTierTemplate; each with $parentUnlockSpark, $parentUnlockGlow textures and child frame $parentRewardOverlay with $parentRewardOverlayBackground / $parentRewardOverlayText)",
+    "SeasonCollectionFrameUnlockInfo (SeasonInfoTemplate: ...Background, ...Icon, ...IconBorder, ...Title, ...Description) + SeasonCollectionFrameUnlockInfoUnlockButton",
+    "SeasonCollectionFrameDraftInfo, SeasonCollectionFramePointsInfo (SeasonInfoTemplate)",
+    "SeasonCollectionFrameRewardModel (DressUpModel; ...Background1, ...Background2, ...Header, ...Title) + SeasonCollectionFrameRewardModelPrevButton, ...NextButton, ...CollectButton, ...KeepDressed (+ ...KeepDressedText)",
+    "textures with global names: SeasonCollectionFrameBackgroundRight, SeasonCollectionFrameLeftGlow, SeasonCollectionFrameBottomRightGlow",
+    "virtual templates (no instances themselves): SeasonRewardRotateGlowTemplate (AnimationGroup), SeasonTierTemplate, SeasonInfoTemplate, SeasonTaskTemplate (never instantiated)"
+  ],
+  "stock_api_assumptions": [
+    "GetAchievementCriteriaInfo(criteriaID) single-argument form (SeasonProgressBarMixin.lua:115, :300): stock 12340 is GetAchievementCriteriaInfo(achievementID, criteriaIndex) and raises a usage error when the index is missing. Every other call in the tree is two-arg, and no Lua wrapper exists, so Ascension.exe must special-case a lone criteria id. Shim: wrap the native - if called with one number that is not being used as an achievement id, resolve via the paired achievement (the addon's AchievementIDs table stores {achievementID, criteriaID} pairs, SeasonProgressBarMixin.lua:43-75) by iterating GetAchievementNumCriteria(achID) and matching the 10th return (criteriaID - stock returns it, see stock-ui-tree WatchFrame.lua:660).",
+    "PlaySound(number): Ascension's Lua PlaySound wrapper (SharedXML/Util/SharedOverwrites.lua:17) ends in native PlaySound(soundKitID:number). Stock PlaySound accepts only SoundEntries NAME strings and the stock exe has no PlaySoundKitID. The ids used here (839, 12188, 80/83/111/..., 54127/89643/...) include Legion-era SoundEntries rows absent from 3.3.5. Shim must map id -> name/file (SoundEntries.dbc) or swallow numbers.",
+    "Model:SetSpellVisual(displayID, spellVisualID) and Model:SetSpell(displayID, spellVisualID) (SeasonRewardMixin.lua:148, :161) are Ascension-native model methods with no stock counterpart. Shim: stub as no-ops on the Model metatable so STATIC/ANIMATED_SPELL_VISUAL rewards degrade to a bare player model + name.",
+    "DressUpModel:TryOn(itemID:number) and TryOn(item, slot) two-argument form (SeasonRewardMixin.lua:99,117,129,198,204): stock TryOn takes one item (id/link); the slot argument is ignored on stock, and the illusion form TryOn(\"item:<id>:<enchantID>\", INVSLOT_MAINHAND) relies on Ascension rendering enchant visuals from the link.",
+    "SetModelApplyComponents(bool) (Ascension global, no stock equivalent) brackets SetUnit/Undress; safe to stub.",
+    "GetItemInventoryType(itemID) returns an inventory-type INDEX (1..28), not the INVTYPE_* string of stock GetItemInfo's 9th return; INVTYPE_INDEX_TO_SLOT (FrameXML/Constants.lua:479) maps index -> INVSLOT_*.",
+    "GetItemName(itemID) / GetItemQuality(itemID) are expected to answer for items NOT in the client cache (used before GetItemInfo succeeds).",
+    "GetGameEventInfo(id) (Extensions.dll) has no stock counterpart; server game_event state must be shipped over the wire (DESIGN section 5 has no verb for it).",
+    "GetAchievementInfo 11th return rewardText and 10th return icon (SeasonTaskMixin.lua:20, SeasonProgressBarMixin.lua:227, :256) - stock 3.3.5 does return (id, name, points, completed, month, day, year, description, flags, icon, rewardText); the assumption is only that Ascension's Achievement.dbc rows 10324-10680 exist with reward text of the form 'N Seasonal Points' (parsed with %d+ at :262).",
+    "Stock-confirmed (present in the stock 12340 Wow.exe string table): SetHorizTile/SetVertTile (needed by Lua SetAtlas), SetPortraitToTexture, GetItemIcon, GetItemCount(itemID), Undress, SetCamera, TryOn, GetAchievementInfo/GetAchievementCriteriaInfo names.",
+    "XML schema: motionScriptsWhileDisabled (stock LFGFrame.xml:4), maxLines (stock AudioOptionsPanels.xml:67), parentKey (32 stock files), horizTile/vertTile, <Attributes>, alphaMode=ADD, DressUpModel and AnimationGroup/<Alpha>/<Translation> are all used by stock 12340 FrameXML. <Rotation> and <Scale> animations (SeasonCollectionTemplates.xml:5,61) are part of the 3.3.5 animation system but appear in NO stock FrameXML file - confirm in the P4 smoke test that the rotating glow and the spark scale-burst play.",
+    "GameTooltip:SetHyperlink(\"achievement:<id>\") (SeasonTaskMixin.lua:64, dead code) - stock accepts achievement links."
+  ],
+  "data_files": [
+    "GlobalStrings (18 keys, defined in NO Lua file under Interface; listed in the 'unknown' section of p0-framexml-gap.json; must come from Ascension's GlobalStrings.dbc in patch-M or be added to compat/FrameXML/GlobalStrings.lua with text recovered from the live client - no GlobalStrings export exists on disk): SEASON_9_TITLE, SEASONAL_POINTS_AVAILABLE (%d), SEASON_COLLECTION_UNLOCK_DESC, UNLOCK_SEASONAL_COLLECTION, OBTAIN_ITEM_TO_EARN_COSMETICS (%s), ITEM_EARNED (%s), TIER_D (%d), UNLOCKS_IN_TIME (%s), EARNED_S_OF_S_ACHIEVEMENT_POINTS (%s,%s), REWARDS_S_SEASONAL_POINTS (%s), SEASON_COLLECTION_UNLOCK_NOW, CLICK_TO_OPEN_STORE, ITEM_ALSO_AVAILABLE_ON_AUCTIONHOUSE (%s), YOU_ALREADY_OWN_S (%s), SEASONAL_ACHIEVEMENTS_UNAVAILABLE, SEASON_COLLECTION_REWARD, SEASON_COLLECTION_VIEW_REWARD, TRANSMOG_PREVIEW_CURRENT_GEAR (the last four are consumed via XML text= attributes)",
+    "Enum.GameEvent.Chapter1Tier1..Chapter4Tier7 = 455-461, 463-469, 470-476, 477-483 (SharedXML/Enum.lua:855-883): server game_event rows whose active/startTime/endTime the client must be able to read (GetGameEventInfo)",
+    "Achievement / criteria pairs hard-coded at SeasonProgressBarMixin.lua:43-75: achievements 10324,10325,10326,10327,10333,10349,10350 / 10351,10352,10353,10354,10365,10371,10377 / 10383,10389,10395,10401,10407,10413,10419 / 10425,10431,10437,10626,10634,10636,10680 with criteria 10007..10113 - Ascension custom Achievement.dbc + Achievement_Criteria.dbc rows (client DBC) and matching server achievement/criteria data; reward text must contain the seasonal-point count as the first integer",
+    "Items: ItemData.SEASONAL_POINTS = 97397 (GetItemCount drives the points label at load), ItemData.SEASONAL_PASS = 97398 (Item cache lookup fills the Unlock box title/icon; GetItemName in tooltips) - item_template rows required server-side",
+    "Atlas sheets referenced through SharedXML/AtlasInfo.lua (SetAtlas): Interface\\Collections\\SeasonCollection.blp (season-collection-background, -glow-edge, -glow-corner, -tier-selected, -tier-border, -tier-unlocked, -task-background, -task-highlight), Interface\\Store\\ServicesAtlas.blp (services-cover-ring, services-checkmark), Interface\\Garrison\\GarrisonMissionUI2.blp (GarrMission_RewardsBox_Shadow, MissionFX-SparkLines), Interface\\Garrison\\GarrisonBuildingUI.blp (Garr_BuildingTimerGlow), Interface\\GuildFrame\\Communities.blp (communities-icon-lock), Interface\\Collections\\Collections.blp (collections-itemborder-collected), Interface\\FrameGeneral\\UIFrameBars.blp (ui-frame-bar-fill-green, ui-frame-bar-bgcenter, ui-frame-bar-spark)",
+    "Direct texture files: Interface\\AddOns\\AwAddons\\Textures\\Collections\\DragonHighlight_green and ...\\Shadow (the AwAddons folder is NOT in the addon tree - it ships inside an MPQ; verify it survives the patch-B exclusion in DESIGN section 2), Spells\\8fx_mask_glowgeneric_a_128_brighter, Spells\\7fx_alphamask_glow_felbw, Interface\\Icons\\inv_treasurechest_felfirecitadel, Interface\\Icons\\seasonal_blank, Interface\\Common\\UI-Metal-Backdrop-Edge (verify present), Interface\\FrameGeneral\\UI-Background-Marble and Interface\\Buttons\\WHITE8x8 (stock)",
+    "Icons named by GetSeasonalCollectionInfo().icons[1..2] (resolved as Interface\\Icons\\<name>) and by GetAchievementInfo icon returns",
+    "SOUNDKIT rows used: CHARACTER_SHEET_OPEN=839, GUILD_VAULT_OPEN=12188, CHAT_SCROLL_BUTTON_50 (12 ids), UI_70_ARTIFACT_FORGE_TRAIT_UNLOCK (5 Legion ids)",
+    "Appearance data behind C_AppearanceCollection.GetSeasonalItems / C_Appearance.GetAppearanceDisplayInfo / C_Appearance.GetCreatureDisplayItems / C_ItemSet.GetAppearances (Ascension appearance + item-set DBCs; not present in the P0 ca-dbc set, which only covers CA/creation DBCs)"
+  ],
+  "protected_actions": [],
+  "blocking_natives": [
+    "GetSeasonalCollectionInfo (OnLoad - nil-tolerated but the three info boxes stay empty)",
+    "C_AssetQueryService.TryCacheItem + event ITEM_CACHE_REQUEST_SUCCESS (OnLoad via Item:CreateFromID(97398):CancelableContinueOnLoad when the pass item is not cached - a missing function is a hard error inside OnLoad)",
+    "IsSeasonalCollectionUnlocked (Tier0 OnShow, UnlockButton OnShow)",
+    "C_Realm.IsSeasonal (UnlockButton OnShow)",
+    "GetGameEventInfo (every SeasonTier OnShow via GameEventUtil.IsEventActive / GetCurrentChapter, and UpdateProgress on ProgressBar OnShow)",
+    "GetAchievementInfo / GetAchievementCriteriaInfo(criteriaID) (SeasonTier OnShow and UpdateProgress - stock names, non-stock one-arg form)",
+    "C_AppearanceCollection.GetAvailableSeasons / GetAvailableChapters / GetSeasonalItems (RewardModel OnShow)",
+    "C_Logger.Error (RewardModel OnShow whenever GetSeasonalItems is nil/empty)",
+    "C_Appearance.GetAppearanceDisplayInfo (RewardModel OnShow as soon as one reward exists)"
+  ],
+  "notes": "SCOPE: this is the Season 9 seasonal battle-pass tab (four chapters x seven tiers, a Seasonal Pass item, Seasonal Points currency, cosmetic rewards from the Vanity store). In the rexxar-reference tree it is ORPHANED: UIParent.lua:429 defines SeasonCollection_LoadUI but nothing calls it, Ascension_Collections registers no Season tab, and no file references SeasonCollectionFrame. It is clearly out of scope for a first release (a seasonal-realm feature; C_Realm.IsSeasonal gates the Unlock button); a shallow shim is enough, but every native above is still required for the frame to load and show without Lua errors.\n\nLOAD ORDER / TOC: the .toc declares no Dependencies. parent=\"Collections\" (SeasonCollectionUI.xml:5) and HideUIPanel(Collections) need Ascension_Collections loaded first; if it is not, the frame parents to nil (top-level, unscaled) and the close button nil-errors. PATCHES.md should add `## Dependencies: !AscensionShim, Ascension_Collections`.\n\nLATENT BUGS in the shipped code (do not 'fix' in the verbatim copy, but do not chase them as shim faults): (1) SeasonRewardMixin:DisplayAnimatedSpell (:162) calls self:UpdateBorder(), which no mixin in its chain defines -> Lua error for ANIMATED_SPELL_VISUAL rewards. (2) DisplayCreature (:106) reads self.appearanceID, which ShowReward never assigns (it keeps a local), so GetCreatureDisplayItems is called with nil and creature rewards render without their gear. (3) SeasonTaskTemplate/SeasonTaskMixin are dead: nothing instantiates the template and the parent:GetCurrentTasks() it expects exists nowhere.\n\nEVENTS: the frame never calls RegisterEvent itself. HookEvent/HookBucketEvent go through C_Hook (pure Lua, SharedXML/C_Hook.lua) whose HookHandler frame is RegisterAllEvents()'d; because the addon is insecure the registration takes the SetAttribute/OnAttributeChanged round-trip (stock-safe). ACHIEVEMENT_EARNED and CRITERIA_UPDATE therefore arrive natively on stock. The shim's EventBus must ALSO deliver synthesized custom events (ITEM_CACHE_REQUEST_SUCCESS, CREATURE_CACHE_REQUEST_SUCCESS, any EVENT verb from the wire) to C_Hook:SendEvent, not only to frames that called RegisterEvent, or every C_Hook consumer in the pack goes deaf.\n\nITEM CACHE PATH: Item:CancelableContinueOnLoad -> ItemQueryListener (FrameXML/Objects/AsyncCallbackHandler.lua) -> C_AssetQueryService.TryCacheItem(itemID) and then native ITEM_CACHE_REQUEST_SUCCESS(itemID). Stock 3.3.5 has no item-info-received event, so the shim's TryCacheItem should force a query (e.g. a hidden GameTooltip:SetHyperlink(\"item:<id>\")) and poll GetItemInfo on a ticker, firing ITEM_CACHE_REQUEST_SUCCESS with the itemID when it resolves; the callback signature is fn(itemID). When the item is already cached the callback runs synchronously and CancelableContinueOnLoad returns nil (the addon guards self.cancelToken with `if`). Creature caching (CREATURE_CACHE_REQUEST_SUCCESS after TryCacheCreature) has no clean stock probe - Creature:CreateFromID(id):IsCached() must be answered somehow (e.g. a hidden Model:SetCreature + GetModel check) or CREATURE rewards will hang uncached.\n\nSERVER / WIRE: three things must be served that DESIGN section 5 does not cover yet: (a) game-event state for ids 455-483 behind GetGameEventInfo (active, startTime, endTime, eventState); (b) IsSeasonalCollectionUnlocked and GetSeasonalCollectionInfo (names/icons/descriptions for the Draft and Points boxes); (c) the seasonal appearance catalogue (GetAvailableSeasons/GetAvailableChapters/GetSeasonalItems + GetAppearanceDisplayInfo/GetCreatureDisplayItems/C_ItemSet.GetAppearances). Achievements 10324-10680 with criteria 10007-10113 must exist in the server's achievement store (see the achievement-id-range memory: the imported Ascension Achievement.dbc ids need the widened int unsigned columns) and items 97397/97398 in item_template, otherwise GetItemCount reads 0 and the Unlock box title is never filled.\n\nSTOCK GAPS TO SHIM (beyond the native list): GetAchievementCriteriaInfo(criteriaID) one-arg form (wrap: resolve criteria id -> (achievementID, index) using the achievement half of the pair and the stock 10th return); PlaySound(number) mapping; Model:SetSpellVisual/SetSpell stubs; SetModelApplyComponents stub; GetItemInventoryType returning an index; OpenAscensionURL -> copy-URL popup; GetItemName/GetItemQuality answering before the cache fills. Everything else the addon touches is either stock (SetPortraitToTexture, SetHorizTile/SetVertTile, GetItemIcon, GetItemCount, Undress, SetCamera, TryOn, IsEnabled()==1) or Lua that the compat layers carry verbatim (TypeExtensions Texture/Region/Button/Model, AtlasInfo + AtlasUtil, C_Hook, Mixin, ModelMixin, ColorUtil, math.lua, SoundKit, Const, Enum, Objects/Item + Creature + AsyncCallbackHandler, GameEventUtil, GlobalFunctions.GetInstantItemLink, GlobalOverwrites.GetInventoryItemTrueID, Data/Items.lua ItemData, Constants.lua INVTYPE_INDEX_TO_SLOT, GameTooltip_AddSpacer, UIParent.lua OpenStoreCollectionToCategory + SeasonCollection_LoadUI, templates RaisedPortraitFrameTemplateNoBackground / BetterStatusBarTemplate / SharedButtonLargeTemplate / LeftButtonTemplate / RightButtonTemplate / ScrollListItemTemplate from SharedXML, GameFontNormalMed3 / GameFontNormalHuge / GameFontHighlightExtraSmall / NumberFontNormal / UICheckButtonTemplate from stock FrameXML).\n\nBINDING-DUMP QUIRK: ext-lua-bindings.tsv attributes GetAppearanceDisplayInfo and GetCreatureDisplayItems to C_AppearanceCollection and GetAppearances to C_Item, while the code (here and in Ascension_AppearanceUI) calls C_Appearance.* and C_ItemSet.GetAppearances with no Lua alias anywhere in the tree. Extensions.dll registers the same C functions under several tables; api-surface.tsv already records the code-facing names as NATIVE. The shim must define the names the code uses."
+}

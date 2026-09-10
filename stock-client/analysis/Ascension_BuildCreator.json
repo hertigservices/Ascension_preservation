@@ -1,0 +1,1283 @@
+{
+  "target": "Ascension_BuildCreator",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": [],
+    "saved_variables": ["BuildCreatorSaved"],
+    "files_in_order": [
+      "BuildEditor/BuildEditorTemplates.xml",
+      "BuildEditor/EditableBuildElement.lua",
+      "BuildEditor/EditableBuildText.lua",
+      "BuildEditor/EditableBuildIcons.lua",
+      "BuildEditor/EditableBuildView.lua",
+      "BuildCreatorTemplates.xml",
+      "BuildSpell.lua",
+      "CategoryListItem.lua",
+      "BuildListItem.lua",
+      "BuildCategory.lua",
+      "SectionListItem.lua",
+      "BuildViewSection.lua",
+      "BuildView.lua",
+      "BuildCreator.xml",
+      "BuildCreator.lua"
+    ]
+  },
+  "entry_points": [
+    "Collections tab 'HeroArchitect': Ascension_Collections/Collections.lua:52-56 adds the tab ONLY when C_Player:IsHero() (IsHeroClass('player') -> select(2, UnitClassBase('player')) == 'HERO'); panel name 'BuildCreatorFrame'; tab PreClick = BuildCreator_LoadUI (FrameXML/UIParent.lua:351) which sets cvar ShowFullBuildCreator=1 when max level or prestiged and then UIParentLoadAddOn('Ascension_BuildCreator'). The frame is <Frame name='BuildCreatorFrame' parent='Collections' hidden='true'> and is shown by Collections' TabSystem (Collections:GoToTab(Collections.Tabs.HeroArchitect) -> ShowUIPanel(Collections) + SelectTabID).",
+    "Chat hyperlink '|Hcabuild:<buildID>|h[name]|h' handled by LinkUtil:AddHandler('cabuild', ...) at SharedXML/Util/HyperlinkUtil.lua:535 -> BuildCreator_LoadUI(); Collections:GoToTab(Collections.Tabs.HeroArchitect); BuildCreatorFrame:ViewBuildID(buildID). Links are produced by BuildCreatorUtil.GetBuildLink(build) (Shift-click on a list item, BuildListItem.lua:154-160).",
+    "StaticPopup BUILD_CREATOR_FINISH_PICKING_SPELLS / _ENCHANTS OnAccept (FrameXML/StaticPopup.lua:853-875) -> Collections:GoToTab(Collections.Tabs.HeroArchitect) after picking spells/enchants in the CA / Mystic Enchant tabs.",
+    "BuildCreatorUtil.ContinueOnLoad(buildID, cb) (FrameXML/Util/BuildCreatorUtil.lua:557) -> BuildCreator_LoadUI() + BuildCreatorFrame:ContinueOnLoad (used by other addons to lazy-load and fetch a build).",
+    "Other addons: AscensionUI/BuildCreatorHelp/BuildCreatorHelpFreepick.lua:24-27 (tutorial: GoToTab + SelectCategory(BuildDraft)); Ascension_WildCard/RapidRolling/RapidRollingDropDown.lua:16-17 (GoToTab + SelectCategory(BuildDraftEndGamePvE)).",
+    "BuildCreatorMixin:OnShow (BuildCreator.lua:279) sends C_Quest:SendPathToAscensionEvent('ACTION_OPEN_HERO_ARCHITECT') = SendAddonMessage('ASC_PATH_TO_ASCENSION', msg, 'WHISPER', UnitName('player')), then ShowBuildCategories and either ViewBuildID(activeBuild) or ShowBuildList (which auto-selects category index 2 with AlwaysSimulateClick -> SelectCategory -> C_BuildCreator.QueryAllBuilds).",
+    "Events that show sub-panels: BUILD_CREATOR_CATEGORY_RESULT -> ShowBuildList; BUILD_CREATOR_BUILD_RESULT -> ViewBuild (BuildViewPanel:Show); BUILD_CREATOR_CREATE_RESULT / SAVE_RESULT -> ViewBuild/ViewBuildID; CreateBuild/EditBuild -> OpenBuildEditor (EditableBuildViewPanel:Show).",
+    "No slash commands, no micro button. A GM-only chat command '.buildcreator check <player> <buildID>' is sent via SendChatMessage on Alt-click of a list item (BuildListItem.lua:163-166)."
+  ],
+  "namespaces": {
+    "C_BuildCreator": {
+      "GetNumBuilds": {
+        "callsites": ["BuildCreator.lua:34", "BuildCreator.lua:181"],
+        "args": "()",
+        "returns": "number: count of builds in the current filtered query result; installed as the ScrollList count provider (SetGetNumResultsFunction) so it is called on every RefreshScrollFrame. Must be a real function at OnLoad (referenced, not called, at BuildCreator.lua:34).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetNumBookmarkedBuilds": {
+        "callsites": ["BuildCreator.lua:178", "CategoryListItem.lua:74"],
+        "args": "()",
+        "returns": "number: count of locally bookmarked builds (the 'History' category); 0 disables the History row.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "QueryAllBuilds": {
+        "callsites": ["BuildCreator.lua:204"],
+        "args": "(category:string) -- an Enum.BuildCategory value: 'None' (all, used for Featured/MyBuilds with a filter), 'Leveling', 'BuildDraft', 'BuildDraftEndGamePvE', 'BuildDraftEndGamePvP', 'Level60PvE', 'Level60PvP', 'Level70PvE', 'Level70PvP'. 'History' and 'ActiveBuild' are never sent (handled locally).",
+        "returns": "ignored. Caller shows the Loading overlay and waits for BUILD_CREATOR_CATEGORY_RESULT(category); the result list is then read via GetNumBuilds/GetBuildAtIndex after UpdateFilter.",
+        "sync": "async-with-event BUILD_CREATOR_CATEGORY_RESULT",
+        "defined_in_lua": null
+      },
+      "QueryBuild": {
+        "callsites": ["BuildCreator.lua:511", "BuildCreator.lua:524"],
+        "args": "(buildID:string)",
+        "returns": "ignored; caller shows Loading and waits for BUILD_CREATOR_BUILD_RESULT(result, buildID) then calls GetBuild(buildID) again (nil -> ShowError(VIEW_BUILD_ERROR, _G[result] or result)).",
+        "sync": "async-with-event BUILD_CREATOR_BUILD_RESULT",
+        "defined_in_lua": null
+      },
+      "GetBuild": {
+        "callsites": ["BuildCreator.lua:506", "BuildCreator.lua:515", "BuildCreator.lua:739", "BuildCreator.lua:805", "BuildListItem.lua:39", "CategoryListItem.lua:42"],
+        "args": "(buildID:string)",
+        "returns": "table or nil (nil = not cached yet -> QueryBuild). Fields read: ID (string), Name, AuthorName ('Ascension' special-cased), UpdatedTime (unix seconds, used with time()), Icon (icon file name WITHOUT 'Interface\\\\Icons\\\\' prefix), Category (Enum.BuildCategory string), Roles ('PLAYER_ROLE_TANK|DAMAGE|HEALER|ANY|LEADER|NONE' -> Enum.BuildRoles), PrimaryStat ('STAT_STRENGTH'.. key into Enum.PrimaryStat, may be unknown -> stat hidden), DifficultyRating (Enum.BuildDifficulty string 'BUILD_DIFFICULTY_RATING_EASY'..), LegendaryEnchant (spellID number, 0/nil = none), Upvotes (number, may be nil), NeedsRepairs (bool), Description (string of '### <SECTION>\\n<text>' blocks, '#' escaped as '{HT}'), Spells (array sorted by Level of {Spell, Level, IsCoreAbility, IsOptimalAbility, IsEmpoweringAbility, IsSynergisticAbility, Comment, Flags}; Lua helpers MUTATE these records adding TalentID/TalentRank so the table must be a mutable Lua table, not a userdata proxy), RandomEnchants (array of {Enchant=spellID, Stacks, Level, Comment, Flags}), ArmorTypes / WeaponTypes (arrays of {Type='ITEM_SUBCLASS_ARMOR_CLOTH'.. / 'ITEM_SUBCLASS_WEAPON_AXE'.., Comment}), EndGameIDPVE, EndGameIDPVP, LevelingID (build id strings, '' when absent), NumCoreSpells/NumCoreTalents/NumCoreAbilities, NumOptimalSpells/Talents/Abilities, NumEmpoweringSpells/Talents/Abilities, NumSynergisticSpells/Talents/Abilities (numbers).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetBuildAtIndex": {
+        "callsites": ["BuildListItem.lua:41"],
+        "args": "(index:number) -- 1-based index into the filtered/sorted result of the last QueryAllBuilds + UpdateFilter",
+        "returns": "build table (same shape as GetBuild); never nil-checked (index always < GetNumBuilds).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetBookmarkedBuildAtIndex": {
+        "callsites": ["BuildListItem.lua:38"],
+        "args": "(index:number)",
+        "returns": "buildID:string, immediately passed to GetBuild (must be cached).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UpdateFilter": {
+        "callsites": ["BuildCreator.lua:326", "BuildCreator.lua:730"],
+        "args": "(searchText:string, filters:table<string,boolean>, sort:table<string,boolean>). filters keys are Enum.BuildFilter values ('FILTER_FEATURED','FILTER_OWNED_BUILDS','FILTER_LAST_30_DAYS','FILTER_DIFFICULTY_RATING_EASY'..'_IMPOSSIBLE','FILTER_PRIMARY_STAT_STRENGTH|AGILITY|INTELLECT|SPIRIT','FILTER_ROLE_TANK|HEALER|DAMAGE') plus class keys 'FILTER_CLASS_<TOKEN>' (FILTER_CLASS_HERO for hero characters; stock tokens WARRIOR..DRUID with DEATH_KNIGHT spelled with underscore; custom tokens BARBARIAN, WITCH_DOCTOR, DEMON_HUNTER, WITCH_HUNTER, STORMBRINGER, KNIGHT_OF_XOROTH (=FLESHWARDEN), GUARDIAN, MONK, SON_OF_ARUGAL, RANGER, CHRONOMANCER, NECROMANCER, PYROMANCER, CULTIST, STARCALLER, SUN_CLERIC, TINKER, VENOMANCER (=PROPHET), REAPER, PRIMALIST (=WILDWALKER)); a copy of the FilterDropDown state with the player's own class auto-added (ApplyDefaultClassFilter). sort has exactly one true key from Enum.BuildSort ('SORT_RATING_DESCENDING' default, 'SORT_RATING_ASCENDING', 'SORT_DATE_DESCENDING', 'SORT_DATE_ASCENDING').",
+        "returns": "nothing; list is re-read synchronously via RefreshScrollFrame right after.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsUpvotedBuild": {
+        "callsites": ["BuildListItem.lua:120", "BuildListItem.lua:218"],
+        "args": "(buildID:string)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RateBuild": {
+        "callsites": ["BuildListItem.lua:29", "BuildListItem.lua:220", "BuildListItem.lua:222"],
+        "args": "(buildID:string, upvote:boolean)",
+        "returns": "ignored. BuildListItem.lua:29 wraps it with hooksecurefunc(C_BuildCreator, 'RateBuild', ...) at list-item OnLoad, so the key MUST exist as a function before any list item is created. Result arrives as BUILD_CREATOR_RATE_RESULT(result, buildID, rating).",
+        "sync": "async-with-event BUILD_CREATOR_RATE_RESULT",
+        "defined_in_lua": null
+      },
+      "CanActivateBuild": {
+        "callsites": ["BuildListItem.lua:189", "BuildView.lua:682"],
+        "args": "(buildID:string)",
+        "returns": "canActivate:boolean, reasons:array<string>|nil (each reason is a GlobalStrings key looked up via _G[reason] or literal text; joined with newline into a red tooltip).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "BookmarkBuild": {
+        "callsites": ["BuildListItem.lua:208", "BuildView.lua:49", "BuildView.lua:663"],
+        "args": "(buildID:string)",
+        "returns": "nothing; adds to the local History list (GetNumBookmarkedBuilds/GetBookmarkedBuildAtIndex). Called on every SetBuild view.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsOwnedBuild": {
+        "callsites": ["BuildView.lua:685"],
+        "args": "(buildID:string)",
+        "returns": "boolean (shows Edit/Delete buttons; GM level >= 4 also shows them).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DeleteBuild": {
+        "callsites": ["BuildCreator.lua:572"],
+        "args": "(buildID:string)",
+        "returns": "success:boolean, failReason:string (GlobalStrings key or text); on success caller shows Loading and waits for BUILD_CREATOR_DELETE_RESULT(result).",
+        "sync": "async-with-event BUILD_CREATOR_DELETE_RESULT",
+        "defined_in_lua": null
+      },
+      "GetActiveBuild": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:178"],
+        "args": "(specID:number) -- from C_CharacterAdvancement.GetActiveSpecID()",
+        "returns": "buildID:string or ''/nil (string.isNilOrEmpty check). Reached via BuildCreatorUtil.GetActiveBuildID/IsActiveBuildID from BuildCreator.lua:185,283,284, BuildCreator.xml:66, BuildListItem.lua:173, BuildView.lua:40,677, CategoryListItem.lua:40; called at OnShow.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpell": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:204"],
+        "args": "(buildID:string, spellID:number)",
+        "returns": "table {IsCoreAbility, IsOptimalAbility, IsEmpoweringAbility, IsSynergisticAbility, ...} or nil (nil = no filtering applied). Reached via BuildCreatorUtil.GetSpellsByClass from BuildView.lua:342 and BuildViewSection.lua:243 (pending build passes ID '' for unpublished builds).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ActivateBuild": {
+        "callsites": ["FrameXML/StaticPopup.lua:474", "FrameXML/StaticPopup.lua:488", "FrameXML/StaticPopup.lua:502"],
+        "args": "(buildID:string, autoLearn:boolean, autoLearn:boolean) -- unpack of the {buildID, autoLearn, autoLearn} popup data built by BuildCreatorUtil.ToggleBuildActive (FrameXML/Util/BuildCreatorUtil.lua:520) from BuildListItem.lua:214, BuildView.lua:669,703, BuildCreator.xml:66. autoLearn comes from the AutoLearn checkbox (cvar heroArchitectAutoLearn).",
+        "returns": "truthy when the request was sent (caller shows Loading); outcome via BUILD_CREATOR_ACTIVATE_RESULT(result) where result 'ACTIVATE_BUILD_OK' or an error key ('ACTIVATE_BUILD_DRAFTED_BUILD_ALREADY_DRAFTED' enables the Deactivate button in the error overlay).",
+        "sync": "async-with-event BUILD_CREATOR_ACTIVATE_RESULT",
+        "defined_in_lua": null
+      },
+      "DeactivateBuild": {
+        "callsites": ["FrameXML/StaticPopup.lua:516", "FrameXML/StaticPopup.lua:530"],
+        "args": "(buildID:string)",
+        "returns": "truthy when sent; outcome via BUILD_CREATOR_DEACTIVATE_RESULT(result) 'DEACTIVATE_BUILD_OK' or error key. Reached from BuildCreatorUtil.ToggleBuildActive when the build is the active one (CONFIRM_DEACTIVATE_BUILD / CONFIRM_DEACTIVATE_BUILD_DRAFT popups), and from BuildCreator.xml:66 (Error overlay Deactivate button).",
+        "sync": "async-with-event BUILD_CREATOR_DEACTIVATE_RESULT",
+        "defined_in_lua": null
+      }
+    },
+    "C_BuildEditor": {
+      "GetPendingBuild": {
+        "callsites": ["BuildCreator.lua:259", "BuildCreator.lua:529", "BuildCreator.lua:581", "BuildEditor/EditableBuildView.lua:198"],
+        "args": "()",
+        "returns": "build table with the same shape as C_BuildCreator.GetBuild (ID is '' for an unpublished build -> string.isNilOrEmpty(build.ID) triggers SerializePendingBuild into SavedVariables). Fields read: ID, Name, Icon, Category (Enum.BuildCreateCategory string), Description, Roles, PrimaryStat, DifficultyRating, Spells[].Spell, RandomEnchants, ArmorTypes, WeaponTypes. Serialized whole by C_Serialize (all fields must be plain Lua values).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "DiscardPendingBuild": {
+        "callsites": ["BuildCreator.lua:225", "BuildCreator.lua:247", "BuildCreator.lua:670", "FrameXML/StaticPopup.lua:714", "FrameXML/StaticPopup.lua:800"],
+        "args": "()",
+        "returns": "nothing; resets the pending build to an empty default (Name 'Build Name' is treated as unset at BuildCreator.lua:583).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "EditBuild": {
+        "callsites": ["BuildCreator.lua:566"],
+        "args": "(buildID:string)",
+        "returns": "nothing; copies a published build into the pending slot (ID kept so PublishBuild becomes a save -> BUILD_CREATOR_SAVE_RESULT).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetName": {
+        "callsites": ["BuildCreator.lua:671", "BuildEditor/EditableBuildView.lua:267"],
+        "args": "(name:string) -- max 48 letters (EditBox), trimmed",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetIcon": {
+        "callsites": ["BuildCreator.lua:672", "BuildEditor/EditableBuildView.lua:268", "BuildEditor/EditableBuildView.lua:316"],
+        "args": "(icon:string) -- normally the icon file name without path (EditableBuildIconMixin:ToText strips 'Interface\\\\Icons\\\\'); EditableBuildView.lua:314 passes the FULL path 'Interface\\\\Icons\\\\INV_Misc_QuestionMark' when empty (inconsistent; native must tolerate both).",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetCategory": {
+        "callsites": ["BuildCreator.lua:673", "BuildEditor/EditableBuildView.lua:350"],
+        "args": "(category:string) -- Enum.BuildCreateCategory value ('Leveling','Level60PvE','Level60PvP','Level70PvE','Level70PvP','BuildDraft','BuildDraftEndGamePvE','BuildDraftEndGamePvP')",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetDescription": {
+        "callsites": ["BuildCreator.lua:674", "BuildEditor/EditableBuildView.lua:266"],
+        "args": "(description:string|nil) -- concatenation of '### <SECTION>\\n<text>' blocks joined by '\\n\\n' where SECTION in OVERVIEW, PROS_AND_CONS, ITEMIZATION, ROTATION, CONSUMABLES, MACROS, WEAKAURAS, NOTES; '#' in text escaped as '{HT}'; may be nil when every section is empty",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetRoles": {
+        "callsites": ["BuildCreator.lua:675", "BuildEditor/EditableBuildView.lua:269", "BuildEditor/EditableBuildView.lua:324"],
+        "args": "(role:string) -- 'PLAYER_ROLE_TANK' | 'PLAYER_ROLE_DAMAGE' | 'PLAYER_ROLE_HEALER' | 'PLAYER_ROLE_NONE'",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetPrimaryStat": {
+        "callsites": ["BuildCreator.lua:676", "BuildEditor/EditableBuildView.lua:270", "BuildEditor/EditableBuildView.lua:345"],
+        "args": "(stat:string) -- 'STAT_STRENGTH' | 'STAT_AGILITY' | 'STAT_INTELLECT' | 'STAT_SPIRIT' (default STAT_STRENGTH)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetDifficultyRating": {
+        "callsites": ["BuildCreator.lua:677", "BuildEditor/EditableBuildView.lua:47", "BuildEditor/EditableBuildView.lua:57", "BuildEditor/EditableBuildView.lua:67", "BuildEditor/EditableBuildView.lua:77", "BuildEditor/EditableBuildView.lua:87"],
+        "args": "(rating:string) -- Enum.BuildDifficulty value 'BUILD_DIFFICULTY_RATING_EASY|NORMAL|HARD|VERY_HARD|IMPOSSIBLE'",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddSpell": {
+        "callsites": ["BuildCreator.lua:680", "BuildSpell.lua:364", "BuildEditor/EditableBuildView.lua:375", "BuildEditor/EditableBuildView.lua:379"],
+        "args": "(spellInfo:table {Spell:number, Level:number, IsCoreAbility:boolean, Comment:string, Flags:number, [IsOptimalAbility, IsEmpoweringAbility, IsSynergisticAbility]}) -- the SAME table is reused across calls in ImportCurrentBuild (BuildCreatorUtil.CreateSpellInfo(0) then mutated), so the native must copy, not keep a reference. IncreaseRank passes the record returned by GetSpellByID with .Spell changed to the next-rank spell id (adds a second rank, does not replace).",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddRandomEnchant": {
+        "callsites": ["BuildCreator.lua:684", "BuildEditor/EditableBuildView.lua:392"],
+        "args": "(enchantInfo:table {Enchant:spellID, Stacks:number, Level:number, Comment:string}) -- table reused/mutated across calls (copy semantics required)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddArmorType": {
+        "callsites": ["BuildCreator.lua:688", "BuildViewSection.lua:676"],
+        "args": "(armor:table {Type:'ITEM_SUBCLASS_ARMOR_<X>', Comment:string})",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddWeaponType": {
+        "callsites": ["BuildCreator.lua:692", "BuildViewSection.lua:707"],
+        "args": "(weapon:table {Type:'ITEM_SUBCLASS_WEAPON_<X>', Comment:string})",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanAddArmorType": {
+        "callsites": ["BuildViewSection.lua:668"],
+        "args": "(armor:table {Type, Comment})",
+        "returns": "boolean (false hides the dropdown entry, e.g. already added)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanAddWeaponType": {
+        "callsites": ["BuildViewSection.lua:699"],
+        "args": "(weapon:table {Type, Comment})",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveSpell": {
+        "callsites": ["BuildSpell.lua:347", "BuildSpell.lua:376"],
+        "args": "(spellID:number) -- for talents the current-rank spell id (DecreaseRank removes the top rank)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveArmorType": {
+        "callsites": ["BuildSpell.lua:342"],
+        "args": "(typeKey:string) -- 'ITEM_SUBCLASS_ARMOR_<X>'",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveWeaponType": {
+        "callsites": ["BuildSpell.lua:344"],
+        "args": "(typeKey:string)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RemoveRandomEnchant": {
+        "callsites": ["BuildSpell.lua:467"],
+        "args": "(enchantSpellID:number)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpellByID": {
+        "callsites": ["BuildSpell.lua:362"],
+        "args": "(spellID:number)",
+        "returns": "mutable copy of the pending spell record {Spell, Level, IsCoreAbility, ..., Comment, Flags}; caller sets .Spell and feeds it back to AddSpell.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetSpellLevel": {
+        "callsites": ["BuildCreator.lua:262", "BuildCreator.lua:266", "BuildCreator.lua:271", "FrameXML/Util/BuildCreatorUtil.lua:500"],
+        "args": "(spellID:number, level:number)",
+        "returns": "nothing (category conversion sets every spell to 60/70/maxLevel; drag-drop placement via BuildCreatorUtil.PlaceHeldSpellAtLevel)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetSpellLevel": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:475", "FrameXML/Util/BuildCreatorUtil.lua:499"],
+        "args": "(spellID:number, level:number)",
+        "returns": "boolean (drives the red X on the drag ghost; reached from BuildSpell.lua:408,415,435 and BuildCreatorTemplates.xml:167-183 / BuildEditorTemplates.xml:376-390 via CheckHeldSpellPlacement/PlaceHeldSpellAtLevel)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetIsCoreAbility": {
+        "callsites": ["BuildViewSection.lua:423"],
+        "args": "(spellID:number, isCore:boolean)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetIsCoreAbility": {
+        "callsites": ["BuildViewSection.lua:421"],
+        "args": "(spellID:number, newValue:boolean)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetIsOptimalAbility": {
+        "callsites": ["BuildSpell.lua:393", "BuildViewSection.lua:436"],
+        "args": "(spellID:number, value:boolean)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetIsOptimalAbility": {
+        "callsites": ["BuildViewSection.lua:434"],
+        "args": "(spellID:number, newValue:boolean)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetIsEmpoweringAbility": {
+        "callsites": ["BuildSpell.lua:396", "BuildViewSection.lua:449"],
+        "args": "(spellID:number, value:boolean)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetIsEmpoweringAbility": {
+        "callsites": ["BuildViewSection.lua:447"],
+        "args": "(spellID:number, newValue:boolean)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetIsSynergisticAbility": {
+        "callsites": ["BuildSpell.lua:399", "BuildViewSection.lua:462"],
+        "args": "(spellID:number, value:boolean)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetIsSynergisticAbility": {
+        "callsites": ["BuildViewSection.lua:460"],
+        "args": "(spellID:number, newValue:boolean)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetSpellFlags": {
+        "callsites": ["BuildViewSection.lua:382"],
+        "args": "(spellID:number, flags:number) -- bitmask, Enum.BuildSpellFlags.NotifyOnLearn = 0x1 (GM-only submenu)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetSpellFlags": {
+        "callsites": ["BuildViewSection.lua:380"],
+        "args": "(spellID:number)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetEnchantStacks": {
+        "callsites": ["BuildSpell.lua:480", "BuildSpell.lua:491"],
+        "args": "(enchantSpellID:number, stacks:number) -- clamped by caller to 1..C_MysticEnchant.GetEnchantInfoBySpell().MaxStacks",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetEnchantFlags": {
+        "callsites": ["BuildViewSection.lua:564"],
+        "args": "(enchantSpellID:number, flags:number)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSetEnchantFlags": {
+        "callsites": ["BuildViewSection.lua:562"],
+        "args": "(enchantSpellID:number)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEssenceForLevel": {
+        "callsites": ["BuildViewSection.lua:245", "FrameXML/Util/BuildCreatorUtil.lua:304", "FrameXML/Util/BuildCreatorUtil.lua:565"],
+        "args": "(level:number) -- 1..80, GetMaxLevel(), or BuildCreatorUtil.GetPickLevel()",
+        "returns": "4 values; only the 2nd (aeRemaining) and 4th (teRemaining) are read: remaining Ability/Talent Essence budget at that level for the pending build. Semantics: >0 shows an 'Add spell' slot and a level header; ==0 renders the header count disabled; the Lua forces -1 (hidden) for AE on default classes.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanPublishBuild": {
+        "callsites": ["BuildEditor/EditableBuildView.lua:277"],
+        "args": "()",
+        "returns": "canPublish:boolean, failReasons:array<string> (GlobalStrings keys or text; iterated with ipairs, must be a table when canPublish is false). Called on EVERY UpdatePendingBuild (every edit).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "PublishBuild": {
+        "callsites": ["BuildCreator.lua:543"],
+        "args": "()",
+        "returns": "publishSent:boolean, failReason:string; on true the caller shows Loading(PUBLISHING_BUILD) and waits for BUILD_CREATOR_CREATE_RESULT(result, buildID) (new build) or BUILD_CREATOR_SAVE_RESULT(result, buildID) (edit of an existing ID); result strings 'CREATE_BUILD_OK'/'SAVE_BUILD_OK' or 'CREATE_BUILD_<ERR>' (gsub'd to PUBLISH_BUILD_<ERR> for the _G lookup).",
+        "sync": "async-with-event BUILD_CREATOR_CREATE_RESULT",
+        "defined_in_lua": null
+      },
+      "SetComment": {
+        "callsites": ["FrameXML/StaticPopup.lua:823"],
+        "args": "(spellIDorTypeKey:number|string, comment:string) -- popup BUILD_CREATOR_SET_COMMENT opened from BuildViewSection.lua:412 and :576; equipment entries are mapped back from their proficiency spell id to the 'ITEM_SUBCLASS_*' key via Enum.WeaponSIDSubClass/ArmorSIDSubClass",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetEnchantLevel": {
+        "callsites": ["FrameXML/StaticPopup.lua:844"],
+        "args": "(enchantSpellID:number, level:number 1..79) -- GM-only popup BUILD_CREATOR_SET_ENCHANT_LEVEL from BuildViewSection.lua:585",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ImportBuild": {
+        "callsites": ["FrameXML/StaticPopup.lua:716"],
+        "args": "(buildString:string) -- output of CharacterAdvancementUtil.GetBuildFromURL(editBoxText); popup BUILD_CREATOR_IMPORT_BUILD opened from BuildCreator.lua:213, then BuildCreatorFrame:CreateBuild(Import, true)",
+        "returns": "nothing used",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_CharacterAdvancement": {
+      "IsKnownSpellID": {
+        "callsites": ["BuildSpell.lua:49", "BuildSpell.lua:87", "BuildSpell.lua:133"],
+        "args": "(spellID:number)",
+        "returns": "boolean -> shows the 'known' checkmark; re-evaluated on CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntryByInternalID": {
+        "callsites": ["BuildSpell.lua:55", "BuildSpell.lua:327", "FrameXML/Util/BuildCreatorUtil.lua:399"],
+        "args": "(entryID:number) -- the CA entry id (TalentID produced by GetInternalID)",
+        "returns": "entry table {ID, Name, Type ('Talent'|'TalentAbility'|'Ability'...), Spells = array of rank spell ids (index = rank), ...}. BuildSpell.lua:56 indexes .Spells BEFORE the nil check, so nil crashes the row.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntryBySpellID": {
+        "callsites": ["BuildSpell.lua:170", "BuildEditor/EditableBuildView.lua:372", "FrameXML/Util/CharacterAdvancementUtil.lua:30", "FrameXML/Util/BuildCreatorUtil.lua:415"],
+        "args": "(spellID:number)",
+        "returns": "entry table {ID, Name, Type, Spells[]} or nil (BuildSpell.lua:178 reads entry.Name/ID/Type without nil check in the dropdown)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentRankByID": {
+        "callsites": ["BuildSpell.lua:189"],
+        "args": "(entryID:number)",
+        "returns": "currentRank:number|nil, maxRank:number -> builds a list of entry ids to learn up to max rank",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetTalentRankBySpellID": {
+        "callsites": ["BuildEditor/EditableBuildView.lua:370", "FrameXML/Util/GlobalOverwrites.lua:397"],
+        "args": "(spellID:number)",
+        "returns": "rank:number|nil (nil = not a talent -> treated as plain spell), maxRank:number",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsTalentSpellID": {
+        "callsites": ["BuildSpell.lua:359", "BuildSpell.lua:375", "BuildEditor/EditableBuildView.lua:369", "FrameXML/Util/BuildCreatorUtil.lua:234", "FrameXML/Util/BuildCreatorUtil.lua:279", "FrameXML/Util/BuildCreatorUtil.lua:318"],
+        "args": "(spellID:number)",
+        "returns": "boolean. NOTE EditableBuildView.lua:369 passes self.spellID (always nil on the panel) -> for default classes ImportCurrentBuild imports nothing; native must return false/nil for nil without erroring.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetKnownSpells": {
+        "callsites": ["BuildEditor/EditableBuildView.lua:367"],
+        "args": "()",
+        "returns": "array of known CA spell ids (ipairs) used by 'Create from current build'",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetInternalID": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:235", "FrameXML/Util/BuildCreatorUtil.lua:280", "FrameXML/Util/BuildCreatorUtil.lua:319"],
+        "args": "(spellID:number)",
+        "returns": "entryID:number used as TalentID to merge talent ranks in GetSpellsByClass/GetSpellsByLevel/GetLevelingEditorSpells (reached from BuildView.lua:320,342 and BuildViewSection.lua:243,307)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetClassInfo": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:199"],
+        "args": "(spellID:number)",
+        "returns": "classDBC, specDBC (raw DBC ids; converted with CharacterAdvancementUtil.GetClassFileByDBC / GetSpecFileByDBC into class tokens and spec names; 'GENERAL'/'GENERAL1' for class-less spells). Reached via GetSpellsByClass from BuildView.lua:342, BuildViewSection.lua:243.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetActiveSpecID": {
+        "callsites": ["FrameXML/Util/SpecializationUtil.lua:65"],
+        "args": "()",
+        "returns": "specID:number passed to C_BuildCreator.GetActiveBuild (reached from BuildCreatorUtil.GetActiveBuildID at OnShow)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ShouldConfirmLearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:151"],
+        "args": "(entryID:number | array<entryID>)",
+        "returns": "shouldConfirm:boolean, reasons:table (CONFIRM_LEARN_S popup). Reached from BuildSpell.lua:195,199 (dropdown 'Learn').",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "LearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:156", "FrameXML/StaticPopup.lua:604"],
+        "args": "(entryID:number | array<entryID>)",
+        "returns": "ignored; server round trip (shim: CMD LEARN). Known-state refresh arrives as CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "ShouldConfirmUnlearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:320"],
+        "args": "(entryID:number)",
+        "returns": "shouldConfirm:boolean, reasons:table (CONFIRM_UNLEARN_S popup). Reached from BuildSpell.lua:210.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "UnlearnID": {
+        "callsites": ["FrameXML/Util/CharacterAdvancementUtil.lua:325", "FrameXML/StaticPopup.lua:633"],
+        "args": "(entryID:number)",
+        "returns": "truthy when accepted (WildCard prints a warning otherwise); shim: CMD UNLEARN",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "IsPendingBuildAvailable": {
+        "callsites": ["FrameXML/Util/C_PrimaryStat.lua:101"],
+        "args": "()",
+        "returns": "boolean (reached via C_PrimaryStat:GetActivePrimaryStat from BuildEditor/EditableBuildView.lua:360)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingRankByEntryID": {
+        "callsites": ["FrameXML/Util/C_PrimaryStat.lua:103"],
+        "args": "(entryID:number)",
+        "returns": "rank:number|nil",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanAddByEntryID": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:384"],
+        "args": "(entryID, 1) -- only when cvar previewCharacterAdvancementChanges is on (CanLearnID override)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanRemoveByEntryID": {
+        "callsites": ["FrameXML/Util/GlobalOverwrites.lua:389"],
+        "args": "(entryID, 1) -- preview mode only (CanUnlearnID override)",
+        "returns": "boolean",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanLearnID": {
+        "callsites": ["BuildSpell.lua:186"],
+        "args": "(entryID:number)",
+        "returns": "boolean (dropdown 'Learn' enabled). Lua override at FrameXML/Util/GlobalOverwrites.lua:382 wraps the NATIVE of the same name (captured before override) and switches to CanAddByEntryID in preview mode; the native CanLearnID is still required.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:382"
+      },
+      "CanUnlearnID": {
+        "callsites": ["BuildSpell.lua:208"],
+        "args": "(entryID:number)",
+        "returns": "boolean. Lua override at GlobalOverwrites.lua:387 over the native CanUnlearnID.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:387"
+      },
+      "GetQualityInfo": {
+        "callsites": ["BuildSpell.lua:25"],
+        "args": "(spellID:number)",
+        "returns": "quality:number (Enum.SpellQuality, >= Uncommon(2) shows rarity gems), qualityCount:number. Lua override at GlobalOverwrites.lua:392 wraps the NATIVE GetQualityInfo (which returns the quality NAME string, mapped through Enum.SpellQuality) and in WildCard returns GetTalentRankBySpellID rank instead.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:392"
+      }
+    },
+    "C_BuildDraft": {
+      "IsCompletedBuild": {
+        "callsites": ["BuildListItem.lua:102"],
+        "args": "(buildID:string)",
+        "returns": "boolean (only for BuildDraft categories: shows completed checkmark vs trophy-eligible icon)",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetDraftedBuild": {
+        "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:183"],
+        "args": "()",
+        "returns": "buildID:string or '' (string.isNilOrEmpty); reached via BuildCreatorUtil.GetDraftedBuildID/IsDraftedBuildID inside ToggleBuildActive (chooses which confirm popup to show)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_ClassInfo": {
+      "GetAllSpecs": {
+        "callsites": ["BuildView.lua:363", "BuildViewSection.lua:275"],
+        "args": "(classFile:string) -- class token from Enum.ClassFile (WARRIOR..DRUID and custom BARBARIAN..SPIRITMAGE)",
+        "returns": "ordered array of spec name strings (ChrSpecialization order); iterated with ipairs; may be empty",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpecInfo": {
+        "callsites": ["BuildView.lua:368", "BuildViewSection.lua:280"],
+        "args": "(classFile:string, specName:string)",
+        "returns": "table {Name:string, SpecFilename:string (icon file name under Interface\\\\Icons)}",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_MysticEnchant": {
+      "GetEnchantInfoBySpell": {
+        "callsites": ["BuildSpell.lua:252", "BuildEditor/EditableBuildView.lua:388"],
+        "args": "(enchantSpellID:number)",
+        "returns": "table {Quality:string key into Enum.EnchantQualityEnum, MaxStacks:number, Known:boolean, RequiredLevel:number} or nil (nil -> C_Logger.Error 'Bad Enchant in Build!' and the row is left blank)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Config": {
+      "GetBoolConfig": {
+        "callsites": ["BuildCategory.lua:18"],
+        "args": "('CONFIG_BUILD_DRAFT_ENABLED')",
+        "returns": "boolean (server config); only reached through BuildCategoryButtonMixin:SetCategory/SetCreateCategory of BuildCategoryTemplate, which this addon never instantiates (legacy column layout).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Info": {
+        "callsites": ["BuildCreator.lua:707", "BuildCreator.lua:737", "BuildCreator.lua:756", "BuildCreator.lua:773", "BuildCreator.lua:789", "BuildCreator.lua:800", "BuildCreator.lua:819"],
+        "args": "(fmt:string, ...) printf-style (%s/%.1f); args may be nil (buildID)",
+        "returns": "nothing",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "Error": {
+        "callsites": ["BuildCategory.lua:107", "BuildCategory.lua:112", "BuildSpell.lua:255", "BuildView.lua:153"],
+        "args": "(fmt:string, ...)",
+        "returns": "nothing (BuildSpell.lua:255 uses it as a return expression)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_AccountInfo": {
+      "GetGMLevel": {
+        "callsites": ["BuildView.lua:686", "BuildEditor/EditableBuildView.lua:129", "FrameXML/Util/C_Player.lua:44"],
+        "args": "()",
+        "returns": "number (0 = player; >0 unlocks GM category conversions and flag submenus; >=4 unlocks Edit/Delete on foreign builds). Reached at OnLoad through C_Player:IsGM (BuildCreator.lua:60).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_Wildcard": {
+      "CanUseRapidRolling": {
+        "callsites": ["BuildListItem.lua:181", "BuildView.lua:676"],
+        "args": "()",
+        "returns": "boolean; only reached when C_GameMode:IsGameModeActive(Enum.GameMode.WildCard)",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_GameMode": {
+      "IsGameModeActive": {
+        "callsites": ["BuildCreator.lua:36", "BuildListItem.lua:179", "BuildListItem.lua:207", "BuildView.lua:6", "BuildView.lua:662", "BuildView.lua:674", "BuildViewSection.lua:495", "BuildEditor/EditableBuildView.lua:13", "BuildEditor/EditableBuildView.lua:102", "BuildEditor/BuildEditorTemplates.xml:427"],
+        "args": "(...modes:number) -- Enum.GameMode bit values (WildCard=0x40 here; HyperlinkUtil also passes Draft=0x08)",
+        "returns": "boolean. Pure Lua (FrameXML/Util/C_GameMode.lua:11) over the NATIVE global GetCustomGameMode() bitmask; called at BuildCreatorFrame OnLoad.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_GameMode.lua:11"
+      }
+    },
+    "C_Player": {
+      "GetLevel": {
+        "callsites": ["BuildCreator.lua:60", "BuildView.lua:319", "FrameXML/Util/BuildCreatorUtil.lua:533"],
+        "args": "()",
+        "returns": "number (cached currentLevel or UnitLevel('player'))",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:18"
+      },
+      "IsGM": {
+        "callsites": ["BuildCreator.lua:60", "BuildListItem.lua:163", "BuildView.lua:36", "BuildViewSection.lua:468", "BuildViewSection.lua:580"],
+        "args": "()",
+        "returns": "boolean = C_AccountInfo.GetGMLevel() > 0",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:43"
+      },
+      "IsHero": {
+        "callsites": ["BuildCreator.lua:299", "BuildCreator.lua:388", "BuildEditor/EditableBuildView.lua:216", "BuildEditor/EditableBuildView.lua:386"],
+        "args": "()",
+        "returns": "boolean = IsHeroClass('player') = select(2, UnitClassBase('player')) == 'HERO' (SharedXML/SharedConstants.lua:55; UnitClassBase is the Lua wrapper GlobalOverwrites.lua:94 over the NATIVE _UnitClassBase). Also gates the Collections tab itself.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:51"
+      },
+      "IsDefaultClass": {
+        "callsites": ["BuildCreator.lua:395", "BuildViewSection.lua:39", "BuildViewSection.lua:305", "BuildEditor/EditableBuildView.lua:177", "BuildEditor/EditableBuildView.lua:369", "FrameXML/Util/BuildCreatorUtil.lua:572"],
+        "args": "()",
+        "returns": "boolean = bit.contains(Enum.ClassMask.DEFAULT, UnitClassMask('player')) (SharedConstants.lua:47; UnitClassMask = 4th return of UnitClassBase)",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:47"
+      },
+      "IsCustomClass": {
+        "callsites": ["BuildCreator.lua:410", "BuildView.lua:6"],
+        "args": "()",
+        "returns": "boolean = bit.contains(Enum.ClassMask.COA, UnitClassMask('player'))",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:55"
+      },
+      "IsMaxLevel": {
+        "callsites": ["BuildView.lua:42", "CategoryListItem.lua:82", "FrameXML/UIParent.lua:354"],
+        "args": "()",
+        "returns": "boolean = GetLevel() >= GetMaxLevel() (GetMaxLevel -> NATIVE GetRealmMaxLevel())",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:22"
+      },
+      "IsPrestiged": {
+        "callsites": ["FrameXML/UIParent.lua:354"],
+        "args": "()",
+        "returns": "boolean = C_Player:HasAura(9930831) (UnitAura scan); used by BuildCreator_LoadUI to unlock ShowFullBuildCreator",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:59"
+      }
+    },
+    "C_PrimaryStat": {
+      "GetPrimaryStatInfo": {
+        "callsites": ["BuildListItem.lua:86", "BuildView.lua:81", "BuildEditor/EditableBuildIcons.lua:141", "BuildEditor/EditableBuildIcons.lua:189"],
+        "args": "(statID:number 1..4 from Enum.PrimaryStat[build.PrimaryStat])",
+        "returns": "spellId, internalId, icon, statName, spellName; callers use only the first (a primary-stat aura spell id fed to SpellIconTemplate:SetSpell and GetSpellInfo). Pure Lua over the PRIMARY_STATS table + GetSpellInfo; EditableBuildPrimaryStatMixin:OnLoad calls it with STAT_STRENGTH at panel creation.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_PrimaryStat.lua:132"
+      },
+      "GetActivePrimaryStat": {
+        "callsites": ["BuildEditor/EditableBuildView.lua:360"],
+        "args": "()",
+        "returns": "statID:number|nil (nil -> Strength); Lua over C_CharacterAdvancement.IsPendingBuildAvailable/GetPendingRankByEntryID and IsSpellKnown(PRIMARY_STATS[i])",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_PrimaryStat.lua:100"
+      }
+    },
+    "C_Quest": {
+      "SendPathToAscensionEvent": {
+        "callsites": ["BuildCreator.lua:280"],
+        "args": "('ACTION_OPEN_HERO_ARCHITECT')",
+        "returns": "nothing; Lua: SendAddonMessage('ASC_PATH_TO_ASCENSION', message, 'WHISPER', UnitName('player')) at OnShow (whisper-to-self addon message, same channel style as the shim transport)",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Quest.lua:253"
+      }
+    },
+    "C_CVar": {
+      "GetBool": {
+        "callsites": ["BuildCategory.lua:117", "BuildCategory.lua:163", "BuildCreatorTemplates.xml:701", "FrameXML/Util/GlobalOverwrites.lua:383"],
+        "args": "(cvar:string) -- 'ShowFullBuildCreator', 'heroArchitectAutoLearn', 'previewCharacterAdvancementChanges'",
+        "returns": "boolean = toboolean(GetCVar(cvar)); cvars are registered in FrameXML/GameCVars.lua:59,83 through C_CVar.RegisterSavedCVar -> NATIVE RegisterSavedCVar(name, default, isCharacter) guarded by GetCVarInfo",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:115"
+      },
+      "Set": {
+        "callsites": ["BuildCreatorTemplates.xml:704", "FrameXML/UIParent.lua:355"],
+        "args": "(cvar:string, value:boolean|string, triggerEvent?)",
+        "returns": "nothing; SetCVar(cvar, '1'|'0')",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_CVar.lua:119"
+      }
+    },
+    "C_Serialize": {
+      "SerializeCompressForPrint": {
+        "callsites": ["BuildCreator.lua:584"],
+        "args": "(build:table)",
+        "returns": "printable string stored in BuildCreatorSaved.SavedBuilds[name] (WIP build backup). Pure Lua: C_Serialize:Serialize + C_Deflate:CompressDeflate/EncodeForPrint (SharedXML/Util/C_Deflate.lua, a LibDeflate port).",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_Serialize.lua:1286"
+      },
+      "DeserializeDecompressFromPrint": {
+        "callsites": ["BuildCreator.lua:665"],
+        "args": "(s:string)",
+        "returns": "build table or nil; fields Name, Icon, Category, Description, Roles, PrimaryStat, DifficultyRating, Spells[], RandomEnchants[], ArmorTypes[], WeaponTypes[] are replayed into C_BuildEditor.*",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/C_Serialize.lua:1296"
+      }
+    }
+  },
+  "globals": {
+    "BuildCreatorUtil": {
+      "callsites": ["BuildCreator.lua:185", "BuildCreator.lua:253", "BuildCreator.lua:283", "BuildCreator.lua:284", "BuildCreator.lua:380-384", "BuildCreator.lua:531", "BuildCreator.lua:568", "BuildCreator.xml:66", "BuildListItem.lua:73", "BuildListItem.lua:96-98", "BuildListItem.lua:101", "BuildListItem.lua:116", "BuildListItem.lua:155", "BuildListItem.lua:173", "BuildListItem.lua:214", "BuildSpell.lua:355", "BuildSpell.lua:368", "BuildSpell.lua:379", "BuildSpell.lua:387", "BuildSpell.lua:394-400", "BuildSpell.lua:408", "BuildSpell.lua:415", "BuildSpell.lua:426", "BuildSpell.lua:435", "BuildSpell.lua:474-493", "BuildView.lua:40", "BuildView.lua:71", "BuildView.lua:124", "BuildView.lua:129-138", "BuildView.lua:320", "BuildView.lua:342", "BuildView.lua:477", "BuildView.lua:656", "BuildView.lua:669", "BuildView.lua:677", "BuildView.lua:703", "BuildViewSection.lua:4-14", "BuildViewSection.lua:209-230", "BuildViewSection.lua:243", "BuildViewSection.lua:307", "BuildViewSection.lua:383-463", "BuildViewSection.lua:565", "BuildViewSection.lua:677", "BuildViewSection.lua:708", "BuildEditor/EditableBuildIcons.lua:60", "BuildEditor/EditableBuildIcons.lua:103", "BuildEditor/EditableBuildText.lua:116", "BuildEditor/EditableBuildView.lua:43-83", "BuildEditor/EditableBuildView.lua:159", "BuildEditor/EditableBuildView.lua:205", "BuildEditor/EditableBuildView.lua:219", "BuildEditor/EditableBuildView.lua:325", "BuildEditor/EditableBuildView.lua:366", "BuildEditor/EditableBuildView.lua:385", "BuildCreatorTemplates.xml:167-182", "BuildEditor/BuildEditorTemplates.xml:376-390", "BuildEditor/BuildEditorTemplates.xml:430"],
+      "args": "Members used: DescriptionSection (table, indexed at FILE LOAD by BuildViewSection.lua:4), PickingMode, DifficultyAtlas, DifficultyColors, GetParentCategory(category), ConvertBuildRoleToLFGRole(role), UnpackDescription(desc), UnpackDescriptionByKeys(desc), GetActiveBuildID(), IsActiveBuildID(id), GetSpellsByClass(build, core, optimal, synergistic, empowering), GetSpellsByLevel(build), GetLevelingEditorSpells(build, noAE), SetPickMode(mode, level), FormatProsAndCons(text), CreateSpellInfo(id), CreateEnchantInfo(id), UpdatePendingBuild(), PickupSpell(spell), CheckHeldSpellPlacement(level), ReleaseHeldSpell(), GetHeldSpell(), PlaceHeldSpellAtLevel(level), GetRatingQuality(rating), ToggleBuildActive(id, category, autoLearn), IsCategoryBuildDraft(category), RefreshFinishPickingPopup(), GetBuildLink(build)",
+      "returns": "Pure Lua helper (615 lines) that fans out to C_BuildCreator.GetActiveBuild/GetSpell/ActivateBuild/DeactivateBuild (via StaticPopups), C_BuildDraft.GetDraftedBuild, C_BuildEditor.GetEssenceForLevel/CanSetSpellLevel/SetSpellLevel/DoesBuildHaveSpellID, C_CharacterAdvancement.GetClassInfo/IsTalentSpellID/GetInternalID/GetEntryByInternalID/GetEntryBySpellID/GetActiveSpecID (via SpecializationUtil), CharacterAdvancementUtil, StaticPopup_Show/Hide/FindVisible/UpdateText, Item:CreateFromID + ItemData.TALENT_ESSENCE/ABILITY_ESSENCE, GetScaledCursorPosition, CreateFrame('Button','BuildCreatorHeldSpellFrame',UIParent,'BuildSpellTemplate'), BuildCreator_LoadUI. It is a CallbackRegistryMixin ('OnEditorSpellsChanged').",
+      "defined_in_lua": "FrameXML/Util/BuildCreatorUtil.lua"
+    },
+    "CharacterAdvancementUtil": {
+      "callsites": ["BuildSpell.lua:195", "BuildSpell.lua:199", "BuildSpell.lua:210", "BuildSpell.lua:360", "FrameXML/Util/BuildCreatorUtil.lua:154", "FrameXML/Util/BuildCreatorUtil.lua:200-201", "FrameXML/StaticPopup.lua:715"],
+      "args": "ConfirmOrLearnID(entryID|array), ConfirmOrUnlearnID(entryID), GetTalentRankSpellBySpellID(spellID, rank), GetClassFileByDBC(dbcID), GetSpecFileByDBC(dbcID), GetIDBySpellID(spellID), GetBuildFromURL(text)",
+      "returns": "ConfirmOr* call C_CharacterAdvancement.ShouldConfirm*/LearnID/UnlearnID and StaticPopup CONFIRM_LEARN_S / CONFIRM_UNLEARN_S (FrameXML/StaticPopup.lua:604,633); ConfirmOrUnlearnID has WildCard branches (WildCard_LoadUI, WildCardDice).",
+      "defined_in_lua": "FrameXML/Util/CharacterAdvancementUtil.lua"
+    },
+    "MysticEnchantUtil": {
+      "callsites": ["BuildEditor/EditableBuildView.lua:387"],
+      "args": "GetAppliedEnchants('player')",
+      "returns": "map enchantSpellID -> stacks (pairs)",
+      "defined_in_lua": "FrameXML/Util/MysticEnchantUtil.lua:58"
+    },
+    "SpecializationUtil": {
+      "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:177"],
+      "args": "GetActiveSpecialization()",
+      "returns": "C_CharacterAdvancement.GetActiveSpecID()",
+      "defined_in_lua": "FrameXML/Util/SpecializationUtil.lua:64"
+    },
+    "LinkUtil": {
+      "callsites": ["BuildViewSection.lua:59", "BuildViewSection.lua:76", "BuildViewSection.lua:80", "BuildViewSection.lua:84", "BuildViewSection.lua:412", "BuildViewSection.lua:576"],
+      "args": "ConvertDBUrlToHyperlink (gsub callback for https://db.ascension.gg/ URLs), :HandleHyperlinkClick(frame, link, text, button), :OnHyperlinkEnter(frame, link, text), :OnHyperlinkLeave(frame), :GetSpellLink(spellID); registers the 'cabuild' link handler (HyperlinkUtil.lua:535)",
+      "returns": "Lua",
+      "defined_in_lua": "SharedXML/Util/HyperlinkUtil.lua"
+    },
+    "ClassInfoUtil": {
+      "callsites": ["BuildCreator.lua:400-434"],
+      "args": "GetColoredClassName(token) for stock and custom class tokens (BARBARIAN, WITCHDOCTOR, ..., WILDWALKER)",
+      "returns": "colored string via RAID_CLASS_COLORS / LOCALIZED_CLASS_NAMES_MALE (custom keys present in SharedXML/SharedConstants.lua)",
+      "defined_in_lua": "SharedXML/Util/ClassInfoUtil.lua"
+    },
+    "AtlasUtil": {
+      "callsites": ["BuildCategory.lua:98"],
+      "args": ":GetCoords(atlasName)",
+      "returns": "left, right, top, bottom from the Lua atlas table (SharedXML/AtlasInfo.lua); every SetAtlas/SetNormalAtlas call in this addon resolves through that table",
+      "defined_in_lua": "SharedXML/AtlasInfo.lua"
+    },
+    "TextureUtil": {
+      "callsites": ["BuildCategory.lua:99"],
+      "args": "ZoomTexCoords(factor, l, r, t, b)",
+      "returns": "Lua",
+      "defined_in_lua": "SharedXML/Util/TextureUtil.lua"
+    },
+    "GetBackgroundTexCoordsForRole": {
+      "callsites": ["BuildListItem.lua:75", "BuildView.lua:73", "BuildEditor/EditableBuildIcons.lua:63", "BuildEditor/EditableBuildIcons.lua:106"],
+      "args": "(role:'TANK'|'HEALER'|'DAMAGER'|'LEADER')",
+      "returns": "4 texcoords into Interface\\\\LFGFrame\\\\UI-LFG-ICONS-ROLEBACKGROUNDS",
+      "defined_in_lua": "SharedXML/Util/TextureUtil.lua:218"
+    },
+    "HelpTip": {
+      "callsites": ["BuildCreator.lua:145", "BuildCategory.lua:181"],
+      "args": ":Show(parentFrame, infoTable, relativeRegion) or :Show('BUILD_CREATOR_FEATURED_HINT', frame) (registry form)",
+      "returns": "Lua (SharedXML/HelpTip.lua:134); the registry entry lives in FrameXML/HelpTips.lua:369 and needs cvar 'HelpTipBitfield' (bit HelpTips.Bits.HeroArchitectFeatured=25) via C_CVar.GetBitfield",
+      "defined_in_lua": "SharedXML/HelpTip.lua"
+    },
+    "GetGridPoint": {
+      "callsites": ["BuildView.lua:225", "BuildView.lua:242", "BuildView.lua:255", "BuildView.lua:268", "BuildView.lua:411", "BuildView.lua:440", "BuildView.lua:449", "BuildViewSection.lua:126", "BuildViewSection.lua:147", "BuildViewSection.lua:199", "BuildViewSection.lua:325", "BuildViewSection.lua:526", "BuildViewSection.lua:636", "BuildViewSection.lua:645"],
+      "args": "(index, parent, cellW, cellH, columns, xOff, yOff)",
+      "returns": "point args for SetPoint (P0 inventory says UNRESOLVED; it is the Lua alias GetGridPoint = GridLayoutUtil.GetGridPoint)",
+      "defined_in_lua": "SharedXML/Util/GridLayoutUtil.lua:162"
+    },
+    "GetMaxLevel": {
+      "callsites": ["BuildCreator.lua:47", "BuildCreator.lua:217", "BuildCreator.lua:228", "BuildCreator.lua:269", "BuildViewSection.lua:245", "BuildViewSection.lua:248", "BuildCreatorTemplates.xml:586", "BuildEditor/EditableBuildView.lua:111", "FrameXML/Util/BuildCreatorUtil.lua:380", "FrameXML/Util/BuildCreatorUtil.lua:392"],
+      "args": "(xpac?)",
+      "returns": "60|70|80; Lua wrapper over the NATIVE global GetRealmMaxLevel() (Extensions.dll); called at BuildCreatorFrame OnLoad to pick categories",
+      "defined_in_lua": "FrameXML/Util/GlobalFunctions.lua:11"
+    },
+    "GetRealmMaxLevel": {
+      "callsites": ["FrameXML/Util/GlobalFunctions.lua:15"],
+      "args": "()",
+      "returns": "number or nil (falls back to 60). NATIVE (Extensions.dll, binding dump _G? row).",
+      "defined_in_lua": null
+    },
+    "GetCustomGameMode": {
+      "callsites": ["FrameXML/Util/C_GameMode.lua:12", "FrameXML/Util/C_GameMode.lua:24", "FrameXML/Util/C_GameMode.lua:34"],
+      "args": "()",
+      "returns": "bitmask number of Enum.GameMode; NATIVE (Extensions.dll). Needed at OnLoad.",
+      "defined_in_lua": null
+    },
+    "UnitClass": {
+      "callsites": ["BuildCreator.lua:303", "BuildViewSection.lua:655"],
+      "args": "('player')",
+      "returns": "name, token, classID, classMask (4 returns; Lua wrapper GlobalOverwrites.lua:88 over the native _UnitClass). The token is a CUSTOM class token on Ascension (PROPHET, FLESHWARDEN, WILDWALKER, DEATHKNIGHT, BARBARIAN...); ApplyDefaultClassFilter maps token -> 'FILTER_CLASS_*'.",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:88"
+    },
+    "UnitClassBase": {
+      "callsites": ["SharedXML/SharedConstants.lua:60", "FrameXML/Util/GlobalOverwrites.lua:105"],
+      "args": "(unit)",
+      "returns": "className, classFileName ('HERO' for classless heroes), classID, classMask; Lua wrapper (GlobalOverwrites.lua:94) over the NATIVE _UnitClassBase (Ascension.exe, not stock). IsHeroClass/IsDefaultClass/IsCustomClass -> C_Player:IsHero/IsDefaultClass/IsCustomClass depend on it.",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:94"
+    },
+    "IsHeroClass": {
+      "callsites": ["FrameXML/Util/C_Player.lua:52", "AddOns/Ascension_Collections/Collections.lua:50"],
+      "args": "(unit?)",
+      "returns": "boolean (see UnitClassBase)",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:55"
+    },
+    "IsDefaultClass": {
+      "callsites": ["FrameXML/Util/C_Player.lua:48"],
+      "args": "(unit?)",
+      "returns": "boolean = bit.contains(Enum.ClassMask.DEFAULT, UnitClassMask(unit))",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:47"
+    },
+    "IsCustomClass": {
+      "callsites": ["FrameXML/Util/C_Player.lua:56", "FrameXML/Util/C_PrimaryStat.lua:6"],
+      "args": "(unit?)",
+      "returns": "boolean = bit.contains(Enum.ClassMask.COA, UnitClassMask(unit))",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:39"
+    },
+    "RegisterSavedCVar": {
+      "callsites": ["SharedXML/Util/C_CVar.lua:39", "SharedXML/Util/C_CVar.lua:54"],
+      "args": "(cvar:string, default:string, isCharacter?:boolean)",
+      "returns": "NATIVE (Extensions.dll); used by FrameXML/GameCVars.lua:59 ('heroArchitectAutoLearn','1', character) and :83 ('ShowFullBuildCreator','0'); guarded by GetCVarInfo(cvar) (stock native).",
+      "defined_in_lua": null
+    },
+    "Internal_CopyToClipboard": {
+      "callsites": ["BuildView.lua:574"],
+      "args": "(text:string)",
+      "returns": "nothing; NATIVE (Extensions.dll; binding dump lists it as C_ClassInfo.Internal_CopyToClipboard but the addon calls the bare global). Macros section copy button; no stock equivalent.",
+      "defined_in_lua": null
+    },
+    "GetScaledCursorPosition": {
+      "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:449"],
+      "args": "()",
+      "returns": "x, y in UIParent units for the drag ghost (Ascension FrameXML/UIParent.lua; not in stock 3.3.5a FrameXML)",
+      "defined_in_lua": "FrameXML/UIParent.lua"
+    },
+    "OpenChallengesUI": {
+      "callsites": ["BuildCreatorTemplates.xml:407"],
+      "args": "()",
+      "returns": "opens the Challenges addon; followed by ChallengesFrame:OpenTab(2) and ChallengesFrame.StoreTab.StoreButtonLayout.BuildMasterButton:Click() (Ascension_Challenges, out of scope)",
+      "defined_in_lua": "FrameXML/UIParent.lua:778"
+    },
+    "BuildCreator_LoadUI": {
+      "callsites": ["AddOns/Ascension_Collections/Collections.lua:53", "FrameXML/Util/BuildCreatorUtil.lua:558", "SharedXML/Util/HyperlinkUtil.lua:540"],
+      "args": "()",
+      "returns": "sets ShowFullBuildCreator=1 when C_Player:IsMaxLevel() or IsPrestiged(), then UIParentLoadAddOn('Ascension_BuildCreator')",
+      "defined_in_lua": "FrameXML/UIParent.lua:351"
+    },
+    "GameTooltip_GenericTooltip": {
+      "callsites": ["BuildCategory.lua:233", "BuildCreatorTemplates.xml:73", "BuildCreatorTemplates.xml:242", "BuildCreatorTemplates.xml:389", "BuildCreatorTemplates.xml:403", "BuildCreatorTemplates.xml:706", "BuildEditor/BuildEditorTemplates.xml:479"],
+      "args": "(frame, anchor?) reads frame.tooltipTitle / frame.tooltipText",
+      "returns": "Ascension FrameXML (not stock)",
+      "defined_in_lua": "FrameXML/GameTooltip.lua:1264"
+    },
+    "ChatEdit_SetInsertTarget": {
+      "callsites": ["BuildEditor/EditableBuildText.lua:81"],
+      "args": "(editBox)",
+      "returns": "Ascension-only FrameXML helper so Shift-click links insert into the multiline editor; ChatEdit_ClearInsertTarget at :96; ChatEdit_InsertLink (BuildListItem.lua:157) is stock but Ascension's version lives at FrameXML/ChatFrame.lua:4060",
+      "defined_in_lua": "FrameXML/ChatFrame.lua:4030"
+    },
+    "PortraitFrame_SetIcon": {
+      "callsites": ["BuildCreator.lua:18"],
+      "args": "(frame, iconPath)",
+      "returns": "SharedXML; PortraitFrame_SetTitle (BuildCreator.lua:19, P0 UNRESOLVED) is the alias PortraitFrame_SetTitle = BasicFrame_SetTitle at SharedPanelTemplates.lua:1119",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1103"
+    },
+    "InputBlockText_OnLoad": {
+      "callsites": ["BuildCreatorTemplates.xml:583"],
+      "args": "(frame)",
+      "returns": "SharedXML; the Loading/Error overlays' :SetText(title, subtext) is InputBlockText_SetText (SharedPanelTemplates.lua:1260)",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1236"
+    },
+    "SearchBoxTemplate_OnTextChanged": {
+      "callsites": ["BuildCreator.xml:83"],
+      "args": "(editBox)",
+      "returns": "SharedXML",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:281"
+    },
+    "EditBox_ClearFocus": {
+      "callsites": ["BuildEditor/EditableBuildText.lua:61", "BuildEditor/EditableBuildText.lua:66"],
+      "args": "(editBox)",
+      "returns": "SharedXML",
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:26"
+    },
+    "UIDropDownMenu2_OnLoad": {
+      "callsites": ["BuildEditor/BuildEditorTemplates.xml:582", "BuildEditor/BuildEditorTemplates.xml:595"],
+      "args": "(dropdown)",
+      "returns": "Ascension's SharedXML dropdown library (replaces stock FrameXML/UIDropDownMenu.lua): also provides UIDropDownMenu_AddSpace (BuildCreator.lua:467, BuildViewSection.lua:685) and honours info.iconAtlas / info.tooltip / info.enabled / info.icon+tCoord fields used here",
+      "defined_in_lua": "SharedXML/UIDropDownMenu.lua:23"
+    },
+    "ScrollFrameTemplate_OnMouseWheelVariable": {
+      "callsites": ["BuildCreatorTemplates.xml:974", "BuildEditor/BuildEditorTemplates.xml:1012"],
+      "args": "(scrollFrame, delta, scrollBar, step)",
+      "returns": "SharedXML",
+      "defined_in_lua": "SharedXML/Scroll/ScrollFrame.lua:37"
+    },
+    "MixinAndLoadScripts": {
+      "callsites": ["BuildCreator.xml:201", "BuildCreatorTemplates.xml:106", "BuildCreatorTemplates.xml:251", "BuildCreatorTemplates.xml:288", "BuildCreatorTemplates.xml:508", "BuildCreatorTemplates.xml:595", "BuildCreatorTemplates.xml:605", "BuildCreatorTemplates.xml:627", "BuildCreatorTemplates.xml:661", "BuildCreatorTemplates.xml:1021", "BuildCreatorTemplates.xml:1039", "BuildEditor/BuildEditorTemplates.xml:78", "BuildEditor/BuildEditorTemplates.xml:155", "BuildEditor/BuildEditorTemplates.xml:209", "BuildEditor/BuildEditorTemplates.xml:222", "BuildEditor/BuildEditorTemplates.xml:235", "BuildEditor/BuildEditorTemplates.xml:265", "BuildEditor/BuildEditorTemplates.xml:296", "BuildEditor/BuildEditorTemplates.xml:317", "BuildEditor/BuildEditorTemplates.xml:333", "BuildEditor/BuildEditorTemplates.xml:569", "BuildEditor/BuildEditorTemplates.xml:633", "BuildEditor/BuildEditorTemplates.xml:722", "BuildEditor/BuildEditorTemplates.xml:744", "BuildEditor/BuildEditorTemplates.xml:767", "BuildEditor/BuildEditorTemplates.xml:803", "BuildEditor/BuildEditorTemplates.xml:1059"],
+      "args": "(frame, 'MixinGlobalName')",
+      "returns": "mixes the named global table in and wires OnLoad/OnShow/OnHide/OnEnter/OnLeave/OnClick/OnEvent/OnDragStart/OnReceiveDrag/OnEnable/OnDisable... methods as scripts; with CreateFromMixins, Mixin (SharedXML/Util/Mixin.lua), OnEventToMethod and nop/dprint (SharedXML/SharedConstants.lua:9,13,87), GenerateClosure (SharedXML/Util/FunctionUtil.lua:100), CreateFramePool (SharedXML/Pools.lua:197), SetParentArray (SharedXML/Util/Util.lua:11), SecondsToTime(seconds, noSeconds, notAbbreviated, maxCount) (SharedXML/Util/TimeUtil.lua:38)",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:152"
+    },
+    "Enum": {
+      "callsites": ["BuildCreator.lua:13-73", "BuildCategory.lua:26-72", "CategoryListItem.lua:4-22", "BuildListItem.lua:83-118", "BuildSpell.lua:26-343", "BuildView.lua:6-359", "BuildViewSection.lua:379-563", "BuildEditor/EditableBuildView.lua:13-133", "BuildEditor/EditableBuildIcons.lua:139-187", "BuildEditor/BuildEditorTemplates.xml:427"],
+      "args": "Enum.BuildCategory, BuildCreateCategory, BuildSubCategory, BuildRoles, BuildSort, BuildFilter, BuildDifficulty, BuildSpellFlags, WeaponSubClassSID/WeaponSIDSubClass, ArmorSubClassSID/ArmorSIDSubClass, PrimaryStat, GameMode, SpellQuality, ItemQuality, EnchantQualityEnum, ECSlotBorderStylesKnown, ClassFile (= tinvert(Enum.Class), ordered by class id incl. HERO=10 and custom 12..32), ClassMask",
+      "returns": "Lua constant tables; several are indexed at file-load time",
+      "defined_in_lua": "SharedXML/Enum.lua"
+    },
+    "Const": {
+      "callsites": ["BuildCreator.lua:69", "BuildCreator.lua:71", "BuildCategory.lua:76-77", "BuildListItem.lua:7", "BuildSpell.lua:4", "BuildView.lua:12", "BuildView.lua:23", "BuildView.lua:27", "CategoryListItem.lua:30", "BuildCreatorTemplates.xml:792", "BuildEditor/BuildEditorTemplates.xml:182", "BuildEditor/BuildEditorTemplates.xml:547", "BuildEditor/EditableBuildView.lua:20-32"],
+      "args": "Const.TextureKit.IgnoreAtlasSize / UseAtlasSize",
+      "returns": "Lua",
+      "defined_in_lua": "SharedXML/Util/Const.lua:3"
+    },
+    "SOUNDKIT": {
+      "callsites": ["BuildCategory.lua:223", "BuildListItem.lua:219", "BuildListItem.lua:223", "BuildView.lua:661"],
+      "args": "SOUNDKIT.UCHATSCROLLBUTTON (table of ids), UCHATSCROLLBUTTON_70, CHAT_SCROLL_BUTTON (table)",
+      "returns": "numeric sound-kit ids / tables; PlaySound is overridden in SharedXML/Util/SharedOverwrites.lua:17 to rotate table entries and pass NUMBERS to the native PlaySound (stock PlaySound takes sound names)",
+      "defined_in_lua": "SharedXML/Util/SoundKit.lua:1"
+    },
+    "ROLE_ATLAS": {
+      "callsites": ["BuildCreator.lua:343", "BuildCreator.lua:354", "BuildCreator.lua:365", "BuildListItem.lua:74", "BuildView.lua:72", "BuildEditor/EditableBuildIcons.lua:62", "BuildEditor/EditableBuildIcons.lua:105"],
+      "args": "keys TANK/HEALER/DAMAGER/LEADER; with ROLE_COLORS, STAT_COLORS, PRIMARY_STAT_ATLAS (keyed by numeric statID, 'Strength'.., and 'STAT_STRENGTH'..), ROLE_TEXT_WITH_ICON, PRIMARY_STAT_TEXT_WITH_ICON, DIFFICULTY_COLORS[1..5], ITEM_QUALITY_COLORS[q]:WrapText, RAID_CLASS_COLORS[customToken], LOCALIZED_CLASS_NAMES_MALE[customToken], and CreateColor-based HIGHLIGHT_FONT_COLOR/RED_FONT_COLOR/GREEN_FONT_COLOR/GRAY_FONT_COLOR/NORMAL_FONT_COLOR/DISABLED_FONT_COLOR with :WrapText/:GetRGB",
+      "returns": "Lua tables (SharedXML/SharedConstants.lua:100-103, 144, 218, 261, 288, 305, 946, 964, 1003, 1032)",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:946"
+    },
+    "Collections": {
+      "callsites": ["BuildCreator.lua:21", "BuildCreator.xml:5", "BuildListItem.lua:209", "BuildView.lua:664", "BuildEditor/BuildEditorTemplates.xml:380", "BuildEditor/BuildEditorTemplates.xml:431"],
+      "args": "parent frame; HideUIPanel(Collections); Collections:GoToTab(id); Collections.Tabs.CharacterAdvancement / .MysticEnchants / .HeroArchitect",
+      "returns": "Ascension_Collections addon (CollectionsMixin, TabSystemMixin); the BuildCreatorFrame panel is registered by name through AddTab(HERO_ARCHITECT, 'BuildCreatorFrame')",
+      "defined_in_lua": "AddOns/Ascension_Collections/Collections.lua"
+    },
+    "WildCardRapidRollingFrame": {
+      "callsites": ["BuildListItem.lua:210-211", "BuildView.lua:665-666"],
+      "args": ":Show(), :ShowImportHint()",
+      "returns": "Ascension_WildCard addon; WildCard mode only",
+      "defined_in_lua": "AddOns/Ascension_WildCard/RapidRolling/RapidRolling.lua"
+    },
+    "StaticPopupDialogs": {
+      "callsites": ["BuildCreator.lua:90-91", "BuildCreator.lua:213", "BuildCreator.lua:276", "BuildCreator.lua:538", "BuildCreator.lua:553", "BuildCreator.lua:559", "BuildCreator.lua:615", "BuildViewSection.lua:412", "BuildViewSection.lua:576", "BuildViewSection.lua:585", "BuildEditor/BuildEditorTemplates.xml:432", "BuildEditor/BuildEditorTemplates.xml:492"],
+      "args": "Dialogs used: BUILD_CREATOR_DELETE_SAVED_BUILD (StaticPopup.lua:695), BUILD_CREATOR_IMPORT_BUILD (:707), BUILD_CREATOR_EDIT_BUILD (:724), BUILD_CREATOR_DELETE_BUILD (:737, typed 'DELETE' confirmation), BUILD_CREATOR_PUBLISH_BUILD (:779), BUILD_CREATOR_RESET_BUILD (:792), BUILD_CREATOR_CHANGE_BUILD_CATEGORY (:804), BUILD_CREATOR_SET_COMMENT (:815), BUILD_CREATOR_SET_ENCHANT_LEVEL (:833), BUILD_CREATOR_FINISH_PICKING_SPELLS (:853), BUILD_CREATOR_FINISH_PICKING_ENCHANTS (:865); via BuildCreatorUtil.ToggleBuildActive: CONFIRM_ACTIVATE_BUILD (:468), CONFIRM_ACTIVATE_BUILD_DEACTIVATE_BUILD_DRAFT (:482), CONFIRM_DEACTIVATE_BUILD (:510), CONFIRM_DEACTIVATE_BUILD_DRAFT (:524), BUILD_DRAFT_ACTIVATE_CONFIRM (:1010), BUILD_DRAFT_ACTIVATE_CONFIRM_NO_REWARDS (:994); via CharacterAdvancementUtil: CONFIRM_LEARN_S (:604), CONFIRM_UNLEARN_S (:633). StaticPopup_Show(which, text1, text2, data) with OnAccept(self, data); StaticPopup_Hide; StaticPopup_FindVisible (stock) and StaticPopup_UpdateText (Ascension-only) from BuildCreatorUtil.RefreshFinishPickingPopup",
+      "returns": "Ascension FrameXML/StaticPopup.lua entries; the shim must add them to the stock StaticPopupDialogs table",
+      "defined_in_lua": "FrameXML/StaticPopup.lua"
+    },
+    "ItemData": {
+      "callsites": ["FrameXML/Util/BuildCreatorUtil.lua:573", "FrameXML/Util/BuildCreatorUtil.lua:581", "FrameXML/Util/BuildCreatorUtil.lua:583"],
+      "args": "ItemData.TALENT_ESSENCE / ItemData.ABILITY_ESSENCE item ids, Item:CreateFromID(id):GetIconLink(22)",
+      "returns": "used only by the FINISH_PICKING_SPELLS popup text (BuildAddSpellTemplate OnClick)",
+      "defined_in_lua": "FrameXML/Data/Items.lua"
+    }
+  },
+  "widget_methods": {
+    "SetAtlas": {
+      "callsites": ["BuildCreator.lua:69", "BuildCreator.lua:71", "BuildCategory.lua:76-77", "BuildCategory.lua:95", "BuildListItem.lua:7", "BuildListItem.lua:96", "BuildSpell.lua:4", "BuildView.lua:12", "BuildView.lua:23", "BuildView.lua:27", "CategoryListItem.lua:30", "BuildCreatorTemplates.xml:792", "BuildEditor/BuildEditorTemplates.xml:182", "BuildEditor/BuildEditorTemplates.xml:547", "BuildEditor/EditableBuildView.lua:20", "BuildEditor/EditableBuildView.lua:28", "BuildEditor/EditableBuildView.lua:32"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:3"
+    },
+    "SetNormalAtlas": {
+      "callsites": ["BuildCategory.lua:172", "BuildListItem.lua:4", "BuildSpell.lua:5", "BuildSpell.lua:10", "BuildSpell.lua:244-245", "BuildSpell.lua:303-306", "BuildSpell.lua:442-446", "CategoryListItem.lua:38", "CategoryListItem.lua:59", "SectionListItem.lua:4", "BuildCreatorTemplates.xml:164", "BuildCreatorTemplates.xml:384", "BuildCreatorTemplates.xml:495", "BuildEditor/BuildEditorTemplates.xml:372", "BuildEditor/BuildEditorTemplates.xml:423"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25"
+    },
+    "SetPushedAtlas": {
+      "callsites": ["BuildCategory.lua:173"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25"
+    },
+    "SetHighlightAtlas": {
+      "callsites": ["BuildCategory.lua:175", "BuildListItem.lua:6", "BuildListItem.lua:19", "BuildSpell.lua:304-307", "BuildSpell.lua:443-447", "CategoryListItem.lua:26", "SectionListItem.lua:5", "BuildCreatorTemplates.xml:385", "BuildCreatorTemplates.xml:496", "BuildEditor/BuildEditorTemplates.xml:373", "BuildEditor/BuildEditorTemplates.xml:424"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25"
+    },
+    "SetDisabledAtlas": {
+      "callsites": ["BuildSpell.lua:309-310", "BuildSpell.lua:448-449"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25"
+    },
+    "SetCheckedAtlas": {
+      "callsites": ["BuildCreatorTemplates.xml:494"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:25"
+    },
+    "SetEnabled": {
+      "callsites": ["BuildCategory.lua:187", "BuildCategory.lua:202", "BuildListItem.lua:182", "BuildListItem.lua:190", "BuildSpell.lua:328-329", "BuildSpell.lua:458-459", "BuildView.lua:101-105", "BuildView.lua:257", "BuildView.lua:270", "BuildView.lua:676", "BuildView.lua:682", "CategoryListItem.lua:50-84"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:13"
+    },
+    "SetShown": {
+      "callsites": ["BuildCreator.lua:322", "BuildCreator.lua:768", "BuildCategory.lua:163", "BuildListItem.lua:103-104", "BuildListItem.lua:134", "BuildSpell.lua:44-49", "BuildSpell.lua:75-87", "BuildSpell.lua:133", "BuildSpell.lua:273", "BuildSpell.lua:325-326", "BuildView.lua:691-692", "BuildViewSection.lua:157-160", "BuildViewSection.lua:511", "BuildEditor/EditableBuildView.lua:216"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28"
+    },
+    "GetBoolValue": {
+      "callsites": ["BuildListItem.lua:121", "BuildView.lua:669", "BuildCreatorTemplates.xml:704"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:44"
+    },
+    "CallScript": {
+      "callsites": ["BuildListItem.lua:79", "BuildView.lua:77", "BuildEditor/EditableBuildView.lua:336"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Frame.lua:23"
+    },
+    "ClearAndSetPoint": {
+      "callsites": ["BuildView.lua:286", "BuildView.lua:293", "BuildView.lua:300", "BuildView.lua:306", "BuildViewSection.lua:207", "BuildViewSection.lua:214", "BuildViewSection.lua:221", "BuildViewSection.lua:228"],
+      "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:36"
+    },
+    "SetTexture(path, 'REPEAT', 'REPEAT')": {
+      "callsites": ["BuildView.lua:657", "BuildEditor/EditableBuildView.lua:327"],
+      "defined_in_lua": null
+    },
+    "SetIcon": {
+      "callsites": ["BuildListItem.lua:23", "BuildListItem.lua:52", "BuildSpell.lua:96", "BuildSpell.lua:271", "BuildView.lua:70", "BuildViewSection.lua:30", "BuildViewSection.lua:44", "CategoryListItem.lua:45-70", "BuildEditor/EditableBuildIcons.lua:15", "BuildEditor/EditableBuildIcons.lua:27", "BuildEditor/BuildEditorTemplates.xml:422"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:24"
+    },
+    "SetRounded": {
+      "callsites": ["BuildListItem.lua:8", "BuildListItem.lua:13", "BuildListItem.lua:20", "BuildSpell.lua:243", "BuildView.lua:13", "BuildView.lua:18", "BuildViewSection.lua:18", "CategoryListItem.lua:29", "BuildEditor/EditableBuildView.lua:21", "BuildEditor/EditableBuildView.lua:23"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:3"
+    },
+    "SetBorderSize / SetBorderOffset / SetBorderAtlas / SetBorderTexture / SetBorderDesaturated / SetIconAtlas / SetDesaturated (BorderIconTemplateMixin)": {
+      "callsites": ["BuildListItem.lua:9-25", "BuildListItem.lua:88", "BuildListItem.lua:147", "BuildSpell.lua:7", "BuildSpell.lua:60", "BuildSpell.lua:99-102", "BuildSpell.lua:138-146", "BuildSpell.lua:242", "BuildSpell.lua:272", "BuildView.lua:14-21", "BuildView.lua:84", "BuildView.lua:117", "BuildViewSection.lua:19-21", "CategoryListItem.lua:27-28", "CategoryListItem.lua:99", "CategoryListItem.lua:104", "BuildEditor/EditableBuildIcons.lua:62", "BuildEditor/EditableBuildIcons.lua:105-108", "BuildEditor/EditableBuildIcons.lua:142", "BuildEditor/EditableBuildIcons.lua:190", "BuildEditor/EditableBuildView.lua:22-26", "BuildEditor/BuildEditorTemplates.xml:369-371", "BuildEditor/BuildEditorTemplates.xml:420-421"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua"
+    },
+    "SetBackgroundTexture / SetBackgroundSize / SetBackgroundAlpha (BorderIconTemplateMixin)": {
+      "callsites": ["BuildListItem.lua:10-12", "BuildView.lua:15-17", "BuildEditor/EditableBuildIcons.lua:55-57"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua"
+    },
+    "SetSpell / UseQuality / SetOverlaySize / SetOverlayTexture (SpellIconTemplateMixin)": {
+      "callsites": ["BuildListItem.lua:87", "BuildListItem.lua:146", "BuildSpell.lua:8-9", "BuildSpell.lua:22", "BuildSpell.lua:59-61", "BuildSpell.lua:106", "BuildView.lua:83", "BuildView.lua:116", "BuildEditor/EditableBuildIcons.lua:141", "BuildEditor/EditableBuildIcons.lua:189"],
+      "defined_in_lua": "SharedXML/SharedTemplates.lua:369"
+    },
+    "SetGemSize / SetOrientation / SetGemQuality / SetNumGems (RarityGemContainerMixin)": {
+      "callsites": ["BuildSpell.lua:11-13", "BuildSpell.lua:28-29"],
+      "defined_in_lua": "FrameXML/UIPanelTemplates.lua:566"
+    },
+    "RegisterCallback('IconSelected') (IconSelectorMixin)": {
+      "callsites": ["BuildEditor/EditableBuildIcons.lua:11"],
+      "defined_in_lua": "FrameXML/UIPanelTemplates.lua:408"
+    },
+    "SetTemplate / SetGetNumResultsFunction / GetSelectedHighlight / RefreshScrollFrame / SetSelectedIndex / GetScrollList / IsSelected / .index (ScrollListMixin, ScrollListItemBaseMixin)": {
+      "callsites": ["BuildCreator.lua:33-34", "BuildCreator.lua:67-70", "BuildCreator.lua:97", "BuildCreator.lua:105", "BuildCreator.lua:109", "BuildCreator.lua:118", "BuildCreator.lua:134", "BuildCreator.lua:154", "BuildCreator.lua:178", "BuildCreator.lua:181", "BuildCreator.lua:327", "BuildCreator.lua:733", "BuildCreator.lua:760-764", "BuildListItem.lua:1", "BuildListItem.lua:36-41", "BuildListItem.lua:53", "BuildListItem.lua:169", "BuildView.lua:24-26", "BuildView.lua:51-52", "BuildView.lua:171", "CategoryListItem.lua:1", "CategoryListItem.lua:34", "SectionListItem.lua:1-14", "BuildEditor/EditableBuildView.lua:29-31", "BuildEditor/EditableBuildView.lua:172"],
+      "defined_in_lua": "SharedXML/Scroll/ScrollList.lua"
+    },
+    "RegisterCallback('OnFilterChanged') / AddHeader / AddFilterOption / CreateFilterInfo / AddOptionSpacer / ClearFilters / SetToSingleFilter / IsFiltered / IsFilteredFind / SetFilter / GetFilter / Initialize / ClearFiltersButton (FilterDropDown mixins)": {
+      "callsites": ["BuildCreator.lua:74-76", "BuildCreator.lua:103", "BuildCreator.lua:191", "BuildCreator.lua:194", "BuildCreator.lua:296", "BuildCreator.lua:304", "BuildCreator.lua:322", "BuildCreator.lua:333-434"],
+      "defined_in_lua": "SharedXML/FilterDropDown.lua"
+    },
+    "SetText(title, subtext) / SetTextColor (InputBlockTextTemplate)": {
+      "callsites": ["BuildCreator.lua:482", "BuildCreator.lua:492", "BuildCreatorTemplates.xml:584-586"],
+      "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1260"
+    },
+    "SetDollyStartColor / SetDollyEndColor / SetDollyFinishCallback / SetDollyStartCoords / SetDollyEndCoords / SetDollyTimeScale / MoveDollyForward / MoveDollyBackward (TextureDollyMixin)": {
+      "callsites": ["BuildCategory.lua:78-83", "BuildCategory.lua:100-101", "BuildCategory.lua:148-158"],
+      "defined_in_lua": "SharedXML/TextureDolly.lua"
+    },
+    "SetDynamicText / GetText / ToText / SetCategory / Serialize / Deserialize (addon-local mixins)": {
+      "callsites": ["BuildView.lua:215", "BuildView.lua:479", "BuildView.lua:502", "BuildView.lua:526", "BuildView.lua:549", "BuildView.lua:572", "BuildView.lua:585", "BuildView.lua:608", "BuildView.lua:632", "BuildEditor/EditableBuildText.lua:87", "BuildEditor/EditableBuildText.lua:119", "BuildEditor/EditableBuildView.lua:207", "BuildEditor/EditableBuildView.lua:236", "BuildEditor/EditableBuildView.lua:267-270", "BuildEditor/EditableBuildView.lua:312", "BuildEditor/EditableBuildView.lua:320", "BuildEditor/EditableBuildView.lua:341"],
+      "defined_in_lua": "BuildViewSection.lua"
+    }
+  },
+  "events": {
+    "ADDON_LOADED": {
+      "registered_at": ["BuildCreator.lua:24"],
+      "handler_args": "(addonName) -- when == 'Ascension_BuildCreator': unregister and modernize BuildCreatorSaved (default {SavedBuilds={}}, __version from TOC Version)",
+      "fired_by": "native"
+    },
+    "BUILD_CREATOR_CATEGORY_RESULT": {
+      "registered_at": ["BuildCreator.lua:25"],
+      "handler_args": "(category:string) -- the Enum.BuildCategory that was queried; handler hides Loading, clears search, calls C_BuildCreator.UpdateFilter('', defaultClassFilters, sort), sets self.category, ShowBuildList, RefreshScrollFrame",
+      "fired_by": "native (Extensions.dll) after C_BuildCreator.QueryAllBuilds; also consumed by Ascension_CoATalents/CoATalentFrame.lua:261"
+    },
+    "BUILD_CREATOR_BUILD_RESULT": {
+      "registered_at": ["BuildCreator.lua:26"],
+      "handler_args": "(result:string, buildID:string) -- handler re-reads C_BuildCreator.GetBuild(buildID); nil -> ShowError(VIEW_BUILD_ERROR, _G[result] or result) when the frame is shown; otherwise runs pendingCallback[buildID] list or ViewBuild",
+      "fired_by": "native after C_BuildCreator.QueryBuild"
+    },
+    "BUILD_CREATOR_ACTIVATE_RESULT": {
+      "registered_at": ["BuildCreator.lua:27"],
+      "handler_args": "(result:string) -- 'ACTIVATE_BUILD_OK' refreshes control buttons / lists; 'ACTIVATE_BUILD_DRAFTED_BUILD_ALREADY_DRAFTED' shows the Deactivate button in the Error overlay; any other value -> ShowError(ACTIVATE_BUILD_FAILED, _G[result] or result)",
+      "fired_by": "native after C_BuildCreator.ActivateBuild; also consumed by Ascension_CoATalents/CoATreeViewMixin.lua:83"
+    },
+    "BUILD_CREATOR_DEACTIVATE_RESULT": {
+      "registered_at": ["BuildCreator.lua:28"],
+      "handler_args": "(result:string) -- 'DEACTIVATE_BUILD_OK' or error key",
+      "fired_by": "native after C_BuildCreator.DeactivateBuild; also Ascension_CoATalents/CoATreeViewMixin.lua:84"
+    },
+    "BUILD_CREATOR_SAVE_RESULT": {
+      "registered_at": ["BuildCreator.lua:29"],
+      "handler_args": "(result:string, buildID:string) -- 'SAVE_BUILD_OK' -> ViewBuildID(buildID); other 'SAVE_BUILD_<ERR>' gsub'd to 'PUBLISH_BUILD_<ERR>' for the _G lookup",
+      "fired_by": "native after C_BuildEditor.PublishBuild on an existing build"
+    },
+    "BUILD_CREATOR_CREATE_RESULT": {
+      "registered_at": ["BuildCreator.lua:30"],
+      "handler_args": "(result:string, buildID:string) -- 'CREATE_BUILD_OK' -> discard the SavedVariables WIP copy and ViewBuild/ViewBuildID; 'CREATE_BUILD_<ERR>' -> PUBLISH_BUILD_<ERR>",
+      "fired_by": "native after C_BuildEditor.PublishBuild on a new build"
+    },
+    "BUILD_CREATOR_DELETE_RESULT": {
+      "registered_at": ["BuildCreator.lua:31"],
+      "handler_args": "(result:string) -- 'DELETE_BUILD_OK' -> re-select the current category (re-query) else ShowError(DELETE_BUILD_FAILED, ...)",
+      "fired_by": "native after C_BuildCreator.DeleteBuild"
+    },
+    "BUILD_CREATOR_RATE_RESULT": {
+      "registered_at": ["BuildListItem.lua:27"],
+      "handler_args": "(result:string, buildID:string, rating:number) -- registered by EVERY BuildListItemTemplate instance (never unregistered); re-enables the like button and, when buildID matches self.data.ID, sets data.Upvotes = rating and refreshes the rating border",
+      "fired_by": "native after C_BuildCreator.RateBuild; also Ascension_CoATalents/Templates/CoATalentTemplates.lua:340"
+    },
+    "CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED": {
+      "registered_at": ["BuildSpell.lua:124"],
+      "handler_args": "() -- registered in BuildSpellMixin:OnShow / unregistered OnHide per BuildSpellTemplate button (EditableBuildSpellMixin sets OnShow/OnHide = nop); refreshes Icon.Known via C_CharacterAdvancement.IsKnownSpellID(self.spellID)",
+      "fired_by": "native (Extensions.dll) whenever the CA known/pending set changes (after LearnID/UnlearnID/ActivateBuild); widely consumed by the CA cluster (Ascension_CharacterAdvancement, CoATalents, TalentUI, WildCard)"
+    }
+  },
+  "frames": [
+    "BuildCreatorFrame (parent Collections, inherits RaisedPortraitFrameTemplateNoBackground, 1060x698, hidden; panel registered with Collections' tab system by name)",
+    "BuildCreatorFrameBackground, BuildCreatorFrameLoading (InputBlockTextLoadingTemplate), BuildCreatorFrameError (+ErrorCloseButton, ErrorDeactivateButton)",
+    "BuildCreatorFrameSearchBox (SearchBoxTemplate), BuildCreatorFrameFilter (FilterDropDownButtonTemplate), BuildCreatorFrameSorting (FilterDropDownMenuTemplate)",
+    "BuildCreatorFrameCategoryScroll (+Background, Artwork, Inset) and BuildCreatorFrameBuildScroll (+Background, Artwork, Inset) (StandardProportionalScrollListTemplate); their row buttons are created by ScrollListMixin from BuildListCategoryListItemTemplate / BuildListItemTemplate",
+    "BuildCreatorFrameToggleCreateButton",
+    "BuildCreatorFrameBuildViewPanel (BuildViewTemplate): ...Controls{ActivateBuildButton, AutoLearn(+Text), DeleteBuildButton, EditBuildButton}, ...MainFrame{ContentBackground, Background, Name, Author, BackButton(+Background), Icon, PrimaryStat(+Icon, Text), Role, SpecIcon(+Icon, Text), ShadowOverlay, ScrollFrame(+ScrollBar/ScrollUpButton/ScrollDownButton, unnamed Content with AlternateBuild1/2/3)}, ...CategoryScroll(+Background), ...BackButton",
+    "BuildCreatorFrameEditableBuildViewPanel (EditableBuildViewTemplate): ...Controls{PublishBuild, ResetBuild}, ...MainFrame{Author, BackButton, Name(+EditBox), CategoryDropDown, DifficultyDropDown (UIDropDownMenuTemplate2), Icon(+IconSelector, EditOverlay), Role(+DropDown, EditOverlay), PrimaryStat(+DropDown, EditOverlay), SpecIcon, ShadowOverlay, ScrollFrame{Content: Overview(+Hint, Text), Spells(+DropDown), MysticEnchants(+DropDown), Equipment(+DropDown, AddEquipmentDropDown), ProsAndCons(+Hint, Text), Itemization(+Hint, Text), Rotation(+Hint, Text), Consumables(+Hint, Text), Macros(+Text), WeakAuras(+Hint, Text), Notes(+Text)}}, ...CategoryScroll(+Background), ...BackButton",
+    "GLOBAL 'Text': BuildEditorTemplates.xml:283 declares <SimpleHTML name=\"Text\" parentKey=\"Text\"> (no $parent prefix) inside EditableBuildMultilineTextTemplate, so every multiline section instance (8 of them) overwrites _G.Text",
+    "Runtime CreateFrame: BuildCreatorSavedBuildDropDown (BuildCreator.lua:237, UIDropDownMenuTemplate), BuildCreatorHeldSpellFrame (FrameXML/Util/BuildCreatorUtil.lua:443, BuildSpellTemplate under UIParent, drag ghost), '<spellParent>DropDown' (BuildSpell.lua:225), BuildCreatorFrameBuildViewPanelMainFrameScrollFrame{Overview, Spells, MysticEnchants, Equipment, ProsAndCons, Itemization, Rotation, Consumables, Macros, WeakAuras, Notes} view sections with ...Text (BuildSimpleHTMLTemplate), ...FilterCore/FilterOptimal/FilterEmpowering/FilterSynergistic (SquareIconCheckButtonTemplate), ...CopyButton (CopyButtonTemplate) (BuildView.lua:178-598), ...SpellsFilterCore.. in the editor (BuildViewSection.lua:204-225), ...MysticEnchantsAddEnchantButton (BuildViewSection.lua:506), ...EquipmentAddEquipmentButton (BuildViewSection.lua:624), anonymous pooled BuildSpellTemplate / EditableBuildSpellTemplate / BuildSpellHeaderTemplate / BuildEnchantTemplate / EditableBuildEnchantTemplate / BuildAddSpellTemplate buttons (CreateFramePool)",
+    "Unused templates in this addon: BuildCategoryTemplate (+UnlockCover, TopShadow, BottomShadow, BorderLeft/Right, '$parentButton<i>' children) and EditableBuildClassTabTemplate (references BuildClassTabMixin, which is defined NOWHERE in the tree; harmless because the template is never instantiated)"
+  ],
+  "stock_api_assumptions": [
+    "UnitClass('player') returns 4 values (name, token, classID, classMask) and the token is a CUSTOM class token on Ascension ('HERO' for classless heroes; PROPHET, FLESHWARDEN, WILDWALKER, BARBARIAN, ..., SPIRITMAGE for CoA; Enum.Class ids 10 and 12-32). BuildCreator.lua:303 and BuildViewSection.lua:655 read the token; Lua wrapper at FrameXML/Util/GlobalOverwrites.lua:88.",
+    "UnitClassBase(unit) (Ascension native _UnitClassBase wrapped at GlobalOverwrites.lua:94) returning 'HERO' as the file token, and UnitClassMask(unit) (Lua, GlobalOverwrites.lua:104) -> IsHeroClass/IsDefaultClass/IsCustomClass (SharedXML/SharedConstants.lua:39-61) -> C_Player:IsHero/IsDefaultClass/IsCustomClass. The whole Hero Architect tab exists only when IsHeroClass('player') is true, so the shim's UnitClass override must also implement UnitClassBase/_UnitClassBase/UnitClassMask and Enum.ClassMask.DEFAULT/COA membership.",
+    "PlaySound(numericSoundKitID | table) -- SOUNDKIT values are numeric sound-kit ids (SharedXML/Util/SoundKit.lua); the SharedXML override (SharedOverwrites.lua:17) forwards numbers to the native PlaySound. Stock 3.3.5a PlaySound only accepts sound names; the shim must map SOUNDKIT ids (UCHATSCROLLBUTTON, UCHATSCROLLBUTTON_70, CHAT_SCROLL_BUTTON) to 3.3.5a sound names or PlaySoundFile paths.",
+    "Texture:SetTexture(path, 'REPEAT', 'REPEAT') 3-argument wrap-mode form (BuildView.lua:657, EditableBuildView.lua:327) -- stock 3.3.5a FrameXML never uses it and the native ignores/rejects the extra args; harmless if extra args are ignored, but tiling of Interface\\BuildCreator\\BCBackground-<ROLE> relies on it (the XML textures use vertTile/horizTile, which stock 3.3.5a XML does support).",
+    "Widget metatable extensions: Texture:SetAtlas, Button:SetNormalAtlas/SetPushedAtlas/SetDisabledAtlas/SetHighlightAtlas/SetCheckedAtlas, Button/CheckButton:SetEnabled, CheckButton:GetBoolValue, Frame:CallScript, Region:SetShown/ClearAndSetPoint, EditBox:SetEnabled come from SharedXML/TypeExtensions/*.lua, which obtain the metatables through NATIVE GetButtonMetatable()/GetCheckButtonMetatable()/GetFrameMetatable()/GetTextureMetatable()/GetRegionMetatable()/GetEditBoxMetatable()/... (P0 UNRESOLVED). The shim must polyfill those with getmetatable(CreateFrame(type)).__index / getmetatable(frame:CreateTexture()).__index before loading TypeExtensions.",
+    "Button:IsEnabled() == 1 (BuildCategory.lua:138) relies on stock 1/nil semantics -- fine on stock.",
+    "GetCVar/SetCVar on custom cvars 'ShowFullBuildCreator' (account), 'heroArchitectAutoLearn' (character, default '1'), 'HelpTipBitfield' and 'previewCharacterAdvancementChanges' registered through NATIVE RegisterSavedCVar(name, default, isCharacter) guarded by GetCVarInfo (FrameXML/GameCVars.lua, SharedXML/Util/C_CVar.lua:28-58). Stock 3.3.5a FrameXML uses neither RegisterCVar nor GetCVarInfo; the shim must polyfill registration (or persist these in SavedVariables). GetCVar on an unregistered cvar returns nil -> C_CVar.GetBool -> false, so the UI degrades rather than errors.",
+    "GetSpellInfo(id) is called on CUSTOM spell ids: build spells / CA rank spells, mystic-enchant spells (LegendaryEnchant, RandomEnchants[].Enchant), primary-stat aura spells (PRIMARY_STATS table in FrameXML/Util/C_PrimaryStat.lua, e.g. 84864), plus stock proficiency spells from Enum.ArmorSubClassSID/WeaponSubClassSID (9078, 9077, 8737, 750, 9116, 27762-27764, 52665, 196-202, 227, 15590, 1180, 2567, 5011, 5009, 264, 266). Names/icons must resolve from the client's Spell.dbc (nil name -> blank rows; SpellIconTemplateMixin:SetSpell at panel OnLoad for STAT_STRENGTH).",
+    "GameTooltip:SetHyperlink('spell:<id>') on custom spell ids (BuildSpell.lua:156, :288) requires those spells in the client DBC.",
+    "SendAddonMessage('ASC_PATH_TO_ASCENSION', msg, 'WHISPER', UnitName('player')) whisper-to-self on every OnShow (C_Quest:SendPathToAscensionEvent); the shim transport uses the same whisper-to-self channel, so the prefix must not collide.",
+    "hooksecurefunc(C_BuildCreator, 'RateBuild', fn) at every list-item OnLoad (BuildListItem.lua:29): the namespace table and the function must exist before the first BuildListItemTemplate is created (i.e. at addon load), and it is hooked once per row (wrapper chains).",
+    "StaticPopup_Show(which, text1, text2, data) / OnAccept(self, data) -- stock-compatible; but StaticPopup_UpdateText (BuildCreatorUtil.lua:578,588) does not exist in stock 3.3.5a (StaticPopup_FindVisible does). The shim's compat layer must add the BUILD_CREATOR_* / CONFIRM_*_BUILD* / BUILD_DRAFT_ACTIVATE_CONFIRM* / CONFIRM_LEARN_S / CONFIRM_UNLEARN_S dialogs to the stock StaticPopupDialogs table and provide StaticPopup_UpdateText.",
+    "UIDropDownMenu: uses Ascension's SharedXML/UIDropDownMenu.lua (UIDropDownMenu2_OnLoad, UIDropDownMenuTemplate2, UIDropDownMenu_AddSpace, info.iconAtlas, info.tooltip, info.enabled, info.icon with tCoord*). These must override the stock FrameXML dropdown library (the shim's SharedXML loads after the MPQ FrameXML, so it wins), and ToggleDropDownMenu(1, nil, dropdown, '<frameName>', x, y) anchors by frame-name string (stock-compatible).",
+    "Font colours are ColorMixin objects: HIGHLIGHT_FONT_COLOR:WrapText/GetRGB, RED/GREEN/GRAY/NORMAL/DISABLED_FONT_COLOR, ITEM_QUALITY_COLORS[q]:WrapText/GetRGB, DIFFICULTY_COLORS[n]:WrapText, RAID_CLASS_COLORS[token]:GetRGB (CreateColor in SharedXML/SharedConstants.lua). Stock 3.3.5a defines these as plain {r,g,b} tables; the shim's SharedXML must redefine them (existing stock code still reads .r/.g/.b).",
+    "TypeExtensions used directly: table.Copy, table.invert/tinvert, string.isNilOrEmpty, string.trim (text:trim()), string.toboolean/toboolean, math.clamp, bit.contains (SharedXML/TypeExtensions/*.lua).",
+    "SecondsToTime(seconds, noSeconds, notAbbreviated, maxCount) 4-arg form -- stock 3.3.5a already supports it; Ascension re-implements in SharedXML/Util/TimeUtil.lua.",
+    "SendSystemMessage(text) (BuildView.lua:575) -- present in stock 3.3.5a FrameXML usage; fine.",
+    "ChatEdit_InsertLink('|cff00ff96|Hcabuild:<id>|h[name]|h|r') inserts a custom link type into the chat editbox; sending it requires the server/other clients to tolerate an unknown link type, and clicking it needs LinkUtil's SetItemRef hook (SharedXML/Util/HyperlinkUtil.lua).",
+    "XML attributes/elements used: parentKey, setAllPoints, vertTile/horizTile, frameLevel, toplevel, motionScriptsWhileDisabled, alphaMode, <Gradient>, <Attributes type='number'>, <FontHeight>, <HitRectInsets>, <NormalFont/HighlightFont/DisabledFont style=>, text= on Button/FontString resolving GlobalStrings keys -- all appear in stock 3.3.5a FrameXML, so the stock XML loader handles them. <Layer> without level (defaults ARTWORK) and letters='256' on EditBox are also stock.",
+    "Multiple-inheritance inherits='BorderIconTemplate, EditableBuildElementTemplate' (comma list) -- supported by the stock loader.",
+    "Frame:RegisterEvent on unknown (custom) event names errors on a stock client ('Attempt to register unknown event'); the DESIGN's EventBus metatable hook must be in place before BuildCreatorFrame OnLoad (7 custom events) and before any BuildListItemTemplate/BuildSpellTemplate instance (BUILD_CREATOR_RATE_RESULT, CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED registered in OnLoad/OnShow)."
+  ],
+  "data_files": [
+    "No LoadAscensionContentJSON / C_Content usage in this addon. All build data comes from the C_BuildCreator/C_BuildEditor natives (server-backed build catalogue: per-build record with the fields listed under C_BuildCreator.GetBuild) -- in the shim this is the BUILD LIST / BUILD GET / BUILD ACTIVATE wire verbs and the ca_build / ca_build_entry tables.",
+    "CA entry graph via C_CharacterAdvancement.GetEntryByInternalID / GetEntryBySpellID / GetInternalID / GetClassInfo / IsTalentSpellID / GetTalentRankByID / GetTalentRankBySpellID / GetQualityInfo / IsKnownSpellID / GetKnownSpells (shim: data/entries/<Class>.lua accessors + KNOWN set from ESSENCE/KNOWN verbs).",
+    "ChrSpecialization-derived data via C_ClassInfo.GetAllSpecs(classFile) / GetSpecInfo(classFile, spec) -> {Name, SpecFilename}; CharacterAdvancementUtil.GetClassFileByDBC / GetSpecFileByDBC mapping tables.",
+    "Mystic enchant metadata via C_MysticEnchant.GetEnchantInfoBySpell -> {Quality, MaxStacks, Known, RequiredLevel} (only when the character is not a CoA class and not WildCard).",
+    "Spell.dbc entries (client-side) for every spell id the UI names: build spells, mystic-enchant spells, PRIMARY_STATS aura spells (FrameXML/Util/C_PrimaryStat.lua), armor/weapon proficiency spells (Enum.ArmorSubClassSID / WeaponSubClassSID).",
+    "GlobalStrings: ~150 Ascension-only keys (HERO_ARCHITECT, HERO_ARCHITECT_TOOLTIP, CREATE_BUILD, BROWSE_BUILDS, BUILD_AUTHOR_S, BUILD_AUTHOR_S_S_AGO, BUILD_RATING_S, BUILD_UNPUBLISHED_NEEDS_FIXES, BUILD_CREATOR_ROLE_S, BUILD_CREATOR_ROLE_<TANK|HEALER|DAMAGER>, BUILD_DRAFT_TROPHY_ELIGIBLE(_TOOLTIP), BUILD_DRAFT_COMPLETED_BUILD(_TOOLTIP), CHOOSE_THIS_BUILD, RAPID_ROLL_THIS_BUILD, ACTIVATE_BUILD, DEACTIVATE_BUILD, DEACTIVATE, EDIT_BUILD, DELETE_BUILD, PUBLISH_BUILD, RESET_BUILD, ENABLE_AUTO_LEARN, PUBLISHING_BUILD, PUBLISH_BUILD_FAILED, PUBLISH_BUILD_<ERR>, CANNOT_PUBLISH_BUILD, VIEW_BUILD_ERROR, ACTIVATE_BUILD_FAILED, ACTIVATE_BUILD_<ERR>, DEACTIVATE_BUILD_FAILED, DELETE_BUILD_FAILED, DELETE_BUILD_CONFIRM(_STRING), TOGGLE_BUILDDRAFT_DISABLED, FEATURE_BECOMES_AVAILABLE_AT_LEVEL, BUILD_SPELL_COMMENT, BUILD_SPELL_FLAGS, SPELL_SET_COMMENT, SPELL_SET_CORE_ABILITY(_TOOLTIP), SPELL_SET_OPTIMAL_ABILITY(_TOOLTIP), SPELL_SET_EMPOWERING_ABILITY(_TOOLTIP), SPELL_SET_SYNERGISTIC_ABILITY(_TOOLTIP), SPELL_SET_SHOW_DRAFT(_TOOLTIP), ADD_SPELL, ADD_ENCHANT, ADD_EQUIPMENT, CHANGE_BUILD_CATEGORY, BUILD_EDITOR_CATEGORY_<LEVELING|LEVEL60PVE|LEVEL60PVP|LEVEL70PVE|LEVEL70PVP|BUILDDRAFT|BUILDDRAFTENDGAMEPVE|BUILDDRAFTENDGAMEPVP>, BUILDCREATOR_CATEGORY_<UPPERCASE Enum.BuildCategory>, BUILDCREATOR_CREATEBUTTON_<UPPERCASE Enum.BuildCreateCategory>, BUILDCREATOR_CATEGORYBUTTON_*, BUILDCREATOR_CATEGORY_HEADER_<GENERAL|PVE|PVP|CREATE>(_SHORT), BUILDCREATOR_SECTION_<OVERVIEW|SPELLS_AND_TALENTS|TALENTS|MYSTIC_ENCHANTS|PROS_AND_CONS|EQUIPMENT|ITEMIZATION|ROTATION|CONSUMABLES|MACROS|WEAKAURAS|NOTES>, BUILD_<FILTER_*> for every Enum.BuildFilter value, BUILD_<SORT_*> for every Enum.BuildSort value, BUILD_SORT_RATING, BUILD_SORT_DATE, BUILD_ORDER, BUILD_DIFFICULTY_RATING_<EASY|NORMAL|HARD|VERY_HARD|IMPOSSIBLE>, COMPLEXITY_LABEL, GENERAL_LABEL, PRIMARY_STAT, PRIMARY_STAT_%d_NAME(_COA), YOU_KNOW_THIS_SPELL, MYSTIC_ENCHANT_COLLECTED, S_COPIED_TO_CLIPBOARD, COPY_TO_CLIPBOARD, CORE, OPTIMAL, EMPOWERING, SYNERGISTIC, ACTIVE_BUILD, NO_ACTIVE_BUILD, VIEW_PVE_BUILD, VIEW_PVP_BUILD, VIEW_LEVELING_BUILD, BUILD_CREATOR_OVERVIEW_HINT, BUILD_CREATOR_PROS_AND_CONS_HINT, BUILD_CREATOR_LINK_ITEMS_HINT, BUILD_CREATOR_LINK_SPELLS_HINT, BUILD_CREATOR_WEAKAURAS_HINT, TIP_RESTORE_WIP_BUILD, BUILD_CREATOR_FEATURED_HINT, ITEM_CLASS_2, ITEM_CLASS_4, plus every StaticPopup text key above). NONE of these exist as Lua in the ui-tree (the only GlobalStrings.lua on disk is the STOCK one under stock-ui-tree, which lacks even ITEM_CLASS_2/ITEM_CLASS_4); p0-framexml-gap.json files them under 'unknown'. They must be extracted from Ascension's packaged GlobalStrings and shipped in the shim's compat layer.",
+    "Atlas definitions (SharedXML/AtlasInfo.lua) and their texture files for: buildcreator-category, buildcreator-category-highlight, buildcreator-category-art, buildcreator-category-currentbuild, buildcreator-preview, buildcreator-preview-h, buildcreator-view, buildcreator-close-background, buildcreator-class-header, !buildcreator-border-left, !buildcreator-border-right, _buildcreator-border-bottom, build-category-bg-<general|pve|pvp|create>, build-draft-border, build-draft-stat-border, build-draft-stat-highlight, professions-icon-quality-tier1..5, professions-background-summarylist, ui-lfg-roleicon-<dps|rangeddps|casterdps|tank|healer|generic|leader|pending>, primary-stat-circle-<strength|agility|stamina|intellect|spirit>, groupfinder-icon-class-<every stock and custom class>, store-category, store-category-hover, heart-icon, mechagon-projects, common-icon-checkmark, common-icon-backarrow(-disable), common-icon-forwardarrow(-disable), common-icon-redx, GarrMission_FollowerPartyBox_Sm, itemupgrade_greenplusicon, itemupgrade_slotborder, item-border-gold, quickslot-border-grey, EnchantSlotBorderKnownLegendary, EnchantSlotBorderKnownUncommon (+Enum.ECSlotBorderStylesKnown values), Garr_ListButton-Selection, spellbook-text-background, poi-workorders, auctionhouse-icon-checkmark, bluemenu-Ring.",
+    "Loose textures: Interface\\BuildCreator\\BCBackground-<TANK|HEALER|DAMAGER>, Interface\\FrameGeneral\\UI-Background-Rock2, Interface\\FrameGeneral\\UI-Background-Marble, Interface\\Common\\ShadowCircle, Interface\\PaperDollInfoFrame\\Character-Plus-BG, Interface\\Buttons\\UI-Quickslot2 (stock), Interface\\LFGFrame\\UI-LFG-ICONS-ROLEBACKGROUNDS (stock), Interface\\MacroFrame\\MacroFrame-Icon (stock), and icons Interface\\Icons\\{ability_priest_angelicfeather, inv_custom_abilityessence, inv_custom_talentessence, inv_misc_build_masters_trophy, inv_ascend_scroll_07_b, inv_MysticEnchantAltar, classicon_hero, trade_archaeology_draenei_tome, achievement_guildperk_mrpopularity_rank2, garrison_purplearmorupgrade, garrison_build, garrison_building_workshop, pvecurrency-justice, achievement_pvp_legion03, ability_bossmagistrix_timewarp2, inv_chest_chain, inv_sword_04, inv_potion_50, trade_engineering, inv_misc_note_02, spell_holy_innerfire, Mail_GMIcon, inv_darkmoon_eye, INV_Misc_QuestionMark} plus every build Icon and every C_ClassInfo SpecFilename.",
+    "ItemData.TALENT_ESSENCE / ItemData.ABILITY_ESSENCE item ids (FrameXML/Data/Items.lua) for the FINISH_PICKING_SPELLS popup icon links (Item:CreateFromID -> GetItemInfo/GetItemIcon on custom items).",
+    "IconSelectorMixin (FrameXML/UIPanelTemplates.lua:408) behind the build-icon picker uses stock GetNumMacroIcons/GetMacroIcons.",
+    "SavedVariables BuildCreatorSaved = { __version = <TOC Version number>, SavedBuilds = { [buildName] = <C_Serialize/C_Deflate printable string of the pending build> } } -- WIP builds are auto-saved on every edit of an unpublished build."
+  ],
+  "protected_actions": [
+    "None of CastSpellByID / PickupSpell (the Blizzard one) / SetBinding / RunMacro are used. BuildCreatorUtil.PickupSpell (FrameXML/Util/BuildCreatorUtil.lua:441) is a Lua drag-ghost frame, not the protected cursor API.",
+    "Learn / Unlearn from the spell dropdown (BuildSpell.lua:186-210) -> CharacterAdvancementUtil.ConfirmOrLearnID / ConfirmOrUnlearnID -> C_CharacterAdvancement.LearnID / UnlearnID natives (server packets). On the shim these become CMD LEARN / CMD UNLEARN; the confirm path goes through StaticPopups CONFIRM_LEARN_S / CONFIRM_UNLEARN_S (FrameXML/StaticPopup.lua:604,633).",
+    "Activate / Deactivate build (BuildListItem.lua:214, BuildView.lua:669,703, BuildCreator.xml:66 -> BuildCreatorUtil.ToggleBuildActive -> StaticPopups -> C_BuildCreator.ActivateBuild(buildID, autoLearn, autoLearn) / DeactivateBuild(buildID)): server teaches/removes spells; shim verb BUILD ACTIVATE.",
+    "Publish / Delete / Rate / Bookmark / Query (C_BuildEditor.PublishBuild, C_BuildCreator.DeleteBuild, RateBuild, BookmarkBuild, QueryAllBuilds, QueryBuild): server round trips answered by BUILD_CREATOR_*_RESULT events; a first release can stub Publish/Delete/Rate with an error result string.",
+    "Internal_CopyToClipboard(text) (BuildView.lua:574, Macros section copy button): native clipboard write with no stock equivalent from insecure code; fallback is to show the text in a selectable EditBox.",
+    "SendChatMessage('.buildcreator check <player> <buildID>') on Alt-click as GM (BuildListItem.lua:164): server GM command, GM-only path.",
+    "SendAddonMessage whisper-to-self on OnShow (C_Quest:SendPathToAscensionEvent) -- allowed from insecure code.",
+    "SetCVar('heroArchitectAutoLearn' / 'ShowFullBuildCreator') -- allowed from insecure code (custom cvars need registration)."
+  ],
+  "blocking_natives": [
+    "C_BuildCreator.GetNumBuilds -- must exist as a function at BuildCreatorFrame OnLoad (BuildCreator.lua:34 passes it to SetGetNumResultsFunction); nil breaks OnLoad",
+    "GetCustomGameMode() (via C_GameMode:IsGameModeActive at BuildCreator.lua:36, OnLoad)",
+    "GetRealmMaxLevel() (via GetMaxLevel at BuildCreator.lua:47, OnLoad; also every editor path)",
+    "C_AccountInfo.GetGMLevel() (via C_Player:IsGM at BuildCreator.lua:60, OnLoad)",
+    "_UnitClassBase/UnitClassBase + UnitClassMask returning the Ascension token/mask (via C_Player:IsHero/IsDefaultClass/IsCustomClass at BuildCreator.lua:388-410, OnLoad; and Collections.lua:50 to create the tab at all)",
+    "C_CharacterAdvancement.GetActiveSpecID() + C_BuildCreator.GetActiveBuild(specID) (BuildCreatorUtil.GetActiveBuildID at OnShow, BuildCreator.lua:283-284, and on every category-list refresh)",
+    "C_BuildCreator.QueryAllBuilds(category) and the BUILD_CREATOR_CATEGORY_RESULT event (OnShow -> ShowBuildList -> SetSelectedIndex(2, AlwaysSimulateClick) -> SelectCategory; without the event the frame stays on the Loading overlay forever)",
+    "C_BuildCreator.GetBuild / QueryBuild + BUILD_CREATOR_BUILD_RESULT (OnShow when an active build exists; CategoryListItem ActiveBuild row; any build view)",
+    "C_BuildCreator.UpdateFilter, GetNumBookmarkedBuilds, GetBuildAtIndex, IsUpvotedBuild, CanActivateBuild (first list render after CATEGORY_RESULT); C_BuildDraft.IsCompletedBuild for BuildDraft categories",
+    "C_BuildCreator.RateBuild -- must exist at the first BuildListItemTemplate OnLoad (hooksecurefunc target)",
+    "Frame:RegisterEvent accepting the 7 custom BUILD_CREATOR_* events at OnLoad (EventBus hook) and BUILD_CREATOR_RATE_RESULT / CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED at row creation/show",
+    "GetSpellInfo on the PRIMARY_STATS spell for Strength (EditableBuildPrimaryStatMixin:OnLoad via C_PrimaryStat:GetPrimaryStatInfo -> SpellIconTemplateMixin:SetSpell) at panel creation -- needs the custom Spell.dbc row (or a nil-tolerant SetSpell)",
+    "For the editor path additionally: C_BuildEditor.GetPendingBuild, CanPublishBuild, GetEssenceForLevel, Set*/Add*/Remove* (EditableBuildViewMixin:OnShow -> UpdatePendingBuild)"
+  ],
+  "notes": "Callsite paths: bare 'X.lua:N' are relative to the addon directory; 'FrameXML/...', 'SharedXML/...' and 'AddOns/...' are relative to ui-tree/Interface and mark transitive call sites reached from this addon through Ascension helpers. NAMESPACE ATTRIBUTION TRAP: ext-lua-bindings.tsv has NO C_BuildCreator namespace -- every C_BuildCreator method the addon calls (GetBuild, GetBuildAtIndex, GetNumBuilds, QueryAllBuilds, QueryBuild, RateBuild, IsUpvotedBuild, IsOwnedBuild, CanActivateBuild, ActivateBuild, DeactivateBuild, DeleteBuild, BookmarkBuild, GetBookmarkedBuildAtIndex, GetNumBookmarkedBuilds, GetActiveBuild, GetSpell, UpdateFilter) appears there under C_BuildEditor in a SECOND registration block (site_va 0x1010df63-0x1010e0cd, vs the editor block 0x1010d99e-0x1010dea0). No Lua defines or aliases C_BuildCreator anywhere in the tree and api-surface.tsv classifies all 18 members NATIVE/in_Extensions.dll, so treat C_BuildCreator as a native table whose dump rows were mislabelled; the shim's Namespaces.lua must create BOTH tables. The Lua 'C_' tables this addon uses (C_Player, C_GameMode, C_PrimaryStat, C_Quest in FrameXML/Util; C_CVar, C_Serialize, C_Deflate in SharedXML/Util) are pure Lua but live in Ascension FrameXML (not SharedXML) for the first four, so the shim's compat/FrameXML must carry them; they bottom out in the natives GetCustomGameMode, GetRealmMaxLevel, C_AccountInfo.GetGMLevel, _UnitClassBase, RegisterSavedCVar, C_CharacterAdvancement.IsPendingBuildAvailable/GetPendingRankByEntryID and stock UnitLevel/UnitAura/IsSpellKnown/GetCVar/SetCVar/SendAddonMessage. Three C_CharacterAdvancement members (CanLearnID, CanUnlearnID, GetQualityInfo) are Lua OVERRIDES in FrameXML/Util/GlobalOverwrites.lua that capture and wrap the native of the same name (GetQualityInfo native returns the quality NAME; the wrapper maps it through Enum.SpellQuality), so the shim must define the native first and then apply the override. FrameXML pieces this addon cannot run without (must be copied into compat/FrameXML): Util/BuildCreatorUtil.lua (indexed at FILE LOAD by BuildViewSection.lua:4, so it must load before the addon), Util/CharacterAdvancementUtil.lua (ConfirmOrLearnID/ConfirmOrUnlearnID/GetTalentRankSpellBySpellID/GetClassFileByDBC/GetSpecFileByDBC/GetBuildFromURL), Util/MysticEnchantUtil.lua, Util/SpecializationUtil.lua, Util/C_Player.lua, Util/C_GameMode.lua, Util/C_PrimaryStat.lua (+PRIMARY_STATS), Util/C_Quest.lua (SendPathToAscensionEvent only), Util/GlobalFunctions.lua (GetMaxLevel), Util/GlobalOverwrites.lua (UnitClass/UnitClassBase/UnitClassMask wrappers + CA overrides), GameCVars.lua (cvar registration), HelpTips.lua (BUILD_CREATOR_FEATURED_HINT), StaticPopup.lua (the ~19 dialogs listed under globals.StaticPopupDialogs), UIParent.lua (BuildCreator_LoadUI, GetScaledCursorPosition, OpenChallengesUI), ChatFrame.lua (ChatEdit_SetInsertTarget/ClearInsertTarget), GameTooltip.lua (GameTooltip_GenericTooltip), UIPanelTemplates.xml/.lua (RarityGemContainerTemplate + RarityGemContainerMixin, SpellButtonCoreIcon/OptimalIcon/EmpoweringIcon/SynergisticIcon, IconSelectionTemplate/IconSelectionBaseTemplate + IconSelectorMixin), FontStyles.xml is NOT needed (GameFontNormalHuge is stock; the other custom fonts are SharedXML/CustomFontStyles.xml), Data/Items.lua + Objects/Item.lua (FINISH_PICKING popup only). Everything else it inherits (RaisedPortraitFrameTemplateNoBackground, InputBlockText*, SharedButtonTemplate, SharedGoldRedButtonTemplate, SearchBoxTemplate, FilterDropDown*, StandardProportionalScrollListTemplate/ScrollListItem*, NineSlicePanelTemplate2, StandardButtonTemplate, SquareIconCheckButtonTemplate, CopyButtonTemplate, SpellIconTemplate, BorderIconTemplate, UIDropDownMenuTemplate2, InputBoxTemplate2, ScrollableMultiLineInputBoxInstructionsTemplate, CustomFontStyles, TypeExtensions, AtlasInfo, HelpTip, HyperlinkUtil, ClassInfoUtil, TextureUtil, GridLayoutUtil, TextureDolly, Pools, Mixin, FunctionUtil, TimeUtil, Enum, Const, SoundKit, SharedOverwrites (PlaySound), CallbackRegistryMixin, C_Hook) is SharedXML and ships verbatim. Load order inside the addon: BuildEditorTemplates.xml loads its four editor Lua files BEFORE BuildCreatorTemplates.xml, yet EditableBuildIconMixin/EditableBuildPrimaryStatMixin (EditableBuildIcons.lua) reference BorderIconTemplateMixin/SpellIconTemplateMixin at file scope (SharedXML, fine) and EditableBuildViewSectionMixin (BuildViewSection.lua, loaded LATER via BuildCreatorTemplates.xml) is only referenced inside OnLoad handlers, so the order works; BuildViewSection.lua's file-scope BuildCreatorUtil.DescriptionSection index is the only hard pre-load dependency. Runtime shape: OnShow always does ShowBuildCategories then either ViewBuildID(active) or ShowBuildList; ShowBuildList calls CategoryScroll:SetSelectedIndex(2, AlwaysSimulateClick) which SelectCategory()s the second category (Leveling on a non-max-level character, BuildDraft first in the list) -> QueryAllBuilds -> Loading overlay until BUILD_CREATOR_CATEGORY_RESULT; the CATEGORY_RESULT handler resets search/filters and applies ApplyDefaultClassFilter (auto-adds FILTER_CLASS_<own class>, or FILTER_CLASS_HERO). Category list contents depend on C_GameMode (WildCard swaps BuildDraft/Leveling for BuildDraftEndGamePvE/PvP), GetMaxLevel (60 vs 70 adds Level60*/Level70*), and level==max or GM or WildCard (adds None='all builds' and History). Result strings arriving in the *_RESULT events are looked up as GlobalStrings keys (_G[result] or result), so error keys need strings too. The build record's Spells entries are MUTATED by BuildCreatorUtil (TalentID/TalentRank added) -- serve plain Lua tables. Known bugs to preserve rather than fix: EditableBuildView.lua:369 passes self.spellID (nil) to IsTalentSpellID so 'Create from current build' imports nothing for default classes; BuildEditorTemplates.xml:283 names a global 'Text'; EditableBuildView.lua:314 sends a full icon path where SetIcon otherwise gets a bare file name. WildCard-mode paths (C_Wildcard.CanUseRapidRolling, WildCardRapidRollingFrame, rapid-roll button text) and the BuildDraft trophy path (OpenChallengesUI / ChallengesFrame) can be stubbed for a first release: the former is gated by GetCustomGameMode()&0x40, the latter by a hidden button. The unused BuildCategoryTemplate (column layout, C_Config.GetBoolConfig, C_CVar.GetBool('ShowFullBuildCreator')) and EditableBuildClassTabTemplate (undefined BuildClassTabMixin) are dead code in this addon."
+}

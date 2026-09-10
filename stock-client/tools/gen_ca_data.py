@@ -153,6 +153,82 @@ def load_essence(raw):
     return sorted(result, key=lambda r: r['ID'])
 
 
+
+def dbc_strings(raw):
+    rows = dbc_rows(raw)
+    count, fields, stride, size = struct.unpack_from('<4I', raw, 4)
+    block = raw[20 + count * stride:]
+    starts = {0} | {n + 1 for n, byte in enumerate(block) if byte == 0 and n + 1 < len(block)}
+    def string(offset):
+        if offset not in starts:
+            raise ValueError('DBC string does not point to a string start')
+        end = block.find(b'\0', offset)
+        if end < 0:
+            raise ValueError('unterminated DBC string')
+        return block[offset:end].decode('utf-8')
+    return rows, string
+
+
+def load_specs(raw):
+    # Verified against GetSpecInfo 0x100DAC60 in original Extensions.dll SHA256
+    # 0f8d847b3adc44a963606f0cd4f7938ad6fcd6f4d87feac3131c7153bdf3bb11.
+    # Native records collapse the localized Name/Description groups; on disk these
+    # start at columns29/46, followed by SortOrder63 and LootSpecID64.
+    rows, text = dbc_strings(raw)
+    result = []
+    for row in rows:
+        if len(row) != 65:
+            raise ValueError('unexpected ChrSpecs stride')
+        record = {'ID': row[0], 'Class': text(row[1]), 'Spec': text(row[2]),
+                  'SpecFilename': text(row[3]), 'DifficultyRating': text(row[17]),
+                  'Name': text(row[29]), 'Description': text(row[46]),
+                  'SortOrder': row[63], 'LootSpecID': row[64],
+                  'PassiveSpell': row[27], 'PassiveID': row[28]}
+        for column, name in enumerate(('Cloth', 'Leather', 'Mail', 'Plate'), 4):
+            record[name] = bool(row[column])
+        for column, name in enumerate(('MeleeDPS', 'RangedDPS', 'CasterDPS', 'Tank', 'Healer', 'Support'), 11):
+            record[name] = bool(row[column])
+        for name, start, sentinel in (('PrimaryStats', 8, 'None'), ('PrimaryResources', 18, 'NONE'), ('SecondaryResources', 21, 'NONE')):
+            record[name] = [text(v) for v in row[start:start+3] if text(v) != sentinel]
+        record['ExampleSpells'] = [v for v in row[24:27] if v]
+        result.append(record)
+    if len({r['ID'] for r in result}) != len(result):
+        raise ValueError('duplicate specialization ID')
+    return sorted(result, key=lambda r: r['ID'])
+
+
+def load_class_identities(raw, classes):
+    rows, text = dbc_strings(raw)
+    names = {}
+    displays = defaultdict(list)
+    for entry in classes:
+        name = entry['Name'].strip().casefold()
+        if name in names:
+            raise ValueError('duplicate internal CA class name')
+        names[name] = entry
+        if entry.get('Display'):
+            displays[entry['Display'].strip().casefold()].append(entry)
+    result = []
+    for row in rows:
+        if len(row) < 56:
+            raise ValueError('unexpected ChrClasses stride')
+        record = {'ID': row[0], 'Name': text(row[4]), 'Token': text(row[55])}
+        # Reborn classes share display labels with stock classes. Prefer exact
+        # internal-name/token matches; an ambiguous display label is not an ID join.
+        match = names.get(record['Token'].strip().casefold()) or names.get(record['Name'].strip().casefold())
+        if not match:
+            options = displays.get(record['Name'].strip().casefold(), [])
+            if len(options) > 1:
+                raise ValueError('ambiguous display-only class join: ' + record['Name'])
+            match = options[0] if options else None
+        if match:
+            record.update(CAClassTypeID=match['ID'], CAClassName=match['Name'])
+        result.append(record)
+    if not any(r['ID'] > 11 for r in result):
+        raise ValueError('stock ChrClasses decoy: no custom class bytes')
+    return sorted(result, key=lambda r: r['ID'])
+
+
 def lua(value):
     if value is None:
         return 'nil'
@@ -188,7 +264,8 @@ CREATE TABLE IF NOT EXISTS ca_dataset (dataset VARCHAR(64) NOT NULL PRIMARY KEY,
 CREATE TABLE IF NOT EXISTS ca_entry (dataset VARCHAR(64) NOT NULL, entry INT UNSIGNED NOT NULL, class_name VARCHAR(80) NOT NULL, tab_name VARCHAR(80) NOT NULL, required_level INT NULL, ae_cost INT NULL, te_cost INT NULL, harvested TINYINT NOT NULL, data_json MEDIUMTEXT NOT NULL, PRIMARY KEY(dataset,entry)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS ca_spell (dataset VARCHAR(64) NOT NULL, entry INT UNSIGNED NOT NULL, rank_index INT UNSIGNED NOT NULL, spell INT UNSIGNED NOT NULL, PRIMARY KEY(dataset,entry,rank_index)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS ca_edge (dataset VARCHAR(64) NOT NULL, entry INT UNSIGNED NOT NULL, kind VARCHAR(24) NOT NULL, ordinal INT UNSIGNED NOT NULL, target INT UNSIGNED NOT NULL, resolved TINYINT NOT NULL, PRIMARY KEY(dataset,entry,kind,ordinal)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS ca_essence (id INT UNSIGNED NOT NULL PRIMARY KEY, level INT UNSIGNED NOT NULL, family INT UNSIGNED NOT NULL, match1 INT UNSIGNED NOT NULL, match2 INT UNSIGNED NOT NULL, match3 INT UNSIGNED NOT NULL, match4 INT UNSIGNED NOT NULL, ae INT UNSIGNED NOT NULL, te INT UNSIGNED NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS ca_essence (dataset VARCHAR(64) NOT NULL, id INT UNSIGNED NOT NULL, level INT UNSIGNED NOT NULL, family INT UNSIGNED NOT NULL, match1 INT UNSIGNED NOT NULL, match2 INT UNSIGNED NOT NULL, match3 INT UNSIGNED NOT NULL, match4 INT UNSIGNED NOT NULL, ae INT UNSIGNED NOT NULL, te INT UNSIGNED NOT NULL, PRIMARY KEY(dataset,id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS ca_reference (dataset VARCHAR(64) NOT NULL, kind VARCHAR(24) NOT NULL, id INT UNSIGNED NOT NULL, data_json MEDIUMTEXT NOT NULL, PRIMARY KEY(dataset,kind,id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 START TRANSACTION;
 '''
 
@@ -238,7 +315,7 @@ def assemble(groups, dbcs, essence, sources):
         outputs[base + 'entries.json'] = canonical(entries) + '\n'
         outputs[base + 'gaps.json'] = canonical(gaps) + '\n'
         outputs[base + 'manifest.json'] = canonical(metadata) + '\n'
-        tables = {'classes': dbcs['classes'], 'tabs': dbcs['tabs'], 'categories': dbcs['categories'], 'essence': essence}
+        tables = {'classes': dbcs['classes'], 'tabs': dbcs['tabs'], 'categories': dbcs['categories'], 'essence': essence, 'specs': dbcs['specs'], 'classIdentities': dbcs['classIdentities']}
         outputs[base + 'tables.json'] = canonical(tables) + '\n'
         prefix = '-- Generated by gen_ca_data.py; do not hand-edit.\n'
         outputs[base + 'lua/Initialize.lua'] = prefix + 'assert(ASC and ASC.Data, "Ascension data core must load first")\nASC.Data.BeginDataset(' + lua(metadata) + ')\n'
@@ -268,7 +345,7 @@ def assemble(groups, dbcs, essence, sources):
         outputs[base + 'load-order.txt'] = '\n'.join(load_order) + '\n'
         sql = [SQL_HEADER]
         skey = sql_text(key)
-        for table in ('ca_edge', 'ca_spell', 'ca_entry', 'ca_dataset'):
+        for table in ('ca_edge', 'ca_spell', 'ca_entry', 'ca_essence', 'ca_reference', 'ca_dataset'):
             sql.append('DELETE FROM %s WHERE dataset=%s;\n' % (table, skey))
         sql.append('INSERT INTO ca_dataset VALUES (%s,%s,%s,%s);\n' % (skey, sql_text(group['realm']), sql_text(group['mode']), sql_text(content_hash)))
         for record in entries:
@@ -283,7 +360,15 @@ def assemble(groups, dbcs, essence, sources):
         # Preserve all matching-flag rows; callers choose a matching curve explicitly.
         for r in essence:
             values = ','.join(str(r[k]) for k in ('ID', 'Level', 'Family', 'Match1', 'Match2', 'Match3', 'Match4', 'AE', 'TE'))
-            sql.append('REPLACE INTO ca_essence VALUES (' + values + ');\n')
+            sql.append('INSERT INTO ca_essence VALUES (' + skey + ',' + values + ');\n')
+        for kind in ('classes', 'tabs', 'categories', 'specs', 'classIdentities'):
+            seen_ids = set()
+            for record in tables[kind]:
+                rid = integer(record['ID'], kind + ' ID')
+                if rid in seen_ids:
+                    raise ValueError('duplicate reference ID in ' + kind)
+                seen_ids.add(rid)
+                sql.append('INSERT INTO ca_reference VALUES (%s,%s,%d,%s);\n' % (skey, sql_text(kind), rid, sql_text(canonical(record))))
         sql.append('COMMIT;\n')
         outputs[base + 'world-staging.sql'] = ''.join(sql)
         summaries.append(metadata)
@@ -327,16 +412,20 @@ def main():
     ap.add_argument('--harvest', type=Path, required=True)
     ap.add_argument('--dbc-export', type=Path, required=True)
     ap.add_argument('--essence-dbc', type=Path, required=True)
+    ap.add_argument('--specs-dbc', type=Path, required=True)
+    ap.add_argument('--chrclasses-dbc', type=Path, required=True)
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--verify', action='store_true', help='compare deterministic outputs without writing')
     args = ap.parse_args()
     sources = {}
-    for source in (args.harvest.parent, args.dbc_export, args.essence_dbc.parent):
+    for source in (args.harvest.parent, args.dbc_export, args.essence_dbc.parent, args.specs_dbc.parent, args.chrclasses_dbc.parent):
         if args.out.resolve().is_relative_to(source.resolve()) or source.resolve().is_relative_to(args.out.resolve()):
             ap.error('output and source directories must be disjoint')
     groups = load_harvest(read_source(args.harvest, 'advancement.tsv', sources))
     dbcs = {name: json.loads(read_source(args.dbc_export / (name + '.json'), name + '.json', sources)) for name in ('entries', 'classes', 'tabs', 'categories')}
     essence = load_essence(read_source(args.essence_dbc, 'CharacterAdvancementEssence.dbc', sources))
+    dbcs['specs'] = load_specs(read_source(args.specs_dbc, 'ChrSpecs.dbc', sources))
+    dbcs['classIdentities'] = load_class_identities(read_source(args.chrclasses_dbc, 'ChrClasses.dbc', sources), dbcs['classes'])
     outputs = assemble(groups, dbcs, essence, sources)
     write_outputs(args.out, outputs, args.verify)
     manifest = json.loads(outputs['generation.json'])

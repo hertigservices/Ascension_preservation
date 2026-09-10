@@ -1,0 +1,344 @@
+{
+  "target": "Ascension_Collections",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": [],
+    "saved_variables": [],
+    "files_in_order": [
+      "CollectionsTabMixin.lua",
+      "Collections.xml",
+      "Collections.lua (loaded by <Script file=\"Collections.lua\"/> at Collections.xml:3, i.e. before the XML templates/frames in that file are parsed)"
+    ],
+    "interface": "30300",
+    "loaded_at_startup_anyway": "LoadOnDemand:1 is moot: AscensionUI.toc:6 declares '## Dependencies: Ascension_Collections' and Ascension_SkillCards (not LoD) depends on it too, so the stock loader pulls it in at login before both. FrameXML/MainMenuBarMicroButtons.lua:63 and :181 index the global 'Collections' unconditionally inside UpdateMicroButtons/CheckUnspentEssences, so the frame MUST exist before the first UpdateMicroButtons call."
+  },
+  "entry_points": [
+    "User path: TalentMicroButton OnClick -> ToggleCollections() (FrameXML/MainMenuBarMicroButtons.xml:265; ToggleCollections defined at FrameXML/UIParent.lua:655). It hides the panel if shown; else picks the tab: IsCustomClass() and UnitLevel('player')<10 -> Collections.Tabs.Vanity; C_GameMode:IsGameModeActive(Enum.GameMode.BuildDraft) -> Tabs.HeroArchitect; otherwise Tabs.CharacterAdvancement. Note: this button OnClick lives in Ascension's MODIFIED FrameXML; the stock MPQ FrameXML's TalentMicroButton calls ToggleTalentFrame(), so a shim over stock FrameXML must re-point that button (or hook ToggleTalentFrame) itself. There is no keybinding (no loose Bindings.xml; stock TOGGLETALENTS -> ToggleTalentFrame which in Ascension's UIParent.lua:646 only handles pet talents) and no slash command.",
+    "Programmatic path: Collections:GoToTab(id) (Collections.lua:181) = ShowUIPanel(self) + SelectTabID(id) + UpdateMicroButtons(). Callers: FrameXML/UIParent.lua:568,572,577 (ShowAppearanceWardrobe/ShowAppearanceCategory/TryOnAppearance -> Tabs.Wardrobe), UIParent.lua:597 (ShowSkillCards -> Tabs.SkillCards), FrameXML/StaticPopup.lua:116 (CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES button3 -> CharacterAdvancement), StaticPopup.lua:859,871 (BUILD_CREATOR_FINISH_PICKING_SPELLS/ENCHANTS -> HeroArchitect), FrameXML/Util/EnchantCollectionUtil.lua:875,889,898,902,920 (-> MysticEnchants), FrameXML/Util/TokenUtil.lua:169 (-> CharacterAdvancement), SharedXML/Util/HyperlinkUtil.lua:543 (-> HeroArchitect), AddOns/AscensionUI/BuildCreatorHelp/BuildCreatorHelpFreepick.lua:14,24, AddOns/AscensionUI/Gossips/PrestigeMode.lua:1103, AddOns/Ascension_BuildCreator/BuildEditor/BuildEditorTemplates.xml:380,431, BuildListItem.lua:209, BuildView.lua:664, AddOns/Ascension_VanityCollection/VanityStore.lua:469,476, AddOns/Ascension_WildCard/RapidRolling/RapidRollingDropDown.lua:16. DESIGN.md verification step 3 uses Collections:GoToTab(Collections.Tabs.CharacterAdvancement).",
+    "Auto-open: CollectionsMixin:PLAYER_LEVEL_UP (Collections.lua:195) - registered at OnLoad only when IsCustomClass() and C_Player:GetLevel() < COA_AUTO_SHOW_TALENTS_LEVEL (10). When the new level >= 10 it queues (Timer.AfterCombat -> Timer.After(2) -> C_PopupQueue:Add) a GoToTab(Collections.Tabs.CharacterAdvancement) and unregisters itself.",
+    "Panel registration: UIPanelWindows['Collections'] = { area='center', pushable=0, whileDead=1, allowOtherPanels=true, dontCloseForNonCenterPanels=true } at FrameXML/UIParent.lua:57. ShowUIPanel/HideUIPanel therefore route through the stock secure FramePositionDelegate; the two extra keys are consumed only by Ascension's edited UIParent.lua:2033 (stock UIParent ignores them - see stock_api_assumptions).",
+    "Tab ids: Collections.Tabs.{CharacterAdvancement, HeroArchitect, SkillCards, Vanity, MysticEnchants, Wardrobe} are numeric ids assigned by TabSystemMixin:AddTab in insertion order and depend on the character (HeroArchitect+SkillCards only when C_Player:IsHero(); MysticEnchants only when not IsCustomClass()). Never hardcode them; the field is nil for absent tabs.",
+    "Combat: PLAYER_REGEN_DISABLED -> HideUIPanel(Collections) (Collections.lua:165). Mouse-down anywhere on the frame calls CloseDropDownMenus() and ForcedPrimaryStatFrame:OnPrimaryStatSelected() if that frame is visible (Collections.xml:47-52)."
+  ],
+  "namespaces": {
+    "C_GameMode": {
+      "IsGameModeActive": {
+        "callsites": [
+          "Collections.lua:4",
+          "Collections.lua:150",
+          "Interface/FrameXML/UIParent.lua:586 (ShowSkillCards, opener)",
+          "Interface/FrameXML/UIParent.lua:663 (ToggleCollections, opener)"
+        ],
+        "args": "(mode:number, ... ) - one or more Enum.GameMode bit values (WildCard=0x40, Draft=0x08, BuildDraft=0x800); varargs",
+        "returns": "boolean scalar: true if bit.contains(GetCustomGameMode(), mode) for any argument, else false. Callers use it only as a truth value (show/hide SkillCards tab, hide MysticEnchants tab, pick opener tab).",
+        "sync": "sync (polls the native GetCustomGameMode() bitmask every call; the addon does not listen to ASCENSION_CUSTOM_GAME_MODE_CHANGED / GAME_MODE_UPDATE)",
+        "defined_in_lua": "Interface/FrameXML/Util/C_GameMode.lua:11",
+        "native_underneath": "GetCustomGameMode() - Extensions.dll native (api-surface: NATIVE, in_Extensions.dll=Y; ext-lua-bindings lists it under 'C_SpellActivationOverlay' fn_va 0x1031eff0, which is a site-adjacency artifact: the code calls it as a bare global). Returns an integer bitmask of Enum.GameMode values, 0 = None. Absent from stock 12340 (string scan)."
+      }
+    },
+    "C_Player": {
+      "GetLevel": {
+        "callsites": ["Collections.lua:12", "Collections.lua:133"],
+        "args": "()",
+        "returns": "number scalar: C_Player.currentLevel (cached from PLAYER_LEVEL_UP/PLAYER_ENTERING_WORLD via C_Hook) or UnitLevel('player'). Compared against COA_AUTO_SHOW_TALENTS_LEVEL (10).",
+        "sync": "sync",
+        "defined_in_lua": "Interface/FrameXML/Util/C_Player.lua:18",
+        "native_underneath": "UnitLevel (stock)"
+      },
+      "IsHero": {
+        "callsites": ["Collections.lua:49"],
+        "args": "()",
+        "returns": "boolean scalar; decides whether the Hero Architect and Skill Card tabs exist at all. = IsHeroClass('player') = select(2, UnitClassBase('player')) == 'HERO'.",
+        "sync": "sync",
+        "defined_in_lua": "Interface/FrameXML/Util/C_Player.lua:51 (IsHeroClass at Interface/SharedXML/SharedConstants.lua:55)",
+        "native_underneath": "UnitClassBase (stock native, present in 12340) - but must return the token 'HERO' for classless characters; see stock_api_assumptions"
+      }
+    },
+    "C_PopupQueue": {
+      "Add": {
+        "callsites": ["Collections.lua:202"],
+        "args": "(frame:Frame, show:function|nil, isDone:function|nil, pos:number|nil) - here (self, function() self:GoToTab(Collections.Tabs.CharacterAdvancement) end, function() return not self:IsVisible() end)",
+        "returns": "nothing; queues an item processed by C_PopupQueue.Frame's OnUpdate (shows when no AchievementAlertFrame is visible, dequeues when isDone() or frame hidden)",
+        "sync": "sync (deferred execution on OnUpdate)",
+        "defined_in_lua": "Interface/FrameXML/Util/C_PopupQueue.lua:52",
+        "native_underneath": "none (CreateFrame OnUpdate; reads MAX_ACHIEVEMENT_ALERTS and AchievementAlertFrame<i> from stock FrameXML AlertFrames)"
+      }
+    },
+    "C_Config": {
+      "GetBoolConfig": {
+        "callsites": [
+          "Interface/FrameXML/UIParent.lua:337 (CharacterAdvancement_LoadUI, installed as the CA tab's PreClick at Collections.lua:42; reached only when the character is neither IsCustomClass() nor IsDefaultClass(), i.e. HERO)"
+        ],
+        "args": "(key:string) - 'CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED'",
+        "returns": "boolean or nil scalar; nil or true (or global CA_FORCE_LEGACY) -> UIParentLoadAddOn('Ascension_CharacterAdvancementSeason9'), false -> UIParentLoadAddOn('Ascension_CharacterAdvancement')",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "native_underneath": "Extensions.dll native (ext-lua-bindings fn_va 0x10198370). Not called from this addon's files, but it is on the click path of its first tab for HERO characters."
+      }
+    }
+  },
+  "globals": {
+    "IsCustomClass": {
+      "callsites": ["Collections.lua:4", "Collections.lua:12", "Collections.lua:37", "Collections.lua:78", "Collections.lua:133", "Interface/FrameXML/UIParent.lua:328,661 (openers)"],
+      "args": "(unit:string|nil) - nil means 'player'",
+      "returns": "boolean: InGlue() and false, else bit.contains(Enum.ClassMask.COA (0xFFFFF800), UnitClassMask(unit)). Decides CoATalentFrame-vs-CharacterAdvancement panel, whether the MysticEnchants tab exists, the level-10 gate and the PLAYER_LEVEL_UP registration - all evaluated ONCE at OnLoad (tab set is frozen then).",
+      "defined_in_lua": "Interface/SharedXML/SharedConstants.lua:39",
+      "native_underneath": "UnitClassBase (stock) via GlobalOverwrites.lua:94 UnitClassBase wrapper -> Enum.ClassMask[token]. If the token is unknown (stock client with a CoA class byte) the mask is nil and bit.band(x, nil) raises 'number expected, got nil'."
+    },
+    "GetCustomGameMode": {
+      "callsites": ["Interface/FrameXML/Util/C_GameMode.lua:12,24,32 (reached from Collections.lua:4,150)"],
+      "args": "()",
+      "returns": "number bitmask of Enum.GameMode",
+      "defined_in_lua": null
+    },
+    "GetUIScale": {
+      "callsites": ["Collections.lua:19"],
+      "args": "()",
+      "returns": "number = UIParent:GetEffectiveScale(); if > 0.9 the frame is scaled by 1-(scale-0.9) (cosmetic shrink)",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:3969 (asc-fx; must be in the shim's compat/FrameXML)"
+    },
+    "UpdateMicroButtons": {
+      "callsites": ["Collections.lua:129", "Collections.lua:162", "Collections.lua:188"],
+      "args": "(level:number|nil)",
+      "returns": "nothing. Stock FrameXML also defines it (stock-fx) so the call cannot nil-error; Ascension's version (FrameXML/MainMenuBarMicroButtons.lua:88) additionally pushes TalentMicroButton when Collections:IsShown() and hides UNSPENT_*_ESSENCE_NEW help tips - a shim on stock FrameXML must hook UpdateMicroButtons to reproduce the pushed state.",
+      "defined_in_lua": "Interface/FrameXML/MainMenuBarMicroButtons.lua:88"
+    },
+    "MixinAndLoadScripts": {
+      "callsites": ["Collections.xml:17", "Collections.xml:44"],
+      "args": "(target:Frame, ...mixinNamesOrTables)",
+      "returns": "target; copies every key, SetScript()s keys the frame HasScript() for (so CollectionsMixin.OnLoad/OnShow/OnHide and CollectionsTabMixin.OnLoad/OnMouseDown/OnMouseUp/OnHide become frame scripts, replacing the XML OnLoad), then calls mixin.OnLoad(target)",
+      "defined_in_lua": "Interface/SharedXML/Util/Mixin.lua:152"
+    },
+    "OnEventToMethod": {
+      "callsites": ["Collections.xml:46 (<OnEvent function=\"OnEventToMethod\"/>)"],
+      "args": "(self, event, ...)",
+      "returns": "dispatches to self[event](self, ...) -> CollectionsMixin:PLAYER_REGEN_DISABLED() / :PLAYER_LEVEL_UP(level)",
+      "defined_in_lua": "Interface/SharedXML/SharedConstants.lua:87"
+    },
+    "CreateFromMixins": {
+      "callsites": ["Collections.lua:1", "CollectionsTabMixin.lua:1"],
+      "args": "(...mixins)",
+      "returns": "new table with the mixins' keys copied",
+      "defined_in_lua": "Interface/SharedXML/Util/Mixin.lua:177"
+    },
+    "TabSystemMixin": {
+      "callsites": ["Collections.lua:1", "Collections.lua:27"],
+      "args": "mixin table (CreateFromMixins(CallbackRegistryMixin)); methods used: OnLoad, SetTabTemplate, SetTabSelectedSound, SetTabPoint, RegisterCallback, AddTab, GetPanelForTabID, UpdateTabLayout, HideCurrentPanel, GetTabByID, ShowTabID, HideTabID, GetCurrentTabID, SelectTabID",
+      "returns": "n/a. Internally uses CreateFramePool (SharedXML/Pools.lua:197), Region:ClearAndSetPoint, Region:SetShown, PlaySound(self.tabSelectedSound), CallbackRegistryMixin:TriggerEvent",
+      "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemMixin.lua:41"
+    },
+    "TabSystemTabMixin": {
+      "callsites": ["CollectionsTabMixin.lua:1"],
+      "args": "mixin table; methods used by this addon: SetTextPadding, IsTabEnabled, SetTabEnabled(enabled, tooltipTitle, ...), SetTooltip(title, ...), GetTabID, SetPreClick(fn), plus internal Init/SetTabText/UpdateWidth/OnEnter/OnLeave/OnClick/SetTabSelected",
+      "returns": "n/a. SetTabSelected/SetTabEnabled call self:SetEnabled(bool) (Lua Button/CheckButton extension, SharedXML/TypeExtensions/Button.lua:13-14; NOT in stock 12340), self:SetChecked (stock), GameTooltip:IsOwned (stock), DISABLED_FONT_COLOR:WrapText / HIGHLIGHT_FONT_COLOR:WrapText / RED_FONT_COLOR:WrapText (ColorMixin, Lua)",
+      "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:1"
+    },
+    "SOUNDKIT": {
+      "callsites": ["Collections.lua:29 (CHARACTER_SHEET_TAB_70 = 681)", "Collections.lua:125 (CHARACTER_SHEET_OPEN_70 = 679)", "Collections.lua:160 (CHARACTER_SHEET_CLOSE_70 = 680)"],
+      "args": "table of numeric sound-kit ids (some entries are arrays of ids)",
+      "returns": "numbers handed to PlaySound",
+      "defined_in_lua": "Interface/SharedXML/Util/SoundKit.lua:1"
+    },
+    "PlaySound": {
+      "callsites": ["Collections.lua:125", "Collections.lua:160", "Interface/SharedXML/TabSystem/TabSystemMixin.lua:246 (tab select sound)"],
+      "args": "(soundFileOrKitId:number|string|table, dontAllowMultiple:boolean|nil, chanellingSound:boolean|nil)",
+      "returns": "nothing; the Lua override unwraps array kits and forwards the NUMBER to the captured native _PlaySound - stock 12340 PlaySound wants a sound NAME string, see stock_api_assumptions",
+      "defined_in_lua": "Interface/SharedXML/Util/SharedOverwrites.lua:17 (override of the stock native)"
+    },
+    "COA_AUTO_SHOW_TALENTS_LEVEL": {
+      "callsites": ["Collections.lua:12", "Collections.lua:133", "Collections.lua:196"],
+      "args": "constant",
+      "returns": "10",
+      "defined_in_lua": "Interface/FrameXML/Constants.lua:5 (asc-fx)"
+    },
+    "Enum": {
+      "callsites": ["Collections.lua:4 (Enum.GameMode.WildCard)", "Collections.lua:150 (Enum.GameMode.WildCard, Enum.GameMode.Draft)"],
+      "args": "Enum.GameMode = {None=0, Random=1, Ironman=2, Survivalist=4, Draft=8, Resolute=0x20, WildCard=0x40, Felforged=0x80, Nightmare=0x100, FreepickRarities=0x400, BuildDraft=0x800, Crusader=0x1000}; Enum.Class (WARRIOR=1..DRUID=11, HERO=10, BARBARIAN=12..SPIRITMAGE=32) and Enum.ClassMask (HERO=0x200, DEFAULT=0x5FF, COA=0xFFFFF800) are read by IsCustomClass/IsHeroClass",
+      "returns": "constants",
+      "defined_in_lua": "Interface/SharedXML/Enum.lua:34 (GameMode at :746, Class at :48, ClassMask at :86)"
+    },
+    "Timer": {
+      "callsites": ["Collections.lua:200 (Timer.AfterCombat(fn))", "Collections.lua:201 (Timer.After(2, fn))"],
+      "args": "AfterCombat(callback) - runs now unless C_Player:InCombat() (UnitAffectingCombat or InCombatLockdown) or C_Player:IsDead(), else on PLAYER_REGEN_ENABLED/PLAYER_UNGHOST/PLAYER_ALIVE; After(seconds, callback)",
+      "returns": "AfterCombat returns a waiter or nil; After returns nothing",
+      "defined_in_lua": "Interface/SharedXML/Util/Timer.lua:132 and :127 (frame 'AscensionTimer' OnUpdate driven, no C_Timer native)"
+    },
+    "HelpTip": {
+      "callsites": ["Collections.lua:156 (HelpTip:Acknowledge('WARDROBE_CHANGE_TRANSMOG_HINT'))"],
+      "args": "Acknowledge(parentOrHelpTipKey:string|Frame|function, text:string|nil)",
+      "returns": "nothing; for a string key it indexes the GLOBAL table HelpTips (FrameXML/HelpTips.lua:515 defines WARDROBE_CHANGE_TRANSMOG_HINT anchored to TalentMicroButton) - if HelpTips itself is nil this line raises an index error on every OnShow; if only the key is missing it returns early",
+      "defined_in_lua": "Interface/SharedXML/HelpTip.lua:322 (HelpTips table: Interface/FrameXML/HelpTips.lua, asc-fx)"
+    },
+    "MysticEnchantUtil": {
+      "callsites": ["Collections.lua:140 (MysticEnchantUtil.HasUnlockedEnchantTab())"],
+      "args": "()",
+      "returns": "constant true (stub) - enables the Mystic Enchant tab for every non-custom class",
+      "defined_in_lua": "Interface/FrameXML/Util/MysticEnchantUtil.lua:81"
+    },
+    "CharacterAdvancement_LoadUI": {
+      "callsites": ["Collections.lua:42 (tab PreClick)"],
+      "args": "()",
+      "returns": "nothing; IsCustomClass() -> UIParentLoadAddOn('Ascension_CoATalents'); IsDefaultClass() -> 'Ascension_CharacterAdvancement'; else C_Config.GetBoolConfig('CONFIG_LEGACY_CHARACTER_ADVANCEMENT_ENABLED') / CA_FORCE_LEGACY chooses 'Ascension_CharacterAdvancementSeason9' vs 'Ascension_CharacterAdvancement'",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:327"
+    },
+    "BuildCreator_LoadUI": {
+      "callsites": ["Collections.lua:53"],
+      "args": "()",
+      "returns": "nothing; if C_Player:IsMaxLevel() or C_Player:IsPrestiged() (HasAura 9930831) sets C_CVar.Set('ShowFullBuildCreator','1') then UIParentLoadAddOn('Ascension_BuildCreator')",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:351"
+    },
+    "SkillCards_LoadUI": {
+      "callsites": ["Collections.lua:62"],
+      "args": "()",
+      "returns": "UIParentLoadAddOn('Ascension_SkillCards')",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:375"
+    },
+    "VanityCollection_LoadUI": {
+      "callsites": ["Collections.lua:71"],
+      "args": "()",
+      "returns": "UIParentLoadAddOn('Ascension_VanityCollection')",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:411"
+    },
+    "MysticEnchant_LoadUI": {
+      "callsites": ["Collections.lua:80"],
+      "args": "()",
+      "returns": "UIParentLoadAddOn('Ascension_EnchantCollection')",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:433"
+    },
+    "AppearanceUI_LoadUI": {
+      "callsites": ["Collections.lua:89"],
+      "args": "()",
+      "returns": "UIParentLoadAddOn('Ascension_AppearanceUI')",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:407"
+    },
+    "ShowUIPanel / HideUIPanel": {
+      "callsites": ["Collections.lua:186 (ShowUIPanel(self))", "Collections.lua:166 (HideUIPanel(self))"],
+      "args": "(frame[, force]) / (frame[, skipSetPoint])",
+      "returns": "stock-fx; because UIPanelWindows['Collections'].area='center' both go through the secure FramePositionDelegate attributes",
+      "defined_in_lua": "Interface/FrameXML/UIParent.lua:2653 / :2669 (stock FrameXML has the same functions)"
+    },
+    "Draft": {
+      "callsites": ["Collections.lua:126-127 (guarded: if Draft then Draft:HideCards() end)"],
+      "args": "Draft:HideCards(invalidate)",
+      "returns": "nothing; Draft is Ascension_Draft's private addon table exported as a global (AddOns/Ascension_Draft/Draft.lua:1 'Draft = select(2, ...)', HideCards at :213); safe when the addon is absent",
+      "defined_in_lua": "Interface/AddOns/Ascension_Draft/Draft.lua:1"
+    },
+    "ForcedPrimaryStatFrame": {
+      "callsites": ["Collections.xml:49-50 (guarded)"],
+      "args": "ForcedPrimaryStatFrame:OnPrimaryStatSelected()",
+      "returns": "nothing; frame from LoD addon Ascension_ForcedPrimaryStat (PrimaryStat.xml:44); nil-safe",
+      "defined_in_lua": "Interface/AddOns/Ascension_ForcedPrimaryStat/PrimaryStat.xml:44"
+    },
+    "MainMenuBarOverlayFrame": {
+      "callsites": ["Collections.lua:124"],
+      "args": "MainMenuBarOverlayFrame:GetFrameLevel()",
+      "returns": "number; stock 3.3.5a FrameXML frame (MainMenuBar.xml) - used to pin the panel's frame level (workaround for a toplevel/layout-cache level-climb bug, see comment at Collections.lua:120-123)",
+      "defined_in_lua": "stock FrameXML"
+    },
+    "GRAY_FONT_COLOR / YELLOW_FONT_COLOR": {
+      "callsites": ["CollectionsTabMixin.lua:6", "CollectionsTabMixin.lua:33", "CollectionsTabMixin.lua:37"],
+      "args": ":GetRGB()",
+      "returns": "r, g, b (3 numbers). Stock 3.3.5a defines these as plain {r,g,b} tables without methods; Ascension redefines them with CreateColor (ColorMixin) in SharedXML/SharedConstants.lua ~:95+ / SharedXML/Util/ColorUtil.lua:43",
+      "defined_in_lua": "Interface/SharedXML/SharedConstants.lua (CreateColor redefinitions) + Interface/SharedXML/Util/ColorUtil.lua:43 (ColorPrototype:GetRGB)"
+    },
+    "GlobalStrings (14 custom)": {
+      "callsites": ["Collections.lua:38,40,44 CHARACTER_ADVANCEMENT, CHARACTER_ADVANCEMENT_TOOLTIP", "Collections.lua:52,55 HERO_ARCHITECT, HERO_ARCHITECT_TOOLTIP", "Collections.lua:61,64 UNLOCK_SKILL_CARDS_TITLE, BOOSTER_TAB_SUBTEXT", "Collections.lua:70,73 VANITY, VANITY_TOOLTIP", "Collections.lua:79,82 MYSTIC_ENCHANT, MYSTIC_ENCHANT_TOOLTIP", "Collections.lua:88,91 WARDROBE, WARDROBE_TOOLTIP", "Collections.lua:133 FEATURE_BECOMES_AVAILABLE_AT_LEVEL (format with %d)", "Collections.lua:140 MYSTIC_ENCHANTING_ALTAR_UNLOCK (format with 60)"],
+      "args": "string constants",
+      "returns": "Not defined in ANY loose Lua/XML under the Interface tree (P0 gap file puts them in the 'unknown' bucket; 'VANITY' only collides with an unrelated enum value VANITY=6 in FrameXML/Util/GlobalFunctions.lua:83). They come from Ascension's GlobalStrings.lua inside its locale MPQ, which the stock package will not carry - the shim's compat layer must define all 14 or every tab label/tooltip is nil (AddTab -> SetTabText -> FontString:SetText(nil) is tolerated, but format(nil, 10) at line 133/140 raises 'bad argument #1 to format').",
+      "defined_in_lua": null
+    },
+    "UnitClassBase (wrapped)": {
+      "callsites": ["Interface/FrameXML/Util/GlobalOverwrites.lua:93-96 (captured as _UnitClassBase at file load, re-exported returning 4 values; reached from IsCustomClass/IsHeroClass on Collections.lua:4,12,37,49,78,133)"],
+      "args": "(unit:string)",
+      "returns": "className, classToken, Enum.Class[token], Enum.ClassMask[token]. Stock native present in 12340 (string scan) but only ever returns stock tokens; the shim must override the native BEFORE GlobalOverwrites.lua captures it so 'HERO' / CoA tokens (TINKER etc.) come back.",
+      "defined_in_lua": "Interface/FrameXML/Util/GlobalOverwrites.lua:94 (wrapper over the stock native)"
+    },
+    "GetFrameMetatable / GetTextureMetatable / GetButtonMetatable / GetCheckButtonMetatable": {
+      "callsites": ["Interface/SharedXML/TypeExtensions/Region.lua (via ExtendedTypes), Texture.lua:1, Button.lua:1-2, Frame.lua:2 - these files define Region:SetShown/ClearAndSetPoint/SetPointOffset, Texture:SetAtlas, Button:SetEnabled that the tab system uses on every AddTab/SelectTab"],
+      "args": "()",
+      "returns": "the widget metatable (__index is the method table). Ascension-exe natives: absent from stock 12340 (string scan), absent from ext-lua-bindings (not Extensions.dll either), P0 bucket 'unknown'. The shim can supply them as getmetatable(CreateFrame(type)) / getmetatable(CreateFrame('Frame'):CreateTexture()).",
+      "defined_in_lua": null
+    }
+  },
+  "widget_methods": {
+    "SetTextPadding": { "callsites": ["CollectionsTabMixin.lua:4"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:118" },
+    "IsTabEnabled": { "callsites": ["CollectionsTabMixin.lua:14", "CollectionsTabMixin.lua:21"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:68" },
+    "SetTabEnabled (tab)": { "callsites": ["Collections.lua:133", "Collections.lua:140"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:37" },
+    "SetTooltip": { "callsites": ["Collections.lua:44", "Collections.lua:55", "Collections.lua:64", "Collections.lua:73", "Collections.lua:82", "Collections.lua:91"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:72" },
+    "GetTabID": { "callsites": ["Collections.lua:45", "Collections.lua:56", "Collections.lua:65", "Collections.lua:74", "Collections.lua:83", "Collections.lua:92"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:160" },
+    "SetPreClick": { "callsites": ["Collections.lua:42", "Collections.lua:53", "Collections.lua:62", "Collections.lua:71", "Collections.lua:80", "Collections.lua:89"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:168" },
+    "SetIcon (tab -> BorderIcon)": { "callsites": ["Collections.lua:43,54,63,72,81,90 -> CollectionsTabMixin.lua:9-11 -> self.Icon:SetIcon"], "defined_in_lua": "CollectionsTabMixin.lua:9 wrapping Interface/SharedXML/SharedTemplates.lua:23 (BorderIconTemplateMixin:SetIcon -> Texture:SetTexCoord + SetTexture, no mask on this path)" },
+    "SetBorderTexture": { "callsites": ["CollectionsTabMixin.lua:5"], "defined_in_lua": "Interface/SharedXML/SharedTemplates.lua:~74 (BorderIconTemplateMixin; IconBorder:SetTexCoord + SetTexture)" },
+    "SetBorderColor": { "callsites": ["CollectionsTabMixin.lua:6", "CollectionsTabMixin.lua:33", "CollectionsTabMixin.lua:37"], "defined_in_lua": "Interface/SharedXML/SharedTemplates.lua:105 (IconBorder:SetVertexColor)" },
+    "SetPointOffset": { "callsites": ["CollectionsTabMixin.lua:17", "CollectionsTabMixin.lua:22", "CollectionsTabMixin.lua:25", "CollectionsTabMixin.lua:29"], "defined_in_lua": "Interface/SharedXML/TypeExtensions/Region.lua:112 (Region extension; uses Vector2D, GetNumPoints/GetPoint/SetPoint - stock)" },
+    "GetRGB": { "callsites": ["CollectionsTabMixin.lua:6", "CollectionsTabMixin.lua:33", "CollectionsTabMixin.lua:37"], "defined_in_lua": "Interface/SharedXML/Util/ColorUtil.lua:43" },
+    "SetupTabSystem / OnTabSelected / GetCharacterAdvancementTab / GetMysticEnchantTab / GetTransmogTab / GoToTab / IsOnTab": { "callsites": ["Collections.lua:26,96,169,173,177,181,191 (this addon defines them on CollectionsMixin; GoToTab/IsOnTab/Tabs are the public API other addons call)"], "defined_in_lua": "Collections.lua" },
+    "SetTabTemplate / SetTabSelectedSound / SetTabPoint / AddTab / GetPanelForTabID / UpdateTabLayout / HideCurrentPanel / GetTabByID / ShowTabID / HideTabID / GetCurrentTabID / SelectTabID": { "callsites": ["Collections.lua:28,29,30,114,38-88,97,115,161,170-178,139,142,151,153,143,192,144,187"], "defined_in_lua": "Interface/SharedXML/TabSystem/TabSystemMixin.lua" },
+    "RegisterCallback": { "callsites": ["Collections.lua:31"], "defined_in_lua": "Interface/SharedXML/CallbackRegistryMixin.lua:35 (CallbackRegistryMixin)" },
+    "ClearAndSetPoint / SetShown": { "callsites": ["Interface/SharedXML/TabSystem/TabSystemMixin.lua:241,280,285,287 (used on tabs/panels for every AddTab/SelectTab/UpdateTabLayout)"], "defined_in_lua": "Interface/SharedXML/TypeExtensions/Region.lua:36 / :28" },
+    "SetEnabled (Button/CheckButton)": { "callsites": ["Interface/SharedXML/TabSystem/TabSystemTabMixin.lua:19,39 (every SetTabSelected/SetTabEnabled)"], "defined_in_lua": "Interface/SharedXML/TypeExtensions/Button.lua:13-14 (Enable/Disable wrapper; native SetEnabled is ABSENT in stock 12340)" },
+    "SetAtlas (Texture) / SetHighlightAtlas": { "callsites": ["Interface/SharedXML/SharedPanelTemplates.lua:509-527 (ThreeSliceButtonMixin:UpdateButton draws the 'wow-tab-*' tab art on every state change)"], "defined_in_lua": "Interface/SharedXML/TypeExtensions/Texture.lua:3 (SetTexture + SetTexCoord + SetHorizTile/SetVertTile - all stock natives) and Interface/SharedXML/SharedTemplates.lua:253" },
+    "SetMaskedTexture": { "callsites": ["not reached from this addon (only when an icon/border mask is set); listed because BorderIconTemplateMixin carries it"], "defined_in_lua": "Interface/SharedXML/TypeExtensions/Texture.lua:110 (calls native SetMaskTexture - Extensions.dll _G? binding 0x10a71fc0, though the name also exists in the stock exe string table - and stock SetPortraitToTexture)" },
+    "StartMoving / StopMovingOrSizing / RegisterForDrag / SetFrameLevel / SetScale / GetSize / SetSize / HasScript / IsOwned / SetChecked / GetButtonState / SetDesaturated / GetNumPoints": { "callsites": ["Collections.lua:16-22,99,113,124; various in the mixins"], "defined_in_lua": "stock natives (all confirmed in the 12340 string table)" }
+  },
+  "events": {
+    "PLAYER_REGEN_DISABLED": {
+      "registered_at": ["Collections.lua:10 (self:RegisterEvent in OnLoad)"],
+      "handler_args": "none used; CollectionsMixin:PLAYER_REGEN_DISABLED() (Collections.lua:165) via OnEventToMethod -> HideUIPanel(self)",
+      "fired_by": "native (stock 3.3.5a)"
+    },
+    "PLAYER_LEVEL_UP": {
+      "registered_at": ["Collections.lua:13 (only if IsCustomClass() and C_Player:GetLevel() < 10 at OnLoad)", "Collections.lua:206 (UnregisterEvent after first level >= 10)"],
+      "handler_args": "arg1 = new level (stock payload); CollectionsMixin:PLAYER_LEVEL_UP(level) returns early if level < COA_AUTO_SHOW_TALENTS_LEVEL, else queues GoToTab(Collections.Tabs.CharacterAdvancement) through Timer.AfterCombat -> Timer.After(2) -> C_PopupQueue:Add",
+      "fired_by": "native (stock 3.3.5a). C_Player also caches it (FrameXML/Util/C_Player.lua:390 via C_Hook) so C_Player:GetLevel() is fresh."
+    },
+    "OnTabSelected (CallbackRegistry event, not a frame event)": {
+      "registered_at": ["Collections.lua:31 (self:RegisterCallback('OnTabSelected', self.OnTabSelected, self))"],
+      "handler_args": "(tabID:number, tab:CheckButton); CollectionsMixin:OnTabSelected (Collections.lua:96) resizes the frame to the panel's GetSize() (+80x50 for Vanity) and moves the tab row (y=2 for Wardrobe)",
+      "fired_by": "Lua (CallbackRegistryMixin:TriggerEvent in TabSystemMixin:SelectTab, Interface/SharedXML/TabSystem/TabSystemMixin.lua:249)"
+    },
+    "ASCENSION_CUSTOM_GAME_MODE_CHANGED / GAME_MODE_UPDATE (not registered here)": {
+      "registered_at": ["not by this addon - it polls C_GameMode:IsGameModeActive at OnShow/GoToTab"],
+      "handler_args": "n/a; C_GameMode (FrameXML/Util/C_GameMode.lua:45-55) listens via C_Hook and re-emits GAME_MODE_UPDATE with C_Hook:SendEvent at :47. A shim that changes the mode after login only needs the GetCustomGameMode() value to be current the next time the panel is shown.",
+      "fired_by": "ASCENSION_CUSTOM_GAME_MODE_CHANGED: native (Extensions.dll event name in the _G? binding list); GAME_MODE_UPDATE: Lua (C_Hook.SendEvent at Interface/FrameXML/Util/C_GameMode.lua:47)"
+    }
+  },
+  "frames": [
+    "Collections (Collections.xml:31; Frame, parent UIParent, frameStrata DIALOG, 784x512, CENTER y=30, movable/clampedToScreen/enableMouse, hidden; Backdrop bgFile Interface\\AddOns\\AwAddons\\Collections\\StoreCollection with -120/-120/-256/-256 insets)",
+    "CollectionTabTemplate (Collections.xml:5; virtual CheckButton inheriting TabSystemTabTemplate -> ThreeSliceButtonTemplate; frameStrata DIALOG, motionScriptsWhileDisabled; child Frame $parentIcon parentKey Icon inheriting BorderIconTemplate 16x16 at LEFT 10,2; ButtonText parentKey Text; PushedTextOffset 0,-1)",
+    "CollectionsPoolFrameCollectionTabTemplate1..6 (runtime; CreateFramePool('CheckButton', Collections, 'CollectionTabTemplate') at TabSystemMixin:AddTab names pooled frames '<parent>PoolFrame<template><n>' per SharedXML/Pools.lua:~165-172), each with children '...Icon' (+ textures ...IconBackground/...IconIcon/...IconIconBorder/...IconOverlay/...IconHighlight), '...Left/...Center/...Right' textures and an unnamed Controller frame",
+    "AscensionTimer (created by SharedXML/Util/Timer.lua:22, not by this addon, but required by Timer.After/AfterCombat)",
+    "Child panels created by OTHER addons with parent=\"Collections\" (they hard-require this frame to exist at their load): CoATalentFrame (Ascension_CoATalents/CoATalentFrame.xml:7), CharacterAdvancement (Ascension_CharacterAdvancement/CharacterAdvancement.xml:5 and the Season9 variant), BuildCreatorFrame (Ascension_BuildCreator/BuildCreator.xml:5), SkillCardsFrame (Ascension_SkillCards/SkillCards.lua:188), StoreCollectionFrame (Ascension_VanityCollection/VanityStore.lua:2), EnchantCollection (Ascension_EnchantCollection/EnchantCollection.lua:864), AppearanceWardrobeFrame (Ascension_AppearanceUI/AppearanceUI.xml:9)"
+  ],
+  "stock_api_assumptions": [
+    "PlaySound(numericSoundKitId): Collections passes SOUNDKIT.CHARACTER_SHEET_OPEN_70=679 / CLOSE_70=680 / TAB_70=681 (SharedXML/Util/SoundKit.lua:37-42). The Lua override (SharedXML/Util/SharedOverwrites.lua:17) forwards the number to the captured native; stock 12340 PlaySound takes a sound NAME string ('igCharacterInfoOpen'/'igCharacterInfoClose'/'igCharacterInfoTab'). Ascension's client accepts kit ids. Shim: map ids to 3.3.5a names inside its own PlaySound before SharedOverwrites captures _PlaySound (a number reaching stock PlaySound is silently ignored at best).",
+    "UnitClass / UnitClassBase return 4 values and non-stock tokens: GlobalOverwrites.lua:87-96 wraps both to return (name, token, Enum.Class[token], Enum.ClassMask[token]); IsCustomClass()/IsDefaultClass()/IsHeroClass() need the native to answer 'HERO' for classless characters and the CoA token (BARBARIAN..SPIRITMAGE, ids 12-32, masks 0x800..0x80000000) for CoA characters. Stock UnitClassBase exists in 12340 but returns stock tokens only; an unknown class byte yields a nil token -> Enum.ClassMask[nil] = nil -> bit.band(x, nil) error inside IsCustomClass at Collections.lua:4/12/37/78/133. The shim must override the NATIVE UnitClass/UnitClassBase (not just the wrapper) before FrameXML/Util/GlobalOverwrites.lua runs, and the answer must be right at addon-load time (see notes on tab-set freezing).",
+    "Button/CheckButton:SetEnabled(bool): used by TabSystemTabMixin on every select/enable; not a 12340 native (string scan) - provided by SharedXML/TypeExtensions/Button.lua via GetButtonMetatable()/GetCheckButtonMetatable(), which are themselves Ascension-exe natives. Same for Region:SetShown/ClearAndSetPoint/SetPointOffset (Region.lua) and Texture:SetAtlas (Texture.lua) via GetFrameMetatable()/GetTextureMetatable(). The shim must supply the four metatable getters (or pre-extend the metatables itself) before compat/SharedXML loads.",
+    "GRAY_FONT_COLOR / YELLOW_FONT_COLOR / DISABLED_FONT_COLOR / HIGHLIGHT_FONT_COLOR / RED_FONT_COLOR are used as ColorMixin objects (:GetRGB(), :WrapText()); stock FrameXML defines them as plain {r,g,b} tables. SharedXML/SharedConstants.lua redefines them with CreateColor and must load before this addon (it does in the compat layer).",
+    "UpdateMicroButtons() is called from insecure OnShow/OnHide/GoToTab and Ascension's version reads Collections:IsShown(); with stock FrameXML in the MPQ the call resolves to the stock function (no error) but the TalentMicroButton will not show PUSHED and TalentMicroButton OnClick still calls ToggleTalentFrame - the shim must hook both to open Collections.",
+    "UIPanelWindows['Collections'] carries the non-stock keys allowOtherPanels=true and dontCloseForNonCenterPanels=true, honoured only by Ascension's edited secure panel code (FrameXML/UIParent.lua:2033-2045). On stock FrameXML the entry (area='center', pushable=0, whileDead=1) still works, but opening another center panel (character sheet, spellbook) will close Collections and vice versa. The shim must add the UIPanelWindows entry itself; without it ShowUIPanel just calls frame:Show() and the panel will not be closed by Escape/other panels.",
+    "GetUIScale() (asc-fx, UIParent.lua:3969) and COA_AUTO_SHOW_TALENTS_LEVEL (asc-fx, Constants.lua:5) are Ascension FrameXML additions the compat layer must define; both are read in OnLoad.",
+    "XML attributes used: parentKey, motionScriptsWhileDisabled, PushedTextOffset, setAllPoints, and horizTile (on the inherited ThreeSliceButtonTemplate) are all present in the stock 12340 string table, so the stock XML loader accepts them. <OnEvent function=\"OnEventToMethod\"/> (script 'function' attribute) could not be verified by string scan ('function' is too generic); if the stock loader ignores it, PLAYER_REGEN_DISABLED/PLAYER_LEVEL_UP handlers never run (no crash, combat auto-hide lost) - verify in P1 or have the shim SetScript('OnEvent', OnEventToMethod) on Collections after load.",
+    "GameTooltip:IsOwned, Frame:HasScript, Texture:SetHorizTile/SetVertTile, SetPortraitToTexture, RegisterForDrag/StartMoving/StopMovingOrSizing, GetButtonState, SetDesaturated, GetNumPoints: all confirmed stock natives (12340 string scan) - no shim work.",
+    "format(FEATURE_BECOMES_AVAILABLE_AT_LEVEL, 10) and format(MYSTIC_ENCHANTING_ALTAR_UNLOCK, 60) at Collections.lua:133/140 assume those globals are non-nil format strings containing %d (see the GlobalStrings entry in globals)."
+  ],
+  "data_files": [
+    "No LoadAscensionContentJSON / C_Content usage in this addon.",
+    "GlobalStrings: CHARACTER_ADVANCEMENT, CHARACTER_ADVANCEMENT_TOOLTIP, HERO_ARCHITECT, HERO_ARCHITECT_TOOLTIP, UNLOCK_SKILL_CARDS_TITLE, BOOSTER_TAB_SUBTEXT, VANITY, VANITY_TOOLTIP, MYSTIC_ENCHANT, MYSTIC_ENCHANT_TOOLTIP, WARDROBE, WARDROBE_TOOLTIP, FEATURE_BECOMES_AVAILABLE_AT_LEVEL (%d), MYSTIC_ENCHANTING_ALTAR_UNLOCK (%d) - not in any loose file; from Ascension's locale-MPQ GlobalStrings.lua. Also TIP_OPEN_WARDROBE_TO_CHANGE_TRANSMOG via HelpTips.",
+    "Backdrop art Interface\\AddOns\\AwAddons\\Collections\\StoreCollection(.blp) (Collections.xml:38) - NOT in the loose ui-tree (no AddOns/AwAddons folder); it is packed in an Ascension UI MPQ (patch-B, which DESIGN.md section 2 excludes) so the addon pack must ship it or the panel background is blank. MainMenuBarMicroButtons.xml:16,31 also reference Interface\\AddOns\\AwAddons\\Textures\\Collections\\DragonHighlight and StoreCollectionRound.",
+    "Tab art: atlas family 'wow-tab' ('wow-tab-Left/-Right/_wow-tab-Center' + -Disabled/-Pressed/-Checked/-Highlight variants) resolved by SharedXML/AtlasInfo.lua to Interface\\Common\\WowTabAtlas(.blp) - not a 3.3.5a file; AtlasUtil:Unpack asserts if an atlas name is missing from AtlasInfo, so AtlasInfo.lua and the sheet must both ship.",
+    "Icon border Interface\\common\\WhiteIconFrame (CollectionsTabMixin.lua:5) - not a 3.3.5a texture (blank border if absent, no error).",
+    "Tab icons: Interface\\Icons\\spell_Paladin_divinecircle, ability_priest_angelicfeather, inv_inscription_darkmooncard_putrescence, inv_arcane_orb (stock 3.3.5a) and INV_Chest_Awakening, inv_custom_ReforgeToken (Ascension patch-I icons).",
+    "Sound kits 679/680/681 (see stock_api_assumptions)."
+  ],
+  "protected_actions": [
+    "None. No CastSpellByID/PickupSpell/SetBinding/RunMacro. ShowUIPanel/HideUIPanel of a 'center' panel from insecure code goes through the stock secure FramePositionDelegate attribute path, which is the normal addon-permitted route (ShowUIPanel(self) at Collections.lua:186, HideUIPanel(self) at :166 including during PLAYER_REGEN_DISABLED; HideUIPanel during combat is allowed for non-protected frames). Timer.AfterCombat checks issecure() only to pick a queue."
+  ],
+  "blocking_natives": [
+    "GetCustomGameMode() - Extensions.dll; reached from C_GameMode:IsGameModeActive at every OnShow (Collections.lua:150 and :138 via ShouldShowMysticEnchantTab) and GoToTab (:183) and from the opener ToggleCollections (UIParent.lua:663). The only Ascension-only native on this addon's own open path; shim returns the mode bitmask (0 for a plain CoA character).",
+    "GetFrameMetatable / GetTextureMetatable / GetButtonMetatable / GetCheckButtonMetatable - Ascension-exe natives (absent from stock 12340 and from Extensions.dll's binding table); required at compat/SharedXML load time and, through them, Button:SetEnabled, Region:SetShown/ClearAndSetPoint/SetPointOffset, Texture:SetAtlas on every AddTab/SelectTab/tab state change.",
+    "UnitClassBase / UnitClass (stock natives) returning 'HERO' or a CoA token - not new natives, but the panel cannot build its tab set (OnLoad) without the override answering correctly at addon-load time.",
+    "C_Config.GetBoolConfig - Extensions.dll; only on the CA tab's PreClick for HERO-class characters (UIParent.lua:337). Not needed for CoA (IsCustomClass) or default-class characters."
+  ],
+  "notes": "1) What this addon is: a 260-line container. It owns no CA data and talks to no server; it is a TabSystemMixin frame ('Collections', 784x512, DIALOG strata) that hosts up to six LoD panels by NAME (panel strings resolved through _G at select time) and lazily loads them via SetPreClick -> *_LoadUI -> UIParentLoadAddOn. Every heavy native lives in the hosted addons; here the entire surface is Lua except GetCustomGameMode (mode bitmask), the four widget-metatable getters (needed by the compat SharedXML layer) and, for HERO characters only, C_Config.GetBoolConfig. 2) Tab set is FROZEN at OnLoad: SetupTabSystem (Collections.lua:26) evaluates IsCustomClass() and C_Player:IsHero() exactly once when the addon loads - which is at login, because AscensionUI.toc and Ascension_SkillCards.toc depend on it. For CoA characters it registers the 'CoATalentFrame' panel and omits the MysticEnchants tab; for others it registers 'CharacterAdvancement' and adds MysticEnchants; HeroArchitect/SkillCards exist only for HERO. In the DESIGN.md architecture the CoA class identity arrives from mod-ascension-ca over the addon channel AFTER login while the stock client sees the carrier class, so at OnLoad IsCustomClass() would be false and the panel would be built wrong (and PLAYER_LEVEL_UP auto-open never registered). The shim must either answer UnitClassBase correctly before addons load (per-character SavedVariable cache of the last CLASS message, or derive from the login class byte) or, on CLASS arrival, call Collections:RemoveAllTabs() (TabSystemMixin.lua:160) then Collections:SetupTabSystem() to rebuild - note SetupTabSystem re-runs TabSystemMixin.OnLoad which resets self.tabs/self.tabPanels and RegisterCallback state, so also re-register OnTabSelected (it does that itself at :31). 3) Tab ids are positional (AddTab order) and character-dependent; Collections.Tabs.<Name> is nil for absent tabs and GoToTab(nil) returns silently, so callers such as ShowSkillCards fail soft. 4) DISCREPANCY: FrameXML/UIParent.lua:594 calls Collections:SwapHeroArchitectTabToSkillCards(), which no file under this addon (or anywhere in the tree) defines; the reference Collections.lua is from a different revision than the captured UIParent.lua. It is reachable only for WildCard/Draft characters whose Tabs.SkillCards is nil (i.e. non-HERO in those modes) and would raise 'attempt to call method'. Out of scope for a CoA-first release; the shim may define it as a no-op or as RemoveTab(HeroArchitect)+AddTab(SkillCards). 5) Opening the panel on stock FrameXML: the user entry point is Ascension's edited TalentMicroButton (OnClick -> ToggleCollections, MainMenuBarMicroButtons.xml:265) and Ascension's UpdateMicroButtons pushes that button; both live in FrameXML which DESIGN.md keeps stock. The shim's compat/FrameXML must define ToggleCollections (copy of UIParent.lua:655-668, it uses IsCustomClass, UnitLevel, C_GameMode, HelpTip:Hide), re-point TalentMicroButton's OnClick (or hook ToggleTalentFrame/TOGGLETALENTS), hook UpdateMicroButtons for the pushed state, and add UIPanelWindows['Collections'] (UIParent.lua:57). No slash command or keybinding exists in Ascension for this panel. 6) Level gate: for CoA characters the CharacterAdvancement tab is SetTabEnabled(false) below COA_AUTO_SHOW_TALENTS_LEVEL=10 with tooltip format(FEATURE_BECOMES_AVAILABLE_AT_LEVEL, 10); ToggleCollections sends such characters to the Vanity tab instead. Matches the memory note that the CA panel gates on level 10 (ARCHIVE_LEVEL=80). Disabling the current tab triggers SelectFirstEnabledTab. 7) OnShow side effects to reproduce or tolerate: SetFrameLevel(MainMenuBarOverlayFrame:GetFrameLevel()+1) (stock frame), PlaySound(679), Draft:HideCards() if Ascension_Draft is loaded, UpdateMicroButtons(), tab enable/hide logic, HelpTip:Acknowledge('WARDROBE_CHANGE_TRANSMOG_HINT') which indexes the GLOBAL HelpTips table (FrameXML/HelpTips.lua, asc-fx) - if HelpTips is nil every OnShow errors after the tabs are set (the shim must at least define HelpTips = {} plus HelpTip.Pools via SharedXML/HelpTip.lua). 8) OnHide: PlaySound(680), HideCurrentPanel() (hides the active child by _G lookup), UpdateMicroButtons(). 9) Frame scale hack: if UIParent:GetEffectiveScale() > 0.9 the frame scale becomes 1-(scale-0.9); OnTabSelected resizes the container to the child's GetSize() (Vanity +80x50, Wardrobe tab row y=2) - children must have real sizes at select time. 10) Combat: PLAYER_REGEN_DISABLED -> HideUIPanel; the level-up auto-open waits for combat end via Timer.AfterCombat (needs the 'AscensionTimer' frame from SharedXML/Util/Timer.lua) then 2 s, then C_PopupQueue (needs MAX_ACHIEVEMENT_ALERTS from stock AlertFrames). 11) Sound: SOUNDKIT ids 679/680/681 must be mapped to igCharacterInfoOpen/igCharacterInfoClose/igCharacterInfoTab for stock PlaySound; TabSystemMixin:SelectTab also plays the tab sound (silent flag exists). 12) Art the pack must ship because patch-B is excluded: AwAddons\\Collections\\StoreCollection (backdrop), Interface\\Common\\WowTabAtlas (tab three-slice via AtlasInfo.lua; AtlasUtil:Unpack asserts on unknown names), Interface\\common\\WhiteIconFrame (icon border), custom icons INV_Chest_Awakening and inv_custom_ReforgeToken. 13) Load order the shim must guarantee before this addon: SharedXML (Mixin.lua, TypeExtensions with the 4 metatable getters, Enum.lua, SharedConstants.lua with CreateColor'd font colours and IsCustomClass/OnEventToMethod, ColorUtil, Pools, CallbackRegistryMixin, TabSystem/*, SharedTemplates.xml+lua (BorderIconTemplate), SharedPanelTemplates.xml+lua (ThreeSliceButtonTemplate/UIButtonMixin/ButtonControllerMixin), AtlasInfo.lua, SoundKit.lua, SharedOverwrites.lua, Timer.lua, HelpTip.lua, C_Hook.lua), then FrameXML compat (Constants.lua COA_AUTO_SHOW_TALENTS_LEVEL, Util/GlobalOverwrites.lua UnitClass wrappers, Util/GlobalFunctions.lua InGlue/GetMaxLevel, Util/C_Player.lua, Util/C_GameMode.lua, Util/C_PopupQueue.lua, Util/MysticEnchantUtil.lua stub, HelpTips.lua, the six *_LoadUI + ToggleCollections + GetUIScale + UIPanelWindows entry from UIParent.lua), plus the 14 GlobalStrings. luacheck_pack.py (DESIGN.md section 7) should whitelist Draft, ForcedPrimaryStatFrame and the seven panel frame names as late-bound. 14) Hosted-panel contract for the shim's own CA implementation: the panel must be a global frame named exactly 'CoATalentFrame' (CoA) or 'CharacterAdvancement' (others) with parent Collections, hidden by default, sized before first select; it is shown/hidden purely by Show()/Hide() from SelectTab/HideCurrentPanel (via SetShown), and its LoD addon is loaded by CharacterAdvancement_LoadUI on the tab's PreClick, so a shim that ships the CA panel non-LoD only needs that function to be a no-op that does not error. 15) Verified against the stock 12340 exe string table (C:\\AzerothRealm\\client\\Wow.exe, sha256 aa63a575...): present - UnitClassBase, UnitClass, SetHorizTile/SetVertTile, SetMaskTexture, PlaySound, SetPortraitToTexture, IsOwned, HasScript, parentKey, motionScriptsWhileDisabled, horizTile, PushedTextOffset; absent - GetTextureMetatable, GetFrameMetatable, GetCustomGameMode, SetEnabled, UnitClassMask, InGlue."
+}

@@ -1,0 +1,359 @@
+{
+  "target": "Ascension_TalentUI",
+  "source": "C:/AzerothRealm/realms/ascension/rexxar-reference/ui-tree/Interface/AddOns/Ascension_TalentUI",
+  "toc": {
+    "load_on_demand": false,
+    "dependencies": [],
+    "saved_variables": [],
+    "files_in_order": [
+      "Ascension_TalentUI.toc",
+      "Ascension_TalentUI.xml",
+      "TalentTreeBase.lua (loaded by <Script file=> at Ascension_TalentUI.xml:3, before the template definition)"
+    ],
+    "interface": "30300",
+    "toc_note": "No ## Dependencies, no ## LoadOnDemand, no ## SavedVariables. Loads at login like any addon; it defines one virtual template and one mixin and shows nothing by itself. Its only consumer, Ascension_CoATalents, declares '## Dependencies: Ascension_TalentUI, Ascension_Collections' and is LoadOnDemand."
+  },
+  "entry_points": [
+    "None of its own. This addon defines the virtual Frame template 'TalentTreeBase' (Ascension_TalentUI.xml:5) and the global mixin TalentTreeBaseMixin; it creates no instance and registers no slash command, LoadUI function, micro button or Collections tab.",
+    "Instances are created by AddOns/Ascension_CoATalents/CoATalentFrame.xml:73 ($parentClassTree, parentKey ClassTree, inherits TalentTreeBase) and :114 ($parentSpecTree, parentKey SpecTree). That frame is CoATalentFrame (parent Collections, hidden).",
+    "Chain that opens it: Collections tab CHARACTER_ADVANCEMENT is added as 'CoATalentFrame' when IsCustomClass() (AddOns/Ascension_Collections/Collections.lua:38) with pre-click CharacterAdvancement_LoadUI (Collections.lua:42) -> FrameXML/UIParent.lua:327 CharacterAdvancement_LoadUI() -> UIParentLoadAddOn(\"Ascension_CoATalents\") when IsCustomClass() (UIParent.lua:329). FrameXML/Util/GlobalOverwrites.lua:473 also redirects LoadAddOn(\"Ascension_CharacterAdvancement\") to _LoadAddOn(\"Ascension_CoATalents\") for custom classes (:476).",
+    "The tree is first built when the consumer calls :SetClassTab(classDBC, tab) from CoATreeViewMixin:OnLoad (AddOns/Ascension_CoATalents/CoATreeViewMixin.lua:62 ClassTree, tab \"Class\") and CoATreeViewMixin:SetSpecID (:245 SpecTree, tab = spec DBC name). SetClassTab marks RebuildTree dirty; the actual BuildTree runs on the next OnUpdate tick (TalentTreeBase.lua:193 SetScript OnUpdate), so the natives are first hit one frame after the consumer's OnLoad, whether or not the frame is visible.",
+    "Redraws are driven by events: CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED (registered OnShow, TalentTreeBase.lua:39) and CHARACTER_ADVANCEMENT_ENTRY_PATCHED (registered OnLoad, :35), plus consumer calls to :MarkDirty(DirtyReason.Nodes|Search) (CoATreeViewMixin.lua:102-103, :251-252) and :ResetTree() (CoATreeViewMixin.lua:115, :122)."
+  ],
+  "namespaces": {
+    "C_CharacterAdvancement": {
+      "GetEntriesByClass": {
+        "callsites": [
+          "Ascension_TalentUI.xml:30 (Attribute getEntries = \"global:C_CharacterAdvancement.GetEntriesByClass\", resolved to the function by AttributesToKeyValues at TalentTreeBase.lua:20)",
+          "TalentTreeBase.lua:331 (invoked as self.getEntries(self.class, self.tab, false) inside BuildTree; asserted non-nil at :319)",
+          "external cross-check: first_seen in P0 inventory is AddOns/Ascension_CoAReader/CoAReader.lua:12 (not present in ui-tree)"
+        ],
+        "args": "(classDBC:string, tabDBC:string, includeHidden:boolean) -- classDBC is the DBC class NAME as produced by CharacterAdvancementUtil.GetClassDBCByFile / ClassConversions.ClassFileToDBC (FrameXML/Util/CharacterAdvancementUtil.lua:832, :1008), e.g. \"Tinker\", \"Warrior\", \"General\" (NOT the upper-case file token \"TINKER\"); tabDBC is the literal string \"Class\" for the class tree (CoATreeViewMixin.lua:62) or a spec DBC name from ClassConversions.SpecFileToDBC (e.g. \"Arms\", \"Survival\"; CoATreeViewMixin.lua:238-245); third argument is the literal false at the only callsite (name 'includeHidden' is inferred, not proven by code).",
+        "returns": "A plain array (consumed with ipairs, index unused) of entry tables; must be {} not nil for an empty tree (no nil guard). Fields read by THIS addon: entry.ID (number; key of self.nodeCache and of every *ByEntryID native), entry.Group (number or nil; 0/nil = single node, equal non-zero Group = siblings collapsed into one choice node, :212-214, :261-267), entry.ConnectedNodes (array of entry IDs iterated with ipairs, :279 and :294; an ID with no node in the SAME class/tab tree is logged via C_Logger.Error, never an error), entry.Name (string, log message only, :288/:302). Fields read by the functions the attributes point at: getPosition=CharacterAdvancementUtil.GetEntryPosition (FrameXML/Util/CharacterAdvancementUtil.lua:706) reads entry.Class (DBC class name -> ClassDBCToFile -> Enum.Class[file] >= Enum.Class.CustomStart(12) for every CoA class) then entry.PositionX/entry.PositionY for CoA classes else entry.Column/entry.Row -- these are GRID indices fed to GridLayoutUtil.SimpleGridXY, not pixels; CoA gate hooks read entry.RequiredTabAEInvestment / entry.RequiredTabTEInvestment (number, > 0 creates a gate; CoACharacterAdvancementUtil.lua:103-109); CoACharacterAdvancementUtil.GetDisplayTemplateForEntry reads entry.NodeType (number keyed by Enum.TraitNodeEntryType, SharedXML/Enum.lua:1516). Fields read by the node templates the tree instantiates (FrameXML/CharacterAdvancement/CATalentBaseMixin.lua, CATalentChoiceBaseMixin.lua): entry.Spells (array indexed by rank, Spells[max(rank,1)]), entry.Icon (icon file name, concatenated after \"Interface\\\\Icons\\\\\"). Order: layout order; the code is order-insensitive except that the first grouped entry seen creates the choice node and anchors it (:342-347). Entry tables are held by reference in node.entry until the next RebuildTree.",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "inventory": "api-surface NATIVE Extensions.dll=Y; ext-lua-bindings fn_va 0x10177050 site_va 0x101841f6; ca-lua-bindings.txt:47 [esp+0x188]"
+      },
+      "GetPendingTabAEInvestment": {
+        "callsites": [
+          "Ascension_TalentUI.xml:41 (Attribute gateCurrencyCount default; consumer Ascension_CoATalents/CoATalentFrame.xml:109 repeats it for ClassTree)",
+          "TalentTreeBase.lua:105 (UpdateGates: self.gateCurrencyCount(self.class, self.tab, 0))",
+          "TalentTreeBase.lua:137 (CreateGates: same call; asserted non-nil at :102 and :133)"
+        ],
+        "args": "(classDBC:string, tabDBC:string, 0:number) -- same class/tab strings as GetEntriesByClass; the third argument is the literal 0 at every callsite in the whole tree (also GetTabTEInvestment(class, spec, 0) in Ascension_CharacterAdvancement); its meaning is not derivable from the code.",
+        "returns": "number: Ability Essence already invested in that tab in the PENDING (previewed) build. Passed straight to gate:UpdateDisplay(currencyCount) -> CAGateBaseMixin:UpdateDisplay (FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:11) which evaluates `investedCurrency < self.requiredCurrency`, so nil is an arithmetic error here. Other Ascension callers guard with `or 0`; this addon does not -> the shim must always return a number.",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "inventory": "api-surface NATIVE Extensions.dll=Y; ext-lua-bindings fn_va 0x10179b70 site_va 0x101847fa; ca-lua-bindings.txt:117 [esp+0x3b8]"
+      },
+      "GetPendingTabTEInvestment": {
+        "callsites": [
+          "not named in this addon's files; the consumer wires it as SpecTree.gateCurrencyCount (Ascension_CoATalents/CoATalentFrame.xml:159) and it is then invoked from TalentTreeBase.lua:105 and :137 exactly like the AE twin",
+          "FrameXML/Util/GlobalOverwrites.lua:368 (inside the GetTabTEInvestment preview wrapper)"
+        ],
+        "args": "(classDBC:string, tabDBC:string, 0:number) -- identical shape to GetPendingTabAEInvestment.",
+        "returns": "number: Talent Essence invested in that tab in the pending build; same `<` comparison in CAGateBaseMixin:UpdateDisplay, nil is an error.",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "inventory": "api-surface NATIVE Extensions.dll=Y, BUT ABSENT from ext-lua-bindings.tsv and from ca-lua-bindings.txt (both list GetPendingTabAEInvestment, GetPendingClassTEInvestment and GetPendingGlobalTEInvestment). The CA binding table in ca-lua-bindings.txt jumps from GetPendingClassTEInvestment [esp+0x3c8] to GetPendingClassPointInvestment [esp+0x3e4], leaving unlisted slots at 0x3d0-0x3dc right where this member would sit, so this is most likely a scanner miss rather than a missing binding. Either way the SpecTree asserts on it (TalentTreeBase.lua:133): if the global does not resolve, AttributesToKeyValues stores nil and BuildTree -> CreateGates throws 'gateCurrencyCount function is nil'. The shim must provide it."
+      },
+      "ClearPendingBuildByTab": {
+        "callsites": [
+          "TalentTreeBase.lua:59 (ResetTree)",
+          "external: FrameXML/Util/CharacterAdvancementUtil.lua:421 (ConfirmClearTabBuild, identical clearType logic)"
+        ],
+        "args": "(classDBC:string, tabDBC:string, onlyClearAllowed:boolean) -- third argument is Const.CharacterAdvancement.OnlyClearAllowed (= true, SharedXML/Util/Const.lua:9) when C_Player:IsCustomClass(), else Const.CharacterAdvancement.ClearEverything (= false, Const.lua:10). For every CoA character this is therefore always true.",
+        "returns": "ignored (no return value consumed). The tree does NOT redraw itself after the call; it relies on CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED arriving afterwards (handler :46 -> MarkDirty(Nodes)). A shim implementation must fire that event after mutating the pending build or the reset is invisible.",
+        "sync": "sync call; visible effect is async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null,
+        "inventory": "api-surface NATIVE Extensions.dll=Y; ext-lua-bindings fn_va 0x10176030 site_va 0x101848c8; ca-lua-bindings.txt:125 [esp+0x40c]"
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": [
+          "TalentTreeBase.lua:288 (choice-node branch of CreateNodeConnections)",
+          "TalentTreeBase.lua:302 (single-node branch)"
+        ],
+        "args": "(format:string, ...:any) -- printf/string.format style: \"Entry %s[ID: %s] Connects to [ID: %s], which doesn't exist.\" with (entry.Name, entry.ID, connectionID). Every callsite in the tree uses %s placeholders with mixed string/number varargs.",
+        "returns": "nothing consumed (one external caller returns its result, AppearanceModelMixin.lua:507, so returning nil is safe).",
+        "sync": "sync",
+        "defined_in_lua": null,
+        "inventory": "api-surface NATIVE (Extensions.dll=Y, Ascension.exe=Y, stock_Wow.exe=Y -- the stock column is a substring artifact: stock 3.3.5a has no C_Logger table and stock FrameXML never references it); ext-lua-bindings fn_va 0x10292170 site_va 0x10293d5f. Only reached on dangling ConnectedNodes data; a nil-call here would abort BuildTreeConnections, so the shim namespace table must define it (a print/no-op is enough)."
+      }
+    },
+    "C_Player": {
+      "IsCustomClass": {
+        "callsites": [
+          "TalentTreeBase.lua:56 (colon call C_Player:IsCustomClass() inside ResetTree)"
+        ],
+        "args": "(self) -- called with method syntax on the Lua table; ignores unit, always \"player\".",
+        "returns": "boolean; true selects OnlyClearAllowed for ClearPendingBuildByTab.",
+        "sync": "sync",
+        "defined_in_lua": "FrameXML/Util/C_Player.lua:55 (C_Player is a pure-Lua table, C_Player.lua:1). Chain: IsCustomClass(\"player\") [SharedXML/SharedConstants.lua:39, Lua] -> bit.contains(Enum.ClassMask.COA, UnitClassMask(unit)) -> UnitClassMask [FrameXML/Util/GlobalOverwrites.lua:104, Lua] -> UnitClassBase [GlobalOverwrites.lua:94, Lua wrapper over the captured native _UnitClassBase, :93] -> Enum.ClassMask[classFileToken] (SharedXML/Enum.lua:86; COA = 0xFFFFF800, DEFAULT = 0x5FF). The shim must keep C_Player as the compat Lua file, not turn it into a native namespace, and its UnitClass/UnitClassBase override must return a CoA file token (e.g. \"TINKER\") for CoA characters so the mask lookup lands in COA."
+      }
+    }
+  },
+  "globals": {
+    "CreateFromMixins": {
+      "callsites": ["TalentTreeBase.lua:1 (CreateFromMixins(\"CallbackRegistryMixin\") -- mixin passed by NAME string)"],
+      "args": "(...mixins: table|string) -- strings are resolved through _G (Ascension extension of the retail helper)",
+      "returns": "new table with the mixin's members copied in",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:177"
+    },
+    "OnEventToMethod": {
+      "callsites": ["TalentTreeBase.lua:2 (assigned as TalentTreeBaseMixin.OnEvent; MixinAndLoadScripts installs it as the frame's OnEvent script)"],
+      "args": "(self, event, ...) -> if self[event] then self[event](self, ...) end",
+      "returns": "nothing; this is what turns the two event names into method calls TalentTreeBaseMixin:CHARACTER_ADVANCEMENT_* with the raw event payload as arguments",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:87"
+    },
+    "FramePool_HideAndClearAnchors": {
+      "callsites": ["TalentTreeBase.lua:16 (inside the local ResetNode resetter passed to GetOrCreatePool at :243 and :263)"],
+      "args": "(framePool, frame)",
+      "returns": "nothing",
+      "defined_in_lua": "SharedXML/Pools.lua:192"
+    },
+    "AttributesToKeyValues": {
+      "callsites": ["TalentTreeBase.lua:20 (no-argument form, in OnLoad)"],
+      "args": "(self) -- the no-arg form calls self:GetAllAttributes() (SharedXML/Util/Util.lua:114), maps every value through CheckGlobalFromAttributeString (Util.lua:86 -> StringToGlobalTableEntry Util.lua:45 for \"global:A.B.C\" strings, returns nil when the path does not resolve), stores it as self[name], then self:SetAttribute(name, nil) so the attributes are GONE after OnLoad",
+      "returns": "nothing; side effect populates self.getNodeTemplate, getConnectionTemplate, getChoiceNodeTemplate, getEntries, getPosition, buttonWidth, buttonHeight, buttonSpacingX, buttonSpacingY, useGates, getGateTemplate, getGateAttachmentPoint, gateCurrency, gateCurrencyCount, getEntryGateRequirement (+ onlyOneGate from the consumer)",
+      "defined_in_lua": "SharedXML/Util/Util.lua:96 -- Lua, but it depends on the NON-STOCK widget method Frame:GetAllAttributes (see widget_methods)"
+    },
+    "CreateFramePoolCollection": {
+      "callsites": ["TalentTreeBase.lua:21 (nodePool)", "TalentTreeBase.lua:22 (displayPool)"],
+      "args": "()",
+      "returns": "FramePoolCollectionMixin object; methods used: GetOrCreatePool(frameType, parent, template, resetter) :243/:263/:138/:310, ReleaseAll() :326-327, EnumerateActive() :237; pool objects: Acquire() :244/:264/:141; frames are created with stock CreateFrame(frameType, name, parent, template) at Pools.lua:173",
+      "defined_in_lua": "SharedXML/Pools.lua:256"
+    },
+    "CallbackRegistryMixin": {
+      "callsites": ["TalentTreeBase.lua:1 (base mixin)", "TalentTreeBase.lua:23 (CallbackRegistryMixin.OnLoad(self))", "TalentTreeBase.lua:24 (self:GenerateCallbackEvents({\"UPDATE_CURRENCY_DISPLAY\",\"TREE_UPDATE\"}))"],
+      "args": "OnLoad(self); GenerateCallbackEvents(eventsArray)",
+      "returns": "callback registry on the frame; the two generated callback events are never TriggerEvent-ed anywhere in this addon (declared only)",
+      "defined_in_lua": "SharedXML/CallbackRegistryMixin.lua:35 (OnLoad :37, GenerateCallbackEvents :184)"
+    },
+    "MixinAndLoadScripts": {
+      "callsites": ["Ascension_TalentUI.xml:47 (OnLoad: MixinAndLoadScripts(self, \"TalentTreeBaseMixin\"))"],
+      "args": "(target, ...mixins: table|string) -- copies every member onto the frame, calls target:SetScript(k, v) for members whose name passes target:HasScript(k) (so OnShow/OnHide/OnEvent/OnLoad become scripts), then calls mixin.OnLoad(target)",
+      "returns": "target",
+      "defined_in_lua": "SharedXML/Util/Mixin.lua:152"
+    },
+    "Const.CharacterAdvancement": {
+      "callsites": ["TalentTreeBase.lua:55 (ClearEverything)", "TalentTreeBase.lua:57 (OnlyClearAllowed)"],
+      "args": "constants: OnlyClearAllowed = true, ClearEverything = false",
+      "returns": "boolean passed as third argument to ClearPendingBuildByTab",
+      "defined_in_lua": "SharedXML/Util/Const.lua:8"
+    },
+    "GridLayoutUtil.SimpleGridXY": {
+      "callsites": ["TalentTreeBase.lua:333 (positionX, positionY, buttonWidth, buttonHeight, 0, 0, buttonSpacingX, buttonSpacingY)"],
+      "args": "(column, row, cellWidth, cellHeight, xOffset, yOffset, xPadding, yPadding)",
+      "returns": "x = xOffset + ((cellWidth + xPadding) * column - 1), y = yOffset - ((cellHeight + yPadding) * row - 1); used as TOPLEFT offsets from the tree frame (:343, :350); so entry.PositionX/PositionY (CoA) or Column/Row (default classes) are 1-based grid indices",
+      "defined_in_lua": "SharedXML/Util/GridLayoutUtil.lua:164"
+    },
+    "CharacterAdvancementUtil.GetEntryPosition": {
+      "callsites": ["Ascension_TalentUI.xml:31 (Attribute getPosition)", "TalentTreeBase.lua:332 (self.getPosition(entry))"],
+      "args": "(entry)",
+      "returns": "two numbers: entry.PositionX, entry.PositionY when the entry's class is a custom class (Enum.Class[ClassDBCToFile[entry.Class]] >= Enum.Class.CustomStart = 12, SharedXML/Enum.lua:84), otherwise entry.Column, entry.Row",
+      "defined_in_lua": "FrameXML/Util/CharacterAdvancementUtil.lua:706 (loose FrameXML; already in p0-framexml-gap.json)"
+    },
+    "CharacterAdvancementUtil.GetDisplayTemplateForEntry": {
+      "callsites": ["Ascension_TalentUI.xml:27 (Attribute getNodeTemplate default)"],
+      "args": "(entry) -> template name string expected by :241",
+      "returns": "NOT DEFINED ANYWHERE in the tree (grep of every .lua: only CoACharacterAdvancementUtil.GetDisplayTemplateForEntry exists). StringToGlobalTableEntry returns nil, so the base template's default is dead; the consumer overrides the attribute (CoATalentFrame.xml:100 -> CoACharacterAdvancementUtil.GetDisplayTemplateForEntry, AddOns/Ascension_CoATalents/CoACharacterAdvancementUtil.lua:5, maps entry.NodeType to CoATalentButton{Hex,Circle,Square,Diamond}Template)",
+      "defined_in_lua": null
+    },
+    "CharacterAdvancementUtil.GetDisplayTemplateForConnection": {
+      "callsites": ["Ascension_TalentUI.xml:28 (Attribute getConnectionTemplate default)"],
+      "args": "() -> template name",
+      "returns": "NOT DEFINED in the tree (dead default). Consumer override: CoACharacterAdvancementUtil.GetDisplayTemplateForConnection -> \"CALineConnectionTemplate\" (CoACharacterAdvancementUtil.lua:25)",
+      "defined_in_lua": null
+    },
+    "CharacterAdvancementUtil.GetDisplayTemplateForEntryChoice": {
+      "callsites": ["Ascension_TalentUI.xml:29 (Attribute getChoiceNodeTemplate default)"],
+      "args": "(entry) -> template name",
+      "returns": "NOT DEFINED in the tree (dead default). Consumer override -> \"CoATalentChoiceButtonTemplate\" (CoACharacterAdvancementUtil.lua:21)",
+      "defined_in_lua": null
+    },
+    "CharacterAdvancementUtil.GetDisplayTemplateForGate": {
+      "callsites": ["Ascension_TalentUI.xml:38 (Attribute getGateTemplate default)"],
+      "args": "() -> template name",
+      "returns": "NOT DEFINED in the tree (dead default). Consumer override -> \"CoAGateTemplate\" (CoACharacterAdvancementUtil.lua:29)",
+      "defined_in_lua": null
+    },
+    "CharacterAdvancementUtil.GetGateAttachmentPoint": {
+      "callsites": ["Ascension_TalentUI.xml:39 (Attribute getGateAttachmentPoint default)"],
+      "args": "(nodes: array of node frames sharing one gate value) -> (point, relativeTo, relativePoint, x, y) consumed by gate:SetPosition at :144",
+      "returns": "NOT DEFINED in the tree (dead default). Consumer override -> CoACharacterAdvancementUtil.GetGateLeftAttachmentPoint (CoACharacterAdvancementUtil.lua:76; picks the top-most/left-most node by entry.PositionX/Y and returns \"RIGHT\", node, \"LEFT\", 0, 0; error()s if nodes is empty)",
+      "defined_in_lua": null
+    },
+    "CharacterAdvancementUtil.GetEntryAEGateRequirement": {
+      "callsites": ["Ascension_TalentUI.xml:42 (Attribute getEntryGateRequirement default)"],
+      "args": "(entry) -> number|nil",
+      "returns": "NOT DEFINED in the tree (dead default). Consumer override -> entry.RequiredTabAEInvestment / entry.RequiredTabTEInvestment (CoACharacterAdvancementUtil.lua:103/:107); a value > 0 creates a gate (:80)",
+      "defined_in_lua": null
+    },
+    "IsCustomClass": {
+      "callsites": ["transitive only: C_Player:IsCustomClass() -> IsCustomClass(\"player\")"],
+      "args": "(unit:string|nil) -- nil -> \"player\"; returns false InGlue()",
+      "returns": "boolean: bit.contains(Enum.ClassMask.COA, UnitClassMask(unit))",
+      "defined_in_lua": "SharedXML/SharedConstants.lua:39"
+    },
+    "UnitClassMask": {
+      "callsites": ["transitive only (from IsCustomClass)"],
+      "args": "(unit)",
+      "returns": "4th return of the Lua UnitClassBase wrapper: Enum.ClassMask[classFileToken]",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:104"
+    },
+    "UnitClassBase": {
+      "callsites": ["transitive only (from UnitClassMask)"],
+      "args": "(unit)",
+      "returns": "(className, classFileToken, Enum.Class[token], Enum.ClassMask[token]) -- Lua wrapper over the captured native `_UnitClassBase = _UnitClassBase or UnitClassBase` (GlobalOverwrites.lua:93). Stock 3.3.5a FrameXML never references UnitClassBase (0 hits in stock-ui-tree) and it is in neither Ascension inventory; whether stock Wow.exe exports it was not verified here. The shim's UnitClass/UnitClassBase override (DESIGN section 6) must return a CoA file token for CoA characters.",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:94 (UnitClass wrapper with the same 4-value contract at :88)"
+    },
+    "Enum": {
+      "callsites": ["transitive: Enum.ClassMask (COA/DEFAULT masks), Enum.Class.CustomStart (GetEntryPosition), Enum.TraitNodeEntryType (consumer's node-template chooser)"],
+      "args": "constant tables",
+      "returns": "Enum.ClassMask at SharedXML/Enum.lua:86 (COA = 0xFFFFF800), Enum.Class.CustomStart = 12 at :84, Enum.TraitNodeEntryType at :1516 (SpendHex=0, SpendSquare=1, SpendCircle=2, SpendSmallCircle=3, DeprecatedSelect=4, DragAndDrop=5, SpendDiamond=6, ProfPath=7, ProfPerk=8, ProfPathUnlock=9)",
+      "defined_in_lua": "SharedXML/Enum.lua:34"
+    },
+    "bit.contains": {
+      "callsites": ["transitive (IsCustomClass)"],
+      "args": "(x, y)",
+      "returns": "boolean",
+      "defined_in_lua": "SharedXML/TypeExtensions/bit.lua:26"
+    },
+    "string.startswith": {
+      "callsites": ["transitive (CheckGlobalFromAttributeString, Util.lua:88)"],
+      "args": "(str, other, caseSensitive)",
+      "returns": "boolean",
+      "defined_in_lua": "SharedXML/TypeExtensions/string.lua:109"
+    },
+    "table.invert": {
+      "callsites": ["transitive (ClassConversions.ClassFileToDBC / SpecFileToDBC, CharacterAdvancementUtil.lua:1008-1009)"],
+      "args": "(t)",
+      "returns": "inverted table",
+      "defined_in_lua": "SharedXML/TypeExtensions/table.lua:68"
+    },
+    "ClassConversions": {
+      "callsites": ["transitive: CharacterAdvancementUtil.GetClassDBCByFile/:832, GetSpecDBCByFile/:836, GetClassFileByDBC/:840"],
+      "args": "lookup tables ClassDBCToFile (e.g. [\"Tinker\"]=\"TINKER\", [\"General\"]=\"GENERAL\"), SpecDBCToFile (e.g. [\"Survival\"]=\"SURVIVAL\"), and their inverses",
+      "returns": "these tables DEFINE the class/tab string format every C_CharacterAdvancement call in this addon uses (DBC names, not file tokens); the shim's Data.lua must key on the same names and must ship this table (it is embedded in a loose FrameXML file)",
+      "defined_in_lua": "FrameXML/Util/CharacterAdvancementUtil.lua:848"
+    },
+    "stock_builtins_used": {
+      "callsites": ["wipe :160/:197/:198/:227/:323-325", "tinsert :83/:92", "table.sort :93", "assert :71/:101-102/:132-134/:317-321", "next :152", "ipairs/pairs", "self:SetScript(\"OnUpdate\") :154/:193", "self:RegisterEvent/UnregisterEvent :35/:39/:43", "SetSize/SetPoint/SetParent/GetParent/Show/Hide/IsShown"],
+      "args": "stock 3.3.5a",
+      "returns": "stock",
+      "defined_in_lua": "stock (nothing to shim)"
+    }
+  },
+  "widget_methods": {
+    "GetAllAttributes": {
+      "callsites": ["SharedXML/Util/Util.lua:114 (the only use in the whole tree), reached from TalentTreeBase.lua:20 AttributesToKeyValues(self) in OnLoad"],
+      "defined_in_lua": null,
+      "note": "NON-STOCK Frame method (stock 3.3.5a exposes only GetAttribute(name)); not in api-surface.tsv or ext-lua-bindings.tsv because neither inventory covers widget methods (SetAtlas/SetMaskedTexture are absent from them too); 0 hits in stock-ui-tree. Returns a name->value table of the frame's XML <Attributes>. Called during OnLoad of every TalentTreeBase instance, so without it the tree frame never gets getEntries/getNodeTemplate/... and BuildTree asserts. XML attributes are applied natively before any Lua runs, so a shim cannot intercept SetAttribute to learn them; the practical shim is to override AttributesToKeyValues (or add Frame:GetAllAttributes via the frame metatable) with a per-template known-name list -- for TalentTreeBase: getNodeTemplate, getConnectionTemplate, getChoiceNodeTemplate, getEntries, getPosition, buttonWidth, buttonHeight, buttonSpacingX, buttonSpacingY, useGates, getGateTemplate, getGateAttachmentPoint, gateCurrency, gateCurrencyCount, getEntryGateRequirement, and the consumer-added onlyOneGate -- read each with stock GetAttribute(name)."
+    },
+    "ClearAndSetPoint": {
+      "callsites": ["FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:21 (inside gate:SetPosition, called from TalentTreeBase.lua:144)"],
+      "defined_in_lua": null,
+      "note": "NON-STOCK widget method: 83 files use it, none defines it, 0 hits in stock-ui-tree, not in either inventory (widget methods are not covered). Semantics are ClearAllPoints() + SetPoint(point, relativeTo, relativePoint, x, y); trivially polyfilled on the Frame metatable by the shim's compat layer."
+    },
+    "SetEntry": {
+      "callsites": ["TalentTreeBase.lua:219 (node:SetEntry(self.getEntry(...)) -- see notes, getEntry is undefined)", "TalentTreeBase.lua:250 (CreateNode)"],
+      "defined_in_lua": "AddOns/Ascension_CoATalents/Templates/CoATalentTemplates.lua:15 (CoATalentButtonMixin) -> FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:28 (stores self.entry)"
+    },
+    "UpdateDisplay (node)": {
+      "callsites": ["TalentTreeBase.lua:224 (RefreshTree)", "TalentTreeBase.lua:251 (CreateNode)"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:65 and CATalentChoiceBaseMixin.lua:85 (these call the natives C_CharacterAdvancement.CanAddByEntryID, GetPendingRankByEntryID, MeetsInvestmentForAddByEntryID, IsConnectionAllowed -- outside this addon's file set but exercised by every tree build)"
+    },
+    "IsChoiceNode": {
+      "callsites": ["TalentTreeBase.lua:73", "TalentTreeBase.lua:222", "TalentTreeBase.lua:276"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:366 (false) / CATalentChoiceBaseMixin.lua:248 (true)"
+    },
+    "Reset": {
+      "callsites": ["TalentTreeBase.lua:13-14 (optional: `if node.Reset then node:Reset() end` in the pool resetter)"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:361 / CATalentChoiceBaseMixin.lua:179"
+    },
+    "AddConnection": {
+      "callsites": ["TalentTreeBase.lua:286 (choice node)", "TalentTreeBase.lua:300 (single node)"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:198 (acquires a connection frame from the displayPool's connection pool, SetStartNode/SetEndNode)"
+    },
+    "AddNode": {
+      "callsites": ["TalentTreeBase.lua:344 (choiceNode:AddNode(node))"],
+      "defined_in_lua": "AddOns/Ascension_CoATalents/Templates/CoATalentTemplates.lua:130 (CoATalentChoiceButtonMixin) -> FrameXML/CharacterAdvancement/CATalentChoiceBaseMixin.lua:35 (REPARENTS the sub-node into the choice node's selection frame and appends to choiceNode.nodes; CreateNode at :245-247 reparents it back to the tree on pool reuse)"
+    },
+    "UpdateSearchMarker": {
+      "callsites": ["TalentTreeBase.lua:232"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:246 (calls native C_CharacterAdvancement.IsFiltered(entry.ID)) / CATalentChoiceBaseMixin.lua:188"
+    },
+    "SetGateInfo": {
+      "callsites": ["TalentTreeBase.lua:143 (gate:SetGateInfo({requiredCurrency=number, nodes={node,...}}))"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:6"
+    },
+    "SetPosition (gate)": {
+      "callsites": ["TalentTreeBase.lua:144 (gate:SetPosition(self.getGateAttachmentPoint(gateInfo.nodes)) -- 5 values point, relativeTo, relativePoint, x, y)"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:20 (-> ClearAndSetPoint)"
+    },
+    "UpdateDisplay (gate)": {
+      "callsites": ["TalentTreeBase.lua:113", "TalentTreeBase.lua:122", "TalentTreeBase.lua:145"],
+      "defined_in_lua": "AddOns/Ascension_CoATalents/Templates/CoATalentTemplates.lua:140 -> FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:11 (investedCurrency < requiredCurrency -> SetLocked)"
+    },
+    "IsLocked (gate)": {
+      "callsites": ["TalentTreeBase.lua:114"],
+      "defined_in_lua": "FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:32"
+    },
+    "fields_read_on_node_frames": {
+      "callsites": ["node.entry (:74-76, :218-222, :279-302)", "node.nodes (choice node sub-node array, :74, :278)", "node.positionX/positionY (written :337-338, :345-346)", "gateInfo.gate (:108)"],
+      "defined_in_lua": "plain table fields set by the mixins above"
+    }
+  },
+  "events": {
+    "CHARACTER_ADVANCEMENT_ENTRY_PATCHED": {
+      "registered_at": ["TalentTreeBase.lua:35 (OnLoad; never unregistered)"],
+      "handler_args": "TalentTreeBaseMixin:CHARACTER_ADVANCEMENT_ENTRY_PATCHED(isNew:boolean, class:string, tab:string, entryID:number) at :359 via OnEventToMethod. class/tab are compared by string equality with self.class/self.tab (the DBC-name strings passed to SetClassTab) and class == \"None\" is ignored. isNew=true -> MarkDirty(RebuildTree) (full rebuild next frame); isNew=false -> MarkEntryNeedUpdateDefinition(entryID) -> on the next RefreshTree calls self.getEntry(entryID) at :219, which is NOT set by any XML attribute or Lua in the tree -> 'attempt to call field getEntry (a nil value)'. See notes.",
+      "fired_by": "native (api-surface __EVENT__ NATIVE, Extensions.dll=Y); no C_Hook.SendEvent / Lua firer anywhere; this addon is the ONLY registrant of this event in the entire ui-tree."
+    },
+    "CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED": {
+      "registered_at": ["TalentTreeBase.lua:39 (OnShow)", "TalentTreeBase.lua:43 (UnregisterEvent in OnHide)"],
+      "handler_args": "TalentTreeBaseMixin:CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED() at :46 -- no payload read; marks DirtyReason.Nodes -> RefreshTree (every node:UpdateDisplay) + UpdateGates on the next OnUpdate.",
+      "fired_by": "native (api-surface __EVENT__ NATIVE); no Lua firer; 20+ registrants tree-wide (Ascension_CharacterAdvancement, Ascension_BuildCreator, Ascension_WildCard, FrameXML/PlayerFrame.lua:43, FrameXML/SpellListItem.lua:44, FrameXML/Ascension_CoAResources via C_Hook:Register at ClassResources.lua:461, FrameXML/Util/DraftUtil.lua:154). Per DESIGN section 5 the shim should fire it after ESSENCE/KNOWN/RESULT arrive and after ClearPendingBuildByTab; the tree only registers it while shown, so a fire while hidden is dropped and the consumer must rebuild on show."
+    },
+    "callback_events_generated_not_frame_events": {
+      "registered_at": ["TalentTreeBase.lua:24-27 (self:GenerateCallbackEvents({\"UPDATE_CURRENCY_DISPLAY\", \"TREE_UPDATE\"}))"],
+      "handler_args": "CallbackRegistryMixin callback names, not client events; never TriggerEvent-ed in this addon (declared for consumers that never use them either)",
+      "fired_by": "Lua (never, in the current tree)"
+    }
+  },
+  "frames": [
+    "TalentTreeBase -- <Frame name=\"TalentTreeBase\" virtual=\"true\"> (Ascension_TalentUI.xml:5): a TEMPLATE, no global frame instance is created by this addon",
+    "Instances (created by the consumer, for reference): CoATalentFrame...$parentClassTree (parentKey ClassTree) and $parentSpecTree (parentKey SpecTree) in AddOns/Ascension_CoATalents/CoATalentFrame.xml:73 and :114; pooled children are unnamed (CreateFrame with nil name via SharedXML/Pools.lua:173)"
+  ],
+  "stock_api_assumptions": [
+    "Frame:GetAllAttributes() -- non-stock widget method used by AttributesToKeyValues (SharedXML/Util/Util.lua:114) during this addon's OnLoad; stock 3.3.5a has only GetAttribute(name). Blocking.",
+    "Frame:ClearAndSetPoint(point, relativeTo, relativePoint, x, y) -- non-stock widget method used by CAGateBaseMixin:SetPosition (reached from CreateGates). Easily polyfilled.",
+    "UnitClass / UnitClassBase returning four values (localizedName, fileToken, classID, classMask) with CUSTOM tokens such as \"TINKER\" -- Lua wrappers at FrameXML/Util/GlobalOverwrites.lua:88 and :94 over the native, needed for C_Player:IsCustomClass() -> Enum.ClassMask.COA test at ResetTree (:56) and for the entry-point gates (Collections.lua:37, UIParent.lua:328). Stock UnitClass returns 2 values with stock tokens; stock FrameXML never references UnitClassBase.",
+    "Frame:RegisterEvent(\"CHARACTER_ADVANCEMENT_ENTRY_PATCHED\") / (\"CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED\") -- non-stock event names; the shim's EventBus hook must record and dispatch them through the frame's OnEvent script (OnEventToMethod).",
+    "CreateFromMixins / MixinAndLoadScripts accepting mixin NAMES as strings resolved via _G, and MixinAndLoadScripts auto-installing OnShow/OnHide/OnEvent scripts from mixin members (SharedXML/Util/Mixin.lua:152-179). Stock 3.3.5a has no Mixin.lua; the shim ships Ascension's SharedXML verbatim (DESIGN section 3).",
+    "TypeExtensions on the Lua std tables: string.startswith (SharedXML/TypeExtensions/string.lua:109), bit.contains (bit.lua:26), table.invert (table.lua:68) -- all reached transitively; ship SharedXML/TypeExtensions before FrameXML compat files.",
+    "XML <Attribute name= value= type=\"string|number|boolean\"> on a virtual Frame -- supported by stock 3.x XML, nothing to do, but the values are consumed only via GetAllAttributes (above).",
+    "Frame:HasScript(name) -- stock 3.3.5a, used by MixinAndLoadScripts; fine."
+  ],
+  "data_files": [
+    "No LoadAscensionContentJSON / C_Content use. All content arrives through C_CharacterAdvancement.GetEntriesByClass(classDBC, tabDBC, false); the entry records must carry at least: ID, Name, Class (DBC class name), Group, ConnectedNodes (array of IDs within the same class+tab), NodeType, Column, Row, PositionX, PositionY, RequiredTabAEInvestment, RequiredTabTEInvestment, Spells (rank-indexed array), Icon -- all present in the DESIGN section 4 entry record shape (advancement.tsv / entries.json / CA DBCs).",
+    "ClassConversions (embedded Lua table, FrameXML/Util/CharacterAdvancementUtil.lua:848-1009): the DBC-name <-> file-token maps that define the class/tab string keys; must be shipped in the compat layer and must agree with the generated data tables' Class/Tab values.",
+    "Enum tables (SharedXML/Enum.lua): Enum.Class (CustomStart=12), Enum.ClassMask (COA=0xFFFFF800), Enum.TraitNodeEntryType -- Lua, shipped with SharedXML.",
+    "Currency ids 383080 (AE) and 383081 (TE) appear as the gateCurrency attribute (Ascension_TalentUI.xml:40, CoATalentFrame.xml:108/:158) but are never read by TalentTreeBase.lua -- informational only."
+  ],
+  "protected_actions": [
+    "None in this addon: no CastSpellByID, PickupSpell, SetBinding, RunMacro, no secure templates, no attribute-driven secure clicks (the XML attributes are plain config, stripped in OnLoad).",
+    "For awareness only (outside this file set but instantiated by the tree): the node template's click handlers in FrameXML/CharacterAdvancement/CATalentBaseMixin.lua call C_CharacterAdvancement.AddByEntryID/:305, RemoveByEntryID/:288, PickupSpell/:356 and C_BuildEditor.RemoveSpell/:280 -- custom natives, not stock-protected functions, so an insecure shim can implement them (PickupSpell would need stock PickupSpell(spellId) with the real spell id, which is not protected in 3.3.5a outside combat lockdown)."
+  ],
+  "blocking_natives": [
+    "Frame:GetAllAttributes (via AttributesToKeyValues in OnLoad, TalentTreeBase.lua:20) -- every TalentTreeBase instance errors in OnLoad without it and never receives getEntries/getNodeTemplate",
+    "C_CharacterAdvancement.GetEntriesByClass(classDBC, tabDBC, false) -- BuildTree :331, first OnUpdate after the consumer's SetClassTab; must return an array",
+    "C_CharacterAdvancement.GetPendingTabAEInvestment(classDBC, tabDBC, 0) -- CreateGates :137 for the ClassTree (useGates=true in the consumer); must resolve at OnLoad time (attribute string -> function) and return a number",
+    "C_CharacterAdvancement.GetPendingTabTEInvestment(classDBC, tabDBC, 0) -- same for the SpecTree (CoATalentFrame.xml:159); absent from both binding dumps, provide it anyway or the SpecTree asserts",
+    "C_Logger.Error(fmt, ...) -- only on dangling ConnectedNodes, but a nil-call aborts BuildTreeConnections; define it",
+    "Not native but load-blocking compat: SharedXML (Mixin.lua, Pools.lua, CallbackRegistryMixin.lua, SharedConstants.lua, Util/Util.lua, Util/Const.lua, Util/GridLayoutUtil.lua, Enum.lua, TypeExtensions/*) and the loose FrameXML files FrameXML/Util/CharacterAdvancementUtil.lua, FrameXML/Util/C_Player.lua, FrameXML/Util/GlobalOverwrites.lua (UnitClass/UnitClassBase wrappers), FrameXML/CharacterAdvancement/{CharacterAdvancementBaseTemplates.xml, CATalentBaseMixin.lua, CATalentChoiceBaseMixin.lua, CAGateBaseMixin.lua} -- all already named in p0-framexml-gap.json"
+  ],
+  "notes": "WHAT IT IS: a 366-line pure-Lua layout engine for a talent tree (node pool, choice/group nodes, connection lines, investment gates, dirty-flag update loop). It touches exactly four native C_CharacterAdvancement members (GetEntriesByClass, GetPendingTabAEInvestment, GetPendingTabTEInvestment, ClearPendingBuildByTab), C_Logger.Error, and one non-stock widget method (GetAllAttributes); everything else it calls is Ascension SharedXML/FrameXML Lua that the shim ships verbatim. Its single consumer is Ascension_CoATalents (ClassTree + SpecTree); it is the whole CoA talent-tree renderer, so it is first-release scope.\n\nCLASS/TAB IDENTITY: self.class and self.tab are DBC NAME strings (\"Tinker\", \"General\", ...) and (\"Class\" | spec DBC name like \"Arms\"), produced by ClassConversions in FrameXML/Util/CharacterAdvancementUtil.lua. Every native call and the ENTRY_PATCHED payload use these exact strings (string ==), so the shim's Data.lua accessors and any EVENT it fires must use the same names, not class bytes or file tokens.\n\nUPDATE LOOP: MarkDirty sets a flag and hooks OnUpdate; Update() drains ONE flag per frame (next(self.dirty)) and unhooks when empty. BuildTree schedules RebuildGates and RebuildConnections, so a tree appears over three consecutive frames; a Lua error inside any stage leaves OnUpdate hooked and re-raises every frame (error spam) -- the shim's natives must never throw. RebuildTree wipes all other flags (:160).\n\nLATENT BUG (Ascension's own): self.getEntry is used at TalentTreeBase.lua:219 but is set by no XML attribute and no Lua anywhere in the tree. It is reached only when CHARACTER_ADVANCEMENT_ENTRY_PATCHED fires with isNew == false for the currently displayed class/tab. Shim options: never fire ENTRY_PATCHED with isNew=false (static data makes it unnecessary), or set TalentTreeBaseMixin.getEntry = C_CharacterAdvancement.GetEntryByInternalID (native present in ext-lua-bindings, 0x101772b0) from the shim so MixinAndLoadScripts copies it onto every instance.\n\nDEAD DEFAULTS: six of the base template's attribute defaults point at CharacterAdvancementUtil functions that do not exist anywhere (GetDisplayTemplateForEntry/ForConnection/ForEntryChoice/ForGate, GetGateAttachmentPoint, GetEntryAEGateRequirement); StringToGlobalTableEntry returns nil for them. Only getEntries (C_CharacterAdvancement.GetEntriesByClass) and getPosition (CharacterAdvancementUtil.GetEntryPosition) are live defaults. The consumer overrides all six, so this is harmless today but any new consumer must do the same; useGates defaults to false so the gate path is skipped unless overridden.\n\nGETALLATTRIBUTES: AttributesToKeyValues copies every XML attribute onto the frame and then SetAttribute(name, nil)s it. Because XML attributes are applied natively before OnLoad and stock exposes only GetAttribute(name), the shim must either add Frame:GetAllAttributes via the frame metatable (impossible to enumerate natively on stock) or override AttributesToKeyValues with a per-template known-name list (15 names in this template + onlyOneGate) read through GetAttribute. Do this in the shim BEFORE Ascension's SharedXML Util.lua is loaded or re-define it after.\n\nGETPENDINGTABTEINVESTMENT: classed NATIVE by the P0 inventory (string present in Extensions.dll) but absent from ext-lua-bindings.tsv and ca-lua-bindings.txt while its AE twin and the Class/Global TE variants are present; the CA binding table has unlisted slots at [esp+0x3d0..0x3dc] exactly where it would sit, so treat as a scanner miss. The SpecTree asserts on it at CreateGates, so the shim must define it regardless. Contract mirrors the AE one; both take a literal 0 third argument at every callsite in the tree (meaning unknown); other Ascension callers guard the result with `or 0`, this addon does not.\n\nGATES: a gate is created per distinct getEntryGateRequirement value (entry.RequiredTab{AE,TE}Investment > 0), sorted ascending; with the consumer's onlyOneGate=true only the lowest still-locked gate is shown. gate:UpdateDisplay(count) compares count < required; getGateAttachmentPoint(nodes) must return 5 values for SetPoint and error()s on an empty node list.\n\nCHOICE NODES: entries sharing a non-zero Group get ONE choice-node button (template from getChoiceNodeTemplate) at the position of the first sibling; each sibling node is still created and then reparented into the choice node by AddNode; connections from/to a grouped entry are re-targeted to its choice node (:282-283, :297-298). ConnectedNodes must reference IDs within the same class+tab list or C_Logger.Error fires per dangling edge.\n\nPOSITIONS: for CoA classes GetEntryPosition returns entry.PositionX/PositionY (default classes: Column/Row) and SimpleGridXY turns them into TOPLEFT offsets ((w+sx)*col-1, -((h+sy)*row-1)) with the consumer's 30x30 buttons and 14px spacing -- so PositionX/Y in the data tables are 1-based grid coordinates, not pixels.\n\nRESET: ResetTree -> ClearPendingBuildByTab(class, tab, true-for-CoA) and then WAITS for CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED to redraw; the shim's implementation must fire that event (while the tree is shown) or the reset is invisible.\n\nEVENTS: PENDING_BUILD_UPDATED is registered only while shown (OnShow/OnHide) and carries no payload; ENTRY_PATCHED is registered for life in OnLoad, payload (isNew, class, tab, entryID) with class \"None\" ignored, and this addon is the only registrant in the tree -- a first release can simply never fire it. Two CallbackRegistry names (UPDATE_CURRENCY_DISPLAY, TREE_UPDATE) are generated but never triggered.\n\nCROSS-CHECK: api-surface.tsv marks C_Logger.Error as present in stock Wow.exe -- substring artifact, stock has no C_Logger. Neither TSV covers widget methods, so their silence on GetAllAttributes/ClearAndSetPoint is not evidence either way; the 0 hits in stock-ui-tree and the absence of any Lua definition are."
+}

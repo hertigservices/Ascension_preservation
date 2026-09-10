@@ -125,12 +125,26 @@ def verify_generated(data_root):
             assert_lua_value(record,data.GetEntry(record['ID']),str(record['ID']))
         # Independently decode every ca_entry's SQL JSON, then compare with Lua/JSON source.
         sql_entries=[]
+        sql_references={}
+        sql_essence=[]
         with (base/'world-staging.sql').open(encoding='utf-8') as source:
             for line in source:
                 if line.startswith('INSERT INTO ca_entry VALUES '):
                     match=re.search(r"CONVERT\(X'([0-9a-f]+)' USING utf8mb4\)\);$",line.strip())
                     assert match, line[:100]
                     sql_entries.append(json.loads(bytes.fromhex(match[1]).decode('utf-8')))
+                elif line.startswith('INSERT INTO ca_reference VALUES '):
+                    cells=re.findall(r"CONVERT\(X'([0-9a-f]+)' USING utf8mb4\)",line)
+                    assert len(cells)==3
+                    assert bytes.fromhex(cells[0]).decode('utf-8')==dataset['key']
+                    kind=bytes.fromhex(cells[1]).decode('utf-8')
+                    sql_references.setdefault(kind,[]).append(json.loads(bytes.fromhex(cells[2]).decode('utf-8')))
+                elif line.startswith('INSERT INTO ca_essence VALUES '):
+                    cells=line.strip().split(' USING utf8mb4),',1)[1].removesuffix(');').split(',')
+                    sql_essence.append(dict(zip(('ID','Level','Family','Match1','Match2','Match3','Match4','AE','TE'),map(int,cells))))
+        tables=json.loads((base/'tables.json').read_text(encoding='utf-8-sig'))
+        assert sql_references=={k:v for k,v in tables.items() if k!='essence'}, 'SQL and client reference tables differ'
+        assert sql_essence==tables['essence'], 'SQL and client essence differ'
         assert sql_entries==expected, 'SQL and client entries differ'
         ae,te=data.GetBudget(28,80)
         assert (ae,te)==(36,35), 'Tinker must use family28'
@@ -138,12 +152,63 @@ def verify_generated(data_root):
         assert data.GetBudget(99999,80)==(None,None,'unavailable')
         assert data.CanEvaluateLearn(1149)==(False,'rules-not-harvested')
         assert data.CanEvaluateLearn(30610)==(False,'missing-relationship')
+        for name in ('C_ClassInfo.lua','C_CharacterAdvancement.lua'):
+            rt.execute((CORE.parent/'api'/name).read_text(encoding='utf-8-sig'))
+        preview=rt.globals().ASC.Preview
+        preview.Begin(dataset['key'],28,80)
+        info=rt.globals().C_ClassInfo.GetSpecInfo('TINKER','FIREARMS')
+        assert info['ID']==49 and info['Name']=='Demolition' and info['PassiveID']==4049
+        assert info['PassiveSpell']==805313 and info['Mail'] is True
+        assert list(rt.globals().C_ClassInfo.GetAllSpecs('TINKER').values())==['FIREARMS','MECHANICS','INVENTION']
+        identities=rt.globals().ASC.Data.Datasets[dataset['key']].tables.classIdentities
+        custom=[row for row in identities.values() if row['ID']>11]
+        assert len(custom)==21 and all(row['CAClassTypeID'] is not None for row in custom)
+        assert preview.Context.identity['CAClassTypeID']==30 and preview.Context.identity['ID']==28
+        ca=rt.globals().C_CharacterAdvancement
+        assert ca.GetEntryByInternalID(4049)['Spells'][1]==92138
+        assert ca.CanAddByEntryID(4049)==(False,'ASC_PREVIEW_READ_ONLY')
+        assert ca.AddByEntryID(4049)==(False,'ASC_PREVIEW_READ_ONLY')
+        assert ca.GetPendingRankByEntryID(4049)==(0,1)
+        assert ca.CanSwitchActiveChrSpec(49) is True and ca.CanSwitchActiveChrSpec(1) is False
+        assert ca.SwitchActiveChrSpec(49) is True and ca.GetActiveChrSpec()==49
+        assert len(ca.CanApplyPendingBuild())==9
+        ca.SetFilteredEntries('Napalm',rt.table())
+        assert ca.IsFiltered(4049) is True and ca.IsFiltered(1000) is False
+        ca.CancelPendingBuild()
+        assert preview.cancelNotification is True
+        preview.FlushNotifications()
+        assert preview.cancelNotification is None
         summary=data.SelfTest()
         gaps=json.loads((base/'gaps.json').read_text(encoding='utf-8-sig'))
         assert summary['unresolvedRelationships']==len(gaps['missing_relationships'])
         results.append({'dataset':dataset['key'],'entries':len(expected),'buckets':summary['buckets'],'unresolvedRelationships':summary['unresolvedRelationships'],'incompleteRuleEntries':summary['incompleteRuleEntries']})
     print(json.dumps({'lua':'5.1','datasetChecks':results},indent=2))
     return results
+
+
+
+def verify_pack(pack):
+    rt=LuaRuntime(unpack_returned_tuples=True)
+    rt.execute('\n    local methods={}\n    function methods:RegisterEvent(name) self.events[name]=true end\n    function methods:UnregisterEvent(name) self.events[name]=nil end\n    function methods:UnregisterAllEvents() self.events={} end\n    function methods:IsEventRegistered(name) return self.events[name] == true end\n    function methods:GetScript(name) return self.scripts[name] end\n    function methods:SetScript(name,fn) self.scripts[name]=fn end\n    function methods:Hide() self.hidden=true end\n    local mt={__index=methods}\n    function CreateFrame() return setmetatable({events={},scripts={}},mt) end\n    SlashCmdList={}\n    TEST_MESSAGES={}\n    DEFAULT_CHAT_FRAME={AddMessage=function(self,text) TEST_MESSAGES[#TEST_MESSAGES+1]=text end}\n    ')
+    manifest=json.loads((pack/'PACK-MANIFEST.json').read_text(encoding='utf-8-sig'))
+    for name,digest in manifest['files'].items():
+        assert hashlib.sha256((pack/name).read_bytes()).hexdigest()==digest,name
+    order=[]
+    for line in (pack/'!AscensionShim.toc').read_text(encoding='utf-8-sig').splitlines():
+        if not line.strip() or line.startswith('#'):continue
+        source=(pack/line.replace('\\','/')).resolve()
+        assert source.is_relative_to(pack.resolve()) and source.is_file(),line
+        rt.execute(source.read_text(encoding='utf-8-sig'));order.append(line)
+    rt.globals().SlashCmdList.ASCENSIONPREVIEW('selftest')
+    assert '10255 entries' in rt.globals().TEST_MESSAGES[1]
+    rt.globals().SlashCmdList.ASCENSIONPREVIEW('spec 49')
+    assert rt.globals().C_CharacterAdvancement.GetActiveChrSpec()==49
+    assert rt.globals().ASC.Preview.Context.readOnly is True
+    if manifest['config'].get('buildCatalogue'):
+        rt.globals().SlashCmdList.ASCENSIONPREVIEW('builds Leveling')
+        assert rt.globals().C_BuildCreator.GetNumBuilds()==139
+        rt.globals().ASC.Preview.Driver.GetScript(rt.globals().ASC.Preview.Driver,'OnUpdate')()
+    print('Pack bootstrap passed under a mocked stock host:',len(order),'Lua files. Visual verification remains pending.')
 
 
 def main():
@@ -154,6 +219,7 @@ def main():
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():return 1
     verify_generated(args.data)
+    verify_pack(ROOT/'build/p2-core-preview/Interface/AddOns/!AscensionShim')
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

@@ -1,0 +1,537 @@
+{
+  "target": "Ascension_CoATalents",
+  "toc": {
+    "load_on_demand": true,
+    "dependencies": ["Ascension_TalentUI", "Ascension_Collections"],
+    "saved_variables": ["CoATalentFooterLayoutDB"],
+    "files_in_order": [
+      "CoACharacterAdvancementUtil.lua",
+      "Templates/CoATalentTemplates.xml",
+      "Templates/CoATalentTemplates.xml -> Templates/CoASpecChoiceMixin.lua",
+      "Templates/CoATalentTemplates.xml -> Templates/CoATalentTemplates.lua",
+      "CoATalentFrame.xml",
+      "CoATalentFrame.xml -> CoATreeViewMixin.lua",
+      "CoATalentFrame.xml -> CoASpecViewMixin.lua",
+      "CoATalentFrame.xml -> CoATalentFrame.lua"
+    ]
+  },
+  "entry_points": [
+    "Collections tab: Ascension_Collections/Collections.lua:37-45 registers the CharacterAdvancement tab with panel name \"CoATalentFrame\" when IsCustomClass() is true (else \"CharacterAdvancement\"); tab id stored in Collections.Tabs.CharacterAdvancement; tab preclick = CharacterAdvancement_LoadUI.",
+    "LoadUI: FrameXML/UIParent.lua:327-330 CharacterAdvancement_LoadUI() -> UIParentLoadAddOn(\"Ascension_CoATalents\") when IsCustomClass(); FrameXML/Util/GlobalOverwrites.lua:471-477 overrides LoadAddOn so LoadAddOn(\"Ascension_CharacterAdvancement\") loads Ascension_CoATalents for custom classes.",
+    "Open: Collections:GoToTab(Collections.Tabs.CharacterAdvancement) (Ascension_Collections/Collections.lua:181-189 -> ShowUIPanel(Collections) + SelectTabID). Callers: FrameXML/UIParent.lua:655-668 ToggleCollections() (micro button / keybinding; routes to Vanity tab when IsCustomClass() and UnitLevel(\"player\") < 10, to HeroArchitect in BuildDraft mode), FrameXML/StaticPopup.lua:116 (CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES button3 GO_BACK), FrameXML/Util/TokenUtil.lua:169, AddOns/Ascension_BuildCreator/BuildView.lua:664, BuildListItem.lua:209, BuildEditor/BuildEditorTemplates.xml:380, AscensionUI/Gossips/PrestigeMode.lua:1103, AscensionUI/BuildCreatorHelp/BuildCreatorHelpFreepick.lua:14.",
+    "Auto-open: Ascension_Collections/Collections.lua:12-14,195-207 registers PLAYER_LEVEL_UP for custom classes below COA_AUTO_SHOW_TALENTS_LEVEL (=10, FrameXML/Constants.lua:5) and queues GoToTab(CharacterAdvancement) through C_PopupQueue after combat; Collections.lua:131-133 disables the tab until C_Player:GetLevel() >= 10.",
+    "Frame OnShow chain: CoATalentFrame (parent=Collections, hidden) is shown by the Collections tab system; CoATalentFrameMixin:OnShow (CoATalentFrame.lua:172) -> UpdateActiveSpec -> C_CharacterAdvancement.GetActiveChrSpec(): nil -> SpecView (spec picker), number -> TreeView + TreeView:SetSpecID.",
+    "Slash commands (do NOT open the frame): /coatalentfooter, /coatfooter (CoATalentFrame.lua:149-151) adjust saved footer button offsets (CoATalentFooterLayoutDB).",
+    "Close: CloseButton -> HideUIPanel(Collections) (CoATalentFrame.lua:162-164); Collections is registered in UIPanelWindows at FrameXML/UIParent.lua:57.",
+    "Local driver (not Ascension's): C:\\AzerothRealm\\client-ascension\\Interface\\AddOns\\Ascension_CoAReader (/coa show <Class>) drives CoATalentFrame.TreeView.ClassTree:SetClassTab(classDBC,\"Class\") and TreeView:SetSpecID(specID) directly, proving the render path is static and cross-class."
+  ],
+  "namespaces": {
+    "C_CharacterAdvancement": {
+      "GetActiveChrSpec": {
+        "callsites": ["CoASpecViewMixin.lua:26", "CoATalentFrame.lua:187", "CoATalentFrame.lua:199", "CoATalentFrame.lua:290"],
+        "args": "()",
+        "returns": "specID:number|nil. nil means 'no active CoA specialization chosen' -> CoATalentFrameMixin:UpdateActiveSpec shows SpecView; a number is passed to C_ClassInfo.GetSpecInfoByID(specID), TreeView:SetSpecID(specID), and compared with CoASpecChoiceMixin:GetSpecID() (specInfo.ID). Scalar.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanSwitchActiveChrSpec": {
+        "callsites": ["Templates/CoASpecChoiceMixin.lua:224"],
+        "args": "(specID:number)",
+        "returns": "boolean; false -> spec card set to State.Disabled (SelectButton disabled, banner desaturated, text DISABLED). Scalar truthiness only.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SwitchActiveChrSpec": {
+        "callsites": ["CoATalentFrame.lua:231"],
+        "args": "(specID:number)",
+        "returns": "return value ignored. Caller sets self.expectingNewSpec=true and waits for CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED (CoATalentFrame.lua:234-238) to call UpdateActiveSpec; ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED (CoATalentFrame.lua:246, CoATreeViewMixin.lua:149) also refreshes. After the switch GetActiveChrSpec() must return the new specID.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED (and ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED)",
+        "defined_in_lua": null
+      },
+      "IsPending": {
+        "callsites": ["CoATalentFrame.lua:181", "CoATreeViewMixin.lua:211"],
+        "args": "()",
+        "returns": "boolean: true when the pending (unsaved) build differs from the applied one. OnHide shows StaticPopup CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES when true; TreeView shows UndoButton + SaveChanges.YellowGlow and hides ResetButton when true.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CancelPendingBuild": {
+        "callsites": ["CoATalentFrame.lua:153-156 (hooksecurefunc at file load, guarded by 'if C_CharacterAdvancement and C_CharacterAdvancement.CancelPendingBuild')", "CoATalentFrame.xml:366 (UndoButton OnClick)"],
+        "args": "()",
+        "returns": "return value ignored. Must be a real table field on C_CharacterAdvancement at addon load so hooksecurefunc(C_CharacterAdvancement, \"CancelPendingBuild\", fn) succeeds; the hook sets a RefreshFromCancel flag consumed on the next CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED (CoATalentFrame.lua:240-243), so the native MUST fire that event after cancelling. Also called from StaticPopup CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES OnButton2 (FrameXML/StaticPopup.lua).",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "ClearPendingBuild": {
+        "callsites": ["CoATreeViewMixin.lua:129 (Reset dropdown 'all')", "(indirect) CoATalentFrame.lua:281 via FrameXML/Util/BuildCreatorUtil.lua:605 ImportPendingBuildID"],
+        "args": "(onlyClearAllowed:boolean) -- Const.CharacterAdvancement.OnlyClearAllowed=true (keep entries the player may not refund), ClearEverything=false",
+        "returns": "ignored; UI refreshes via CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "GetPendingRemainingAE": {
+        "callsites": ["CoATreeViewMixin.lua:192"],
+        "args": "()",
+        "returns": "number (remaining Ability Essence in the pending build). Used as FontString text and compared '> 0' -> green vs disabled colour. Must never be nil (arithmetic compare).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingRemainingTE": {
+        "callsites": ["CoATreeViewMixin.lua:193"],
+        "args": "()",
+        "returns": "number (remaining Talent Essence in the pending build); same handling as AE.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingTabAEInvestment": {
+        "callsites": ["CoATalentFrame.xml:109 (ClassTree attribute gateCurrencyCount=\"global:C_CharacterAdvancement.GetPendingTabAEInvestment\", resolved to the function by AttributesToKeyValues SharedXML/Util/Util.lua:96 and called from Ascension_TalentUI/TalentTreeBase.lua:105,137)"],
+        "args": "(classDBCName:string, tabDBCName:string, 0:number) -- e.g. (\"Tinker\", \"Class\", 0); class/tab names are the CharacterAdvancementClassTypes / TabTypes DBC tokens from ClassConversions (FrameXML/Util/CharacterAdvancementUtil.lua:848+)",
+        "returns": "number: AE already invested in that tab in the pending build; compared against entry.RequiredTabAEInvestment by CAGateBaseMixin:UpdateDisplay (locked when invested < required) and shown as 'remainder' text on the CoA gate.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingTabTEInvestment": {
+        "callsites": ["CoATalentFrame.xml:159 (SpecTree attribute gateCurrencyCount, same mechanism as AE)"],
+        "args": "(classDBCName:string, tabDBCName:string, 0:number)",
+        "returns": "number: TE invested in that spec tab; compared against entry.RequiredTabTEInvestment. NOT in ext-lua-bindings.tsv but api-surface.tsv marks it NATIVE (Extensions.dll) and FrameXML/Util/GlobalOverwrites.lua:368 calls it unconditionally.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanApplyPendingBuild": {
+        "callsites": ["CoATreeViewMixin.lua:216", "(indirect) CoATalentFrame.xml:303 via FrameXML/Util/CharacterAdvancementUtil.lua:446 ConfirmApplyPendingBuild", "(indirect) StaticPopup CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES OnShow"],
+        "args": "()",
+        "returns": "multiple: canApply:boolean, reason:string|nil (a GlobalStrings key looked up as _G[reason], else used verbatim; then :format(entryName, entryRank, traversalText)), traversalError:string|nil (also _G-resolved), entryID:number|nil (resolved with GetEntryByInternalID for its .Name), entryRank:number|nil, marksCost:number, goldCost:number, tokenType, tokenCost. SaveChanges:SetEnabled(canApply); when a pending build exists the tooltip shows the formatted error in red. ConfirmApplyPendingBuild does 'marksCost > 0' and 'goldCost > 0' so those two must be numbers, never nil.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntryByInternalID": {
+        "callsites": ["CoATreeViewMixin.lua:221"],
+        "args": "(entryID:number)",
+        "returns": "entry record table or nil (only .Name is read here; falls back to the raw entryID). Same record shape as GetEntriesByClass items (DESIGN.md §4).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "SetFilteredEntries": {
+        "callsites": ["CoATreeViewMixin.lua:250"],
+        "args": "(searchText:string, filter:table) -- second arg is table.empty here; other callers pass a filter table from a filter dropdown (AddOns/Ascension_CharacterAdvancement/CharacterAdvancement.lua:743,749)",
+        "returns": "ignored. Side effect: subsequent C_CharacterAdvancement.IsFiltered(entryID) (FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:247, CATalentChoiceBaseMixin.lua:190) returns true for matching entries; the trees are marked DirtyReason.Search and show LocationIcon markers on matches.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetEntriesByClass": {
+        "callsites": ["(indirect) CoATreeViewMixin.lua:62 ClassTree:SetClassTab(classDBC,\"Class\") and CoATreeViewMixin.lua:245 SpecTree:SetClassTab(classDBC, specDBC) -> Ascension_TalentUI/TalentTreeBase.lua:331 via attribute getEntries=\"global:C_CharacterAdvancement.GetEntriesByClass\" (Ascension_TalentUI.xml:30)"],
+        "args": "(classDBCName:string, tabDBCName:string, includeHidden:boolean=false)",
+        "returns": "array (ipairs) of entry records. Fields read on the CoA render path: ID, Group (0/nil = single node, else choice-node group id), ConnectedNodes (array of entry IDs), Spells (array of spellIDs indexed by rank), NodeType (string key into Enum.TraitNodeEntryType: SpendSquare/SpendCircle/SpendHex/SpendDiamond -> CoACharacterAdvancementUtil.GetDisplayTemplateForEntry), PositionX/PositionY (used because Enum.Class[classFile] >= Enum.Class.CustomStart in CharacterAdvancementUtil.GetEntryPosition; stock classes use Column/Row), Class (DBC token, converted by GetClassFileByDBC), Name, RequiredTabAEInvestment, RequiredTabTEInvestment (gate thresholds, CoACharacterAdvancementUtil.lua:103-109).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetActiveSpecID": {
+        "callsites": ["(indirect) CoATreeViewMixin.lua:159,165 and Templates/CoATalentTemplates.lua:363 via FrameXML/Util/BuildCreatorUtil.lua:177 GetActiveBuildID -> FrameXML/Util/SpecializationUtil.lua:65"],
+        "args": "()",
+        "returns": "specID:number (the 'specialization slot' used by Hero Architect builds; passed to C_BuildCreator.GetActiveBuild). Distinct from GetActiveChrSpec (the CoA class specialization).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ClearPendingBuildByTab": {
+        "callsites": ["(indirect) CoATreeViewMixin.lua:115,122 ClassTree/SpecTree:ResetTree -> Ascension_TalentUI/TalentTreeBase.lua:59"],
+        "args": "(classDBCName:string, tabDBCName:string, onlyClearAllowed:boolean) -- true for custom classes (C_Player:IsCustomClass())",
+        "returns": "ignored; refresh via CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "ImportPendingBuildID": {
+        "callsites": ["(indirect) CoATalentFrame.lua:281 SelectBuild -> FrameXML/Util/BuildCreatorUtil.lua:606"],
+        "args": "(buildID:string uuid)",
+        "returns": "ignored; the pending build is replaced by the Hero Architect build's entries; refresh via CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "ImportPendingBuild": {
+        "callsites": ["(indirect) CoATalentFrame.xml:412 StaticPopup_Show(\"CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD\") -> FrameXML/StaticPopup.lua OnButton1"],
+        "args": "(buildString:string) -- the talents=/overview/ segment extracted from an ascension.gg URL by CharacterAdvancementUtil.GetBuildFromURL",
+        "returns": "for CoA players: success:boolean, traversalError, entryID, entryRank (used to build an error message); non-CoA ignores the return.",
+        "sync": "sync (state change then CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED)",
+        "defined_in_lua": null
+      },
+      "ExportBuild": {
+        "callsites": ["(indirect) CoATalentFrame.xml:389 ShareBuildButton -> FrameXML/Util/CharacterAdvancementUtil.lua:517 GetBuildWebURL"],
+        "args": "(pending:boolean=true)",
+        "returns": "buildLink:string|nil; formatted into https://ascension.gg/v2/builder/coa/overview/<link> when IsConquestOfAzerothPlayer(), then Internal_CopyToClipboard.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ApplyPendingBuild": {
+        "callsites": ["(indirect) CoATalentFrame.xml:303 SaveChanges -> FrameXML/Util/CharacterAdvancementUtil.lua:463 ConfirmApplyPendingBuild (or StaticPopup CONFIRM_APPLY_PENDING_BUILD OnAccept when marks/gold cost > 0)"],
+        "args": "()",
+        "returns": "ignored; result arrives as CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT(success, reason) (CoATreeViewMixin.lua:138 plays UI_CLASS_TALENT_APPLY_COMPLETE on success) followed by CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT",
+        "defined_in_lua": null
+      },
+      "CanAddByEntryID": {
+        "callsites": ["(indirect, per node on tree build/refresh) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:70,303; CATalentChoiceBaseMixin.lua:100 -- reached from CoATalentButton*/CoATalentChoiceButton templates inherited by every CoA node"],
+        "args": "(entryID:number, numRanks:number=1)",
+        "returns": "canLearn:boolean, cantLearnReason. Drives node visual state (Selectable/Disabled) and left-click AddByEntryID.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetPendingRankByEntryID": {
+        "callsites": ["(indirect, per node) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:71; CATalentChoiceBaseMixin.lua:48"],
+        "args": "(entryID:number)",
+        "returns": "rank:number, maxRank:number (rank 0 = not taken). Selects entry.Spells[max(rank,1)] for the icon and RankFrame text 'rank/maxRank'.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "MeetsInvestmentForAddByEntryID": {
+        "callsites": ["(indirect, per node) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:72"],
+        "args": "(entryID:number, numRanks:number=1)",
+        "returns": "boolean; false -> node isGated (locked art, 'spend more points' tooltip).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsConnectionAllowed": {
+        "callsites": ["(indirect, per edge) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:215; CATalentChoiceBaseMixin.lua:241"],
+        "args": "(fromEntryID:number, toEntryID:number)",
+        "returns": "boolean -> connection line state Connected vs NoConnection (CALineConnectionTemplate).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsFiltered": {
+        "callsites": ["(indirect, on DirtyReason.Search) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:247; CATalentChoiceBaseMixin.lua:190"],
+        "args": "(entryID:number)",
+        "returns": "boolean -> shows Icon.LocationIcon search marker.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "CanRemoveByEntryID": {
+        "callsites": ["(indirect, node right-click / tooltip) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:287,327"],
+        "args": "(entryID:number)",
+        "returns": "boolean.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "AddByEntryID": {
+        "callsites": ["(indirect, node left-click) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:305"],
+        "args": "(entryID:number, numRanks:number=1)",
+        "returns": "ignored; pending build changes -> CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "RemoveByEntryID": {
+        "callsites": ["(indirect, node right-click) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:288"],
+        "args": "(entryID:number)",
+        "returns": "ignored; -> CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED.",
+        "sync": "async-with-event CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED",
+        "defined_in_lua": null
+      },
+      "IsKnownID": {
+        "callsites": ["(indirect, node drag) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:355"],
+        "args": "(entryID:number)",
+        "returns": "boolean (entry learned on the live character, not just pending).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "PickupSpell": {
+        "callsites": ["(indirect, node OnDragStart) FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:356"],
+        "args": "(entryID:number)",
+        "returns": "puts the entry's spell on the cursor (protected-equivalent of stock PickupSpell).",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    },
+    "C_ClassInfo": {
+      "GetAllSpecs": {
+        "callsites": ["CoASpecViewMixin.lua:8", "(indirect) CoATalentFrame.lua:202,294 and CoATreeViewMixin.lua:236 via SharedXML/Util/ClassInfoUtil.lua:235 GetSpecInfoByID placeholder"],
+        "args": "(classToken:string) -- the UnitClass file token, custom CoA tokens included (e.g. \"TINKER\"); the placeholder GetSpecInfoByID iterates CLASS_SORT_ORDER tokens",
+        "returns": "array (ipairs, #specs) of spec file-name strings (e.g. \"Firearms\"); each is passed back to GetSpecInfo(classToken, spec). Called in CoASpecViewMixin:OnLoad, i.e. at ADDON LOAD.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpecInfo": {
+        "callsites": ["CoASpecViewMixin.lua:15", "(indirect) via SharedXML/Util/ClassInfoUtil.lua:237 GetSpecInfoByID placeholder"],
+        "args": "(classToken:string, specFile:string)",
+        "returns": "specInfo record table. Fields read by this addon: ID (number, compared with GetActiveChrSpec / passed to CanSwitchActiveChrSpec & SwitchActiveChrSpec), Name (display, :upper() for tree label), Spec (spec file name -> CharacterAdvancementUtil.GetSpecDBCByFile and atlas names 'talents-background-<class>-<spec>' / 'spec-thumbnail-<class>-<spec>' lower-cased; also '#SPEC:<Spec>' Hero Architect filter tag), Class (class file token -> GetClassDBCByFile and the atlas names), Description (string), DifficultyRating (string; _G['SPEC_COMPLEXITY_'..upper] and COMPLEXITY_COLORS[rating]; C_Logger.Error if missing), SpecFilename (icon basename under Interface\\Icons\\ for the portrait), MeleeDPS/RangedDPS/CasterDPS/Healer/Tank/Support (booleans -> role icons), PrimaryStats (array of Enum.PrimaryStat keys or ids), PassiveSpell (spellID, first sample ability), ExampleSpells (array of spellIDs). Other UI reads PassiveID, SortOrder, PrimaryResources, SecondaryResources, Plate/Mail/Leather/Cloth. Called at ADDON LOAD for every spec of the player's class.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetSpecInfoByID": {
+        "callsites": ["CoATalentFrame.lua:202", "CoATalentFrame.lua:294", "CoATreeViewMixin.lua:236"],
+        "args": "(specID:number)",
+        "returns": "specInfo record (same shape as GetSpecInfo) or nil; CoATreeViewMixin:SetSpecID indexes .Spec/.Class/.Name without a nil check, UpdatePortrait nil-checks. NOT in ext-lua-bindings.tsv: the running definition is the Lua placeholder in SharedXML/Util/ClassInfoUtil.lua:232-244 (guarded 'if not C_ClassInfo.GetSpecInfoByID'), which scans CLASS_SORT_ORDER x GetAllSpecs x GetSpecInfo.",
+        "sync": "sync",
+        "defined_in_lua": "SharedXML/Util/ClassInfoUtil.lua:233"
+      }
+    },
+    "C_BuildCreator": {
+      "GetNumBuilds": {
+        "callsites": ["CoATalentFrame.lua:258 (passed as function to BuildList:SetGetNumResultsFunction)", "CoATalentFrame.lua:300"],
+        "args": "()",
+        "returns": "number of builds in the current (filtered) build list; 0 -> NoItemText shown.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "QueryAllBuilds": {
+        "callsites": ["CoATalentFrame.lua:277"],
+        "args": "(category:string) -- Enum.BuildCategory.Leveling = \"Leveling\"",
+        "returns": "ignored; Loading overlay shown until BUILD_CREATOR_CATEGORY_RESULT(category) fires (CoATalentFrame.lua:288).",
+        "sync": "async-with-event BUILD_CREATOR_CATEGORY_RESULT",
+        "defined_in_lua": null
+      },
+      "UpdateFilter": {
+        "callsites": ["CoATalentFrame.lua:297"],
+        "args": "(searchText:string, classFilter:table, sort:table) -- here (\"#SPEC:<specInfo.Spec>\", table.empty, table.empty); Ascension_BuildCreator passes (text, self:ApplyDefaultClassFilter(), self.sort)",
+        "returns": "ignored; synchronously re-filters the list so that GetNumBuilds/GetBuildAtIndex reflect it (BuildList:RefreshScrollFrame follows immediately). The '#SPEC:' tag is embedded in build Names (CoACharacterAdvancementUtil.FormatArchitectTag / StripArchitectTag).",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "GetBuildAtIndex": {
+        "callsites": ["Templates/CoATalentTemplates.lua:348"],
+        "args": "(index:number 1-based)",
+        "returns": "build record table or nil. Fields read here: ID (uuid string), Name (string, may carry '#SPEC:<spec>' suffix that is stripped), Subtext (string), Description (string), Icon (Interface\\Icons\\ basename), Roles (key of Enum.BuildRoles, e.g. \"PLAYER_ROLE_TANK\" -> LFG role via BuildCreatorUtil.ConvertBuildRoleToLFGRole), Upvotes (number|nil). Other UI reads Category, Spells, AuthorName, NeedsRepairs, UpdatedTime, PrimaryStat, LegendaryEnchant, DifficultyRating.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "IsUpvotedBuild": {
+        "callsites": ["Templates/CoATalentTemplates.lua:386", "Templates/CoATalentTemplates.lua:399"],
+        "args": "(buildID:string)",
+        "returns": "boolean -> LikeButton:SetChecked.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "RateBuild": {
+        "callsites": ["Templates/CoATalentTemplates.lua:401", "Templates/CoATalentTemplates.lua:403"],
+        "args": "(buildID:string, upvote:boolean)",
+        "returns": "ignored; BUILD_CREATOR_RATE_RESULT(result, buildID, rating:number) re-enables LikeButton and updates data.Upvotes.",
+        "sync": "async-with-event BUILD_CREATOR_RATE_RESULT",
+        "defined_in_lua": null
+      },
+      "GetActiveBuild": {
+        "callsites": ["(indirect) CoATreeViewMixin.lua:159,165 and Templates/CoATalentTemplates.lua:363 via FrameXML/Util/BuildCreatorUtil.lua:178 GetActiveBuildID (called in TreeView OnShow)"],
+        "args": "(specID:number) -- from C_CharacterAdvancement.GetActiveSpecID()",
+        "returns": "buildID:string uuid, or nil/\"\" when none (string.isNilOrEmpty). Non-empty -> DeactivateBuild button shown, BuildDropDown text via BuildCreatorUtil.ContinueOnLoad (which loads Ascension_BuildCreator and calls BuildCreatorFrame:ContinueOnLoad). NOT in ext-lua-bindings.tsv (only C_BuildEditor.GetActiveBuild is), api-surface.tsv marks it NATIVE.",
+        "sync": "sync",
+        "defined_in_lua": null
+      },
+      "ActivateBuild": {
+        "callsites": ["(indirect) CoATalentFrame.xml:303 -> FrameXML/Util/CharacterAdvancementUtil.lua:465 (after ApplyPendingBuild when a Hero Architect build was imported)"],
+        "args": "(buildID:string, true, true)",
+        "returns": "ignored; BUILD_CREATOR_ACTIVATE_RESULT refreshes the dropdowns (CoATreeViewMixin.lua:153).",
+        "sync": "async-with-event BUILD_CREATOR_ACTIVATE_RESULT",
+        "defined_in_lua": null
+      },
+      "DeactivateBuild": {
+        "callsites": ["(indirect) CoATalentFrame.xml:325 StaticPopup_Show(\"CONFIRM_DEACTIVATE_BUILD\", nil, nil, activeBuildID) -> FrameXML/StaticPopup.lua OnAccept"],
+        "args": "(buildID:string)",
+        "returns": "boolean (true -> BuildCreatorFrame:ShowLoading if loaded); BUILD_CREATOR_DEACTIVATE_RESULT refreshes dropdowns and hides DeactivateBuild (CoATreeViewMixin.lua:157-160).",
+        "sync": "async-with-event BUILD_CREATOR_DEACTIVATE_RESULT",
+        "defined_in_lua": null
+      }
+    },
+    "C_Logger": {
+      "Error": {
+        "callsites": ["Templates/CoASpecChoiceMixin.lua:111", "Templates/CoATalentTemplates.lua:169", "Templates/CoATalentTemplates.lua:187", "Templates/CoATalentTemplates.lua:196", "Templates/CoATalentTemplates.lua:214", "Templates/CoATalentTemplates.lua:222", "(indirect, tree build) Ascension_TalentUI/TalentTreeBase.lua:288,302 for dangling ConnectedNodes"],
+        "args": "(format:string, ...) -- printf-style, string.format semantics",
+        "returns": "nothing (diagnostic log). Only reached on bad data (missing DifficultyRating, unknown role/stat/armor, dangling edge). A print()-backed stub suffices.",
+        "sync": "sync",
+        "defined_in_lua": null
+      }
+    }
+  },
+  "globals": {
+    "Internal_CopyToClipboard": {
+      "callsites": ["CoATalentFrame.xml:391"],
+      "args": "(text:string)",
+      "returns": "nothing; copies the build URL to the OS clipboard. Native (Extensions.dll: bound as C_ClassInfo.Internal_CopyToClipboard 0x100dbbd0 and C_Realm.Internal_CopyToClipboard, and exposed as a bare global per api-surface.tsv). No stock equivalent; shim can no-op and show the link in an EditBox instead.",
+      "defined_in_lua": null
+    },
+    "UnitClass": {
+      "callsites": ["CoASpecViewMixin.lua:4", "CoATalentFrame.lua:160", "CoATreeViewMixin.lua:60"],
+      "args": "(\"player\")",
+      "returns": "select(2, ...) = class file token. Ascension's FrameXML/Util/GlobalOverwrites.lua:88 wraps the native to return (name, token, Enum.Class[token], Enum.ClassMask[token]); for a CoA character the NATIVE returns a custom token (TINKER, NECROMANCER, ... per Enum.Class 12-32) which is then used for LOCALIZED_CLASS_NAMES_MALE[token], CLASS_ICON_TCOORDS_ROUND[token], C_ClassInfo.GetAllSpecs(token) and ClassConversions.ClassFileToDBC[token]. The shim's UnitClass override (DESIGN §6) must produce this token from the CoA class byte.",
+      "defined_in_lua": "FrameXML/Util/GlobalOverwrites.lua:88 (wrapper over the native)"
+    },
+    "hooksecurefunc": {
+      "callsites": ["CoATalentFrame.lua:154"],
+      "args": "(C_CharacterAdvancement, \"CancelPendingBuild\", fn)",
+      "returns": "stock; requires the field to exist at file load.",
+      "defined_in_lua": null
+    },
+    "PlaySound": {
+      "callsites": ["CoATalentFrame.xml:188,205,302,322,364,388,411,430,444", "Templates/CoATalentTemplates.xml:589", "Templates/CoATalentTemplates.lua:400,404", "CoATreeViewMixin.lua:140"],
+      "args": "(SOUNDKIT.<KEY>) where SOUNDKIT values are numeric sound-kit ids or arrays of ids (SharedXML/Util/SoundKit.lua; e.g. UCHATSCROLLBUTTON_70 = {173751,...}, UI_CLASS_TALENT_APPLY_COMPLETE = 393882, CHAT_SCROLL_BUTTON = {792,...})",
+      "returns": "SharedXML/Util/SharedOverwrites.lua:16-30 wraps the native: picks an index from an array and calls _PlaySound(number). Stock 3.3.5a PlaySound takes a sound NAME string; the shim must map numeric kit ids to stock names or swallow them.",
+      "defined_in_lua": "SharedXML/Util/SharedOverwrites.lua:17 (wrapper over the native)"
+    },
+    "SendSystemMessage": {
+      "callsites": ["CoATalentFrame.xml:392"],
+      "args": "(text:string)",
+      "returns": "stock native (used by stock FrameXML/ChatFrame.lua:1975).",
+      "defined_in_lua": null
+    },
+    "GetMouseFocus": {
+      "callsites": ["Templates/CoASpecChoiceMixin.lua:352"],
+      "args": "()",
+      "returns": "stock.",
+      "defined_in_lua": null
+    },
+    "GetSpellInfo": {
+      "callsites": ["(indirect) Templates/CoASpecChoiceMixin.lua:199,206 SetSpell -> SharedXML/SharedTemplates.lua SpellIconTemplateMixin:SetSpell 'select(3, GetSpellInfo(spellID))'"],
+      "args": "(spellID:number) -- Ascension custom spell ids (PassiveSpell / ExampleSpells, ids up to ~1.5M)",
+      "returns": "stock signature (icon = 3rd value); the ids must resolve in the client's Spell.dbc (patch-M/S/T).",
+      "defined_in_lua": null
+    },
+    "GetTextureMetatable / GetButtonMetatable / GetCheckButtonMetatable / GetFrameMetatable": {
+      "callsites": ["(compat layer) SharedXML/TypeExtensions/Texture.lua:1, Button.lua:1-2, Frame.lua:2 -- required for every widget method this addon uses that is Lua-defined (SetAtlas, FlipX, SetShown, SetEnabled, SetCheckedAtlas, GetBoolValue, CallScript, SetPortraitTexture)"],
+      "args": "()",
+      "returns": "the widget metatable whose __index the extensions patch. UNRESOLVED in api-surface.tsv (native, Extensions.dll). Shim: return getmetatable(CreateFrame(\"Frame\"/\"Button\"/\"CheckButton\")) and getmetatable(UIParent:CreateTexture()).",
+      "defined_in_lua": null
+    },
+    "CreateFramePool": { "callsites": ["CoASpecViewMixin.lua:6"], "args": "(frameType, parent, template[, resetter])", "returns": "pool with Acquire()/EnumerateActive()", "defined_in_lua": "SharedXML/Pools.lua:197" },
+    "CreateFramePoolCollection": { "callsites": ["Templates/CoASpecChoiceMixin.lua:13"], "args": "()", "returns": "collection with GetOrCreatePool(frameType, parent, template)", "defined_in_lua": "SharedXML/Pools.lua:256" },
+    "CreateFromMixins": { "callsites": ["Templates/CoATalentTemplates.lua:1,19,43,67,91,115,138,235,327"], "args": "(\"MixinGlobalName\" | mixinTable, ...) -- STRING form resolves _G[name]", "returns": "new mixin table", "defined_in_lua": "SharedXML/Util/Mixin.lua:177" },
+    "MixinAndLoadScripts": { "callsites": ["CoATalentFrame.xml:29,280,482,489", "Templates/CoATalentTemplates.xml:29,64,81,98,107,115,123,131,139,156,165,193,202,231,600,686"], "args": "(frame, \"MixinGlobalName\") -- mixes in and wires OnLoad/OnShow/OnHide/OnEvent/OnEnter/... methods as scripts", "returns": "nothing", "defined_in_lua": "SharedXML/Util/Mixin.lua:152" },
+    "OnEventToMethod": { "callsites": ["CoATalentFrame.lua:9,254", "CoATreeViewMixin.lua:2", "Templates/CoATalentTemplates.xml:688"], "args": "(self, event, ...) -> self[event](self, ...)", "returns": "dispatches events to same-named methods", "defined_in_lua": "SharedXML/SharedConstants.lua:87" },
+    "CreateCounter": { "callsites": ["Templates/CoASpecChoiceMixin.lua:70"], "args": "([initial])", "returns": "closure returning increasing ints (layoutIndex)", "defined_in_lua": "SharedXML/TypeExtensions/math.lua:125" },
+    "GenerateClosure": { "callsites": ["CoATreeViewMixin.lua:76"], "args": "(f, ...)", "returns": "bound closure", "defined_in_lua": "SharedXML/Util/FunctionUtil.lua:100" },
+    "DoesAncestryInclude": { "callsites": ["Templates/CoASpecChoiceMixin.lua:352"], "args": "(ancestor, frame)", "returns": "boolean", "defined_in_lua": "SharedXML/Util/FrameUtil.lua:188" },
+    "UseParentLevel": { "callsites": ["Templates/CoATalentTemplates.lua:261,287"], "args": "(frame)", "returns": "nothing", "defined_in_lua": "SharedXML/Util/Util.lua:128" },
+    "AttributesToKeyValues": { "callsites": ["(indirect) TalentTreeBase OnLoad -> resolves the XML attributes in CoATalentFrame.xml:95-111,145-161 including 'global:<dotted.name>' strings to functions/tables"], "args": "(frame[, attrNames...])", "returns": "copies attributes onto the frame table", "defined_in_lua": "SharedXML/Util/Util.lua:96" },
+    "PortraitFrame_SetTitle": { "callsites": ["CoATalentFrame.lua:161"], "args": "(frame, title) -> self.TitleText:SetText", "returns": "nothing (api-surface.tsv lists it UNRESOLVED because it is an alias assignment, not a function statement)", "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1119 (= BasicFrame_SetTitle, :1085)" },
+    "PortraitFrame_SetIcon": { "callsites": ["CoATalentFrame.lua:209"], "args": "(frame, iconPath) -> portrait:SetPortraitTexture -> SetPortraitToTexture (stock)", "returns": "nothing", "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1103" },
+    "PortraitFrame_SetClassIcon": { "callsites": ["CoATalentFrame.lua:211"], "args": "(frame, classToken) -> CLASS_ICON_TCOORDS_ROUND[token] (SharedXML/SharedConstants.lua:443, has all 32 tokens incl. CoA ones) on UI-CHARACTERCREATE-CLASSES-ROUND", "returns": "nothing", "defined_in_lua": "SharedXML/SharedPanelTemplates.lua:1092" },
+    "GameTooltip_GenericTooltip": { "callsites": ["CoATalentFrame.xml:307,369", "Templates/CoATalentTemplates.xml:658", "Templates/CoATalentTemplates.lua:409"], "args": "(frame[, anchor]) reads frame.tooltipTitle / frame.tooltipText", "returns": "nothing", "defined_in_lua": "FrameXML/GameTooltip.lua:1264" },
+    "StaticPopup_Show / StaticPopup_Hide": { "callsites": ["CoATalentFrame.lua:174,182", "CoATalentFrame.xml:325,412"], "args": "(\"CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES\" | \"CONFIRM_DEACTIVATE_BUILD\", nil, nil, buildID | \"CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD\")", "returns": "stock functions, but the three dialogs are Ascension definitions in FrameXML/StaticPopup.lua (they call CharacterAdvancementUtil.ConfirmApplyPendingBuild / MarkForSwap, BuildCreatorUtil.ClearPendingBuildID, C_CharacterAdvancement.CancelPendingBuild / CanApplyPendingBuild / ImportPendingBuild, C_BuildCreator.DeactivateBuild, Collections:GoToTab, IsConquestOfAzerothPlayer, SendConquestOfAzerothImportMessage, GetConquestOfAzerothImportErrorText)", "defined_in_lua": "FrameXML/StaticPopup.lua (dialog tables); stock StaticPopup.lua for the functions" },
+    "HideUIPanel": { "callsites": ["CoATalentFrame.lua:163"], "args": "(Collections)", "returns": "stock; Collections registered in UIPanelWindows at FrameXML/UIParent.lua:57 (shim must register it since stock UIParent.lua stays in the MPQ)", "defined_in_lua": "stock FrameXML/UIParent.lua" },
+    "CharacterAdvancementUtil": { "callsites": ["CoATreeViewMixin.lua:61,238,239,241", "Templates/CoASpecChoiceMixin.lua:83", "CoATalentFrame.xml:303,389"], "args": "GetClassDBCByFile(token)->ClassConversions.ClassFileToDBC[token] (e.g. TINKER->Tinker, SPIRITMAGE->Runemaster, WILDWALKER->Primalist, PROPHET->Venomancer, FLESHWARDEN->KnightOfXoroth); GetSpecDBCByFile(specFile)->SpecFileToDBC; GetBackgroundAtlas(class,spec)->'talents-background-<class>-<spec>' with fallback 'talents-background-druid-restoration' via AtlasUtil:AtlasExists; GetThumbnailAtlas->'spec-thumbnail-<class>-<spec>' fallback 'spec-thumbnail-hero-hero'; ConfirmApplyPendingBuild(); GetBuildWebURL()", "returns": "see each; ConfirmApplyPendingBuild also touches Item:CreateFromID(ItemData.MARK_OF_ASCENSION):GetIconLink and GetMoneyString when costs > 0", "defined_in_lua": "FrameXML/Util/CharacterAdvancementUtil.lua:832,836,715,726,444,516" },
+    "BuildCreatorUtil": { "callsites": ["CoATalentFrame.lua:281", "CoATalentFrame.xml:323,365", "CoATreeViewMixin.lua:159,165,174", "Templates/CoATalentTemplates.lua:363,369"], "args": "ImportPendingBuildID(id), GetActiveBuildID(), ContinueOnLoad(id, cb) [loads Ascension_BuildCreator via BuildCreator_LoadUI and needs BuildCreatorFrame], ClearPendingBuildID(), IsActiveBuildID(id), ConvertBuildRoleToLFGRole(role)->Enum.BuildRoles[role]", "returns": "BuildCreatorUtil itself is CreateFromMixins(CallbackRegistryMixin) at file load", "defined_in_lua": "FrameXML/Util/BuildCreatorUtil.lua:604,176,557,614,187,88" },
+    "FrameUtil": { "callsites": ["CoATalentFrame.lua:285", "CoATalentFrame.xml:185,202,227", "Templates/CoASpecChoiceMixin.lua:76-81,303-310", "Templates/CoATalentTemplates.lua:246,251", "Templates/CoATalentTemplates.xml:592-593"], "args": "DialogStyleGlobalMouseDown(frame, ignoreFrame), PassOnClickToParent, PassOnEnterToParent, PassOnLeaveToParent, SetRegionsSize/Height/Shown(list, ...)", "returns": "helpers", "defined_in_lua": "SharedXML/Util/FrameUtil.lua:61,176,168,172,142,154,136" },
+    "TalentButtonUtil.VisualShape": { "callsites": ["CoACharacterAdvancementUtil.lua:124,139,156,171,186"], "args": "table {Circle=1,Square=2,Choice=3}; CATalentArtMixin also needs TalentButtonUtil.BaseVisualState/ConnectionState/GetColorForBaseVisualState/GetHoverAlphaForVisualStyle", "returns": "constants", "defined_in_lua": "FrameXML/Util/TalentUtil.lua:27" },
+    "TalentTreeBaseMixin": { "callsites": ["CoATreeViewMixin.lua:102,103,251,252 (DirtyReason.Nodes/Search)"], "args": "mixin of the TalentTreeBase template (Ascension_TalentUI); SetClassTab(class,tab), MarkDirty(reason), ResetTree()", "returns": "-", "defined_in_lua": "AddOns/Ascension_TalentUI/TalentTreeBase.lua:1" },
+    "Enum": { "callsites": ["CoACharacterAdvancementUtil.lua:6-14 (TraitNodeEntryType)", "CoATalentFrame.lua:277 (BuildCategory.Leveling)", "Templates/CoATalentTemplates.lua:164 (ClassRole), :191 (PrimaryStat), :218 (ClassArmorType), :384 (ItemQuality.Uncommon)"], "args": "pure Lua enum tables", "returns": "-", "defined_in_lua": "SharedXML/Enum.lua:1516,509,1605,282,1614,146 (Enum.Class:48 with CustomStart=12, Enum.ClassMask.COA=0xFFFFF800)" },
+    "Const": { "callsites": ["CoASpecViewMixin.lua:5", "CoATreeViewMixin.lua:64,129", "CoATalentFrame.xml:351,474", "Templates/*.lua (many SetAtlas calls)"], "args": "Const.TextureKit.UseAtlasSize=true / IgnoreAtlasSize=false; Const.CharacterAdvancement.OnlyClearAllowed=true / ClearEverything=false", "returns": "-", "defined_in_lua": "SharedXML/Util/Const.lua:1" },
+    "SOUNDKIT": { "callsites": ["see PlaySound"], "args": "keys used: UCHATSCROLLBUTTON_70, UCHATSCROLLBUTTON, CHAT_SCROLL_BUTTON, UI_CLASS_TALENT_APPLY_COMPLETE (+ UI_CLASS_TALENT_NODE_SPEND/REFUND via CATalentBaseMixin, CHARACTER_SHEET_TAB_70/OPEN_70/CLOSE_70 via Collections)", "returns": "numeric kit ids", "defined_in_lua": "SharedXML/Util/SoundKit.lua:1" },
+    "table.empty": { "callsites": ["CoATalentFrame.lua:297", "CoATreeViewMixin.lua:250"], "args": "shared empty table", "returns": "-", "defined_in_lua": "SharedXML/TypeExtensions/table.lua:239" },
+    "Color objects (GREEN_FONT_COLOR, DISABLED_FONT_COLOR, RED_FONT_COLOR, ITEM_QUALITY_COLORS[q], COMPLEXITY_COLORS[rating])": { "callsites": ["CoATreeViewMixin.lua:197,199,204,206,223", "Templates/CoASpecChoiceMixin.lua:114", "Templates/CoATalentTemplates.lua:384"], "args": ":GetRGB(), :WrapText(text)", "returns": "Ascension redefines these as CreateColor objects (SharedXML/SharedConstants.lua:101-103,144-153,297); stock 3.3.5a versions are plain {r,g,b} tables without methods", "defined_in_lua": "SharedXML/SharedConstants.lua + SharedXML/Util/ColorUtil.lua:9,43,88" },
+    "Role/stat/armor lookup tables": { "callsites": ["Templates/CoATalentTemplates.lua:165-166,192-193,219-220,370"], "args": "ROLE_TEXT, ROLE_TEXT_SHORT, ROLE_ATLAS (SharedConstants.lua:928,937,946; keyed by Enum.ClassRole id AND by LFG role string for the build list), PRIMARY_STAT_ATLAS (:1003), ARMOR_TYPE_ATLAS/ARMOR_TYPE_NAME (:974,985), PRIMARY_STAT_NAME_FORMAT (FrameXML/Util/C_PrimaryStat.lua:8 'PRIMARY_STAT_%d_NAME_COA' / :47), LOCALIZED_CLASS_NAMES_MALE (:342, must contain CoA tokens), CLASS_SORT_ORDER (:1084), GetBackgroundTexCoordsForRole (SharedXML/Util/TextureUtil.lua:218)", "returns": "-", "defined_in_lua": "SharedXML/SharedConstants.lua" },
+    "AtlasInfo / AtlasUtil": { "callsites": ["(indirect) every SetAtlas call and CharacterAdvancementUtil.GetBackgroundAtlas/GetThumbnailAtlas"], "args": "AtlasUtil:Unpack(name) / AtlasUtil:AtlasExists(name)", "returns": "pure Lua table of ~5000 atlas entries; all atlases this addon names are present (spec-*, talents-node-*, talents-gate*, talents-background-*, talents-animations-*, talents-button-undo, ca-passive-bg, buildcreator-class-header, build-draft-border, heart-icon); the referenced BLPs live in Ascension's Interface art (patch-B / patch-I)", "defined_in_lua": "SharedXML/AtlasInfo.lua:1 (AtlasUtil at :4906,4934)" },
+    "IsCustomClass / IsDefaultClass / IsConquestOfAzerothPlayer": { "callsites": ["(indirect) entry points and StaticPopups"], "args": "(unit) -> bit.contains(Enum.ClassMask.COA, UnitClassMask(unit)); UnitClassMask -> UnitClassBase wrapper (GlobalOverwrites.lua:94-107) -> Enum.ClassMask[token]", "returns": "boolean; true only when the native UnitClassBase returns a CoA token", "defined_in_lua": "SharedXML/SharedConstants.lua:39,47; FrameXML/StaticPopup.lua:32" },
+    "GlobalStrings (not defined in any loose Lua in the tree)": { "callsites": ["CoATalentFrame.lua:161 COA_CA_TITLE, :257 HERO_ARCHITECT", "CoATreeViewMixin.lua:108-127 TALENT_FRAME_RESET_BUTTON_DROPDOWN_TITLE/LEFT/RIGHT/ALL, :178,182 TALENTS_IMPORT_HERO_ARCHITECT, :219 CA_UNABLE_TO_SAVE_PENDING_BUILD, :220,222 _G[reason]/_G[traversalError]", "CoATalentFrame.xml:241 BUILD_CREATOR_NO_BUILDS, :285 SAVE_CHANGES, :314 DEACTIVATE_BUILD, :352 TALENT_FRAME_DISCARD_CHANGES_BUTTON_TOOLTIP, :392 BUILD_URL_COPIED_TO_CLIPBOARD, :436 CHANGE_TALENTS", "Templates/CoASpecChoiceMixin.lua:109 SPEC_COMPLEXITY_<RATING>, :269 VIEW_TALENTS, :287 ACTIVATE_TALENTS, :295 DISABLED", "Templates/CoATalentTemplates.xml:561 SAMPLE_ABILITIES, :578 ACTIVE", "Templates/CoATalentTemplates.lua:364 ACTIVE, :372 BUILD_CREATOR_ROLE_S, :373 BUILD_CREATOR_ROLE_<ROLE>, :385 BUILD_RATING_S", "FrameXML/SpecializationMenu.lua:41 COA_CA_AVAILABLE_SPECIALIZATIONS, CAGateBaseMixin.lua:44 TALENT_FRAME_GATE_TOOLTIP_FORMAT, CATalentBaseMixin TOOLTIP_TALENT_RANK/LEARN/UNLEARN, TALENT_SPEND_MORE_POINTS"], "args": "string constants", "returns": "Ascension ships these in its GlobalStrings (MPQ locale file / native), not in ui-tree; p0-framexml-gap.json lists them as unknown. The addon self-defines fallbacks only for COA_RESET_TREES, COA_CHANGE_ACTIVE_SPECIALIZATION, COA_SHARE_BUILD(_TOOLTIP), COA_IMPORT_BUILD(_TOOLTIP) (CoATalentFrame.lua:1-6). Missing ones make SetText(nil) silently blank, but _G[...]:format and :upper() paths error.", "defined_in_lua": null }
+  },
+  "widget_methods": {
+    "SetAtlas (Texture)": { "callsites": ["CoASpecViewMixin.lua:5", "CoATreeViewMixin.lua:64,242,244", "CoATalentFrame.xml:351,474", "Templates/CoASpecChoiceMixin.lua:10-11,27-59,84-85,96-97,316-317", "Templates/CoATalentTemplates.lua:149,155,173,200,227,264,295-299,331"], "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:3" },
+    "FlipX (Texture)": { "callsites": ["Templates/CoASpecChoiceMixin.lua:39-42,56-59", "Templates/CoATalentTemplates.lua:300"], "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:62" },
+    "SetPortraitTexture (Texture)": { "callsites": ["(indirect) CoATalentFrame.lua:209 via PortraitFrame_SetIcon"], "defined_in_lua": "SharedXML/TypeExtensions/Texture.lua:35" },
+    "SetShown (Region)": { "callsites": ["CoATalentFrame.lua:300", "CoATalentFrame.xml:190,207", "CoATreeViewMixin.lua:187,212-214", "Templates/CoASpecChoiceMixin.lua:326-328,344"], "defined_in_lua": "SharedXML/TypeExtensions/Region.lua:28" },
+    "SetEnabled (Button/CheckButton)": { "callsites": ["CoATreeViewMixin.lua:188,217", "Templates/CoASpecChoiceMixin.lua:233"], "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:5-14" },
+    "SetCheckedAtlas / SetNormalAtlas / SetHighlightAtlas (CheckButton)": { "callsites": ["Templates/CoATalentTemplates.xml:671-673"], "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:27-42" },
+    "GetBoolValue (CheckButton)": { "callsites": ["Templates/CoATalentTemplates.lua:387"], "defined_in_lua": "SharedXML/TypeExtensions/Button.lua:44" },
+    "CallScript (Frame)": { "callsites": ["Templates/CoATalentTemplates.lua:375"], "defined_in_lua": "SharedXML/TypeExtensions/Frame.lua:23" },
+    "GetRGB / WrapText (Color)": { "callsites": ["CoATreeViewMixin.lua:197,199,204,206,223", "Templates/CoASpecChoiceMixin.lua:114", "Templates/CoATalentTemplates.lua:384"], "defined_in_lua": "SharedXML/Util/ColorUtil.lua:43,88" },
+    "SetClassTab / MarkDirty / ResetTree (TalentTreeBase)": { "callsites": ["CoATreeViewMixin.lua:62,102-103,115,122,245,251-252"], "defined_in_lua": "AddOns/Ascension_TalentUI/TalentTreeBase.lua:202,187,54" },
+    "SetArtSet / SetShowSingleRanks / SetShowZeroMultiRanks / SetIsSubNode / SetEntry / AddNode (CA node mixins)": { "callsites": ["Templates/CoATalentTemplates.lua:4-133"], "defined_in_lua": "FrameXML/CharacterAdvancement/CharacterAdvancementBaseTemplates.lua:1 (CATalentArtMixin), CATalentBaseMixin.lua, CATalentChoiceBaseMixin.lua" },
+    "UpdateDisplay / SetLocked / SetUnlocked (CAGateBase)": { "callsites": ["Templates/CoATalentTemplates.lua:140-156"], "defined_in_lua": "FrameXML/CharacterAdvancement/CAGateBaseMixin.lua:11,24,28" },
+    "Icon: SetBackgroundInset / SetBorderInset / SetOverlayInset / SetHighlightInset / SetRounded / SetBorderAtlas / SetBorderSize / SetBorderOffset / SetIcon / SetIconAtlas / SetBackgroundTexture / SetBackgroundSize / SetBackgroundAlpha / SetSpell (BorderIconTemplate / SpellIconTemplate)": { "callsites": ["Templates/CoATalentTemplates.lua:5-8,29-39,53-63,77-87,101-111,119-122,239-241,332-339,361,370", "Templates/CoASpecChoiceMixin.lua:199,205"], "defined_in_lua": "SharedXML/SharedTemplates.lua (BorderIconTemplateMixin :253 SetHighlightAtlas etc.; SpellIconTemplateMixin:SetSpell)" },
+    "RankFrame: ShowMaxRank / SetMaxRankSeparator (SimpleRankMixin)": { "callsites": ["Templates/CoATalentTemplates.lua:11-12,125-126"], "defined_in_lua": "FrameXML/UIPanelTemplates.lua:888" },
+    "BuildList: SetGetNumResultsFunction / SetSelectedHighlightTexture / SetTemplate / RefreshScrollFrame / GetScrollList (ScrollList)": { "callsites": ["CoATalentFrame.lua:258-260,301", "Templates/CoATalentTemplates.lua:344"], "defined_in_lua": "SharedXML/Scroll/ScrollList.lua" },
+    "Layout / MarkDirty (LayoutFrame)": { "callsites": ["Templates/CoASpecChoiceMixin.lua:118,169,192,212"], "defined_in_lua": "SharedXML/LayoutFrame.lua" },
+    "Pool: Acquire / EnumerateActive / GetOrCreatePool": { "callsites": ["CoASpecViewMixin.lua:16,27", "Templates/CoASpecChoiceMixin.lua:155-197"], "defined_in_lua": "SharedXML/Pools.lua" },
+    "Stock widget methods relied on": { "callsites": ["GameTooltip:IsOwned (Templates/CoATalentTemplates.lua:374), SetFormattedText (:385), LockHighlight/UnlockHighlight (:388,390), SetChecked/GetChecked, Button:IsEnabled()==0 (CoATalentFrame.xml:306), EditBox:HasFocus (:458,463), SetDesaturated, SetTexCoord, GetStringWidth, SetFrameLevel, RegisterEvent/UnregisterEvent with CUSTOM event names (must not error on a stock client -> EventBus hook per DESIGN §3), AnimationGroup:Play/Stop"], "defined_in_lua": null }
+  },
+  "events": {
+    "CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED": {
+      "registered_at": ["CoATalentFrame.lua:165 (CoATalentFrame OnLoad, permanent)", "CoATreeViewMixin.lua:81 (TreeView OnShow)", "(indirect) Ascension_TalentUI/TalentTreeBase.lua:39 (each tree OnShow)"],
+      "handler_args": "none read. CoATalentFrameMixin: if expectingNewSpec (after SwitchActiveChrSpec) or RefreshFromCancel (hook on CancelPendingBuild) -> UpdateActiveSpec. CoATreeViewMixin: UpdateCommitButtons + UpdatePoints. TalentTreeBase: MarkDirty(Nodes) -> per-node CanAddByEntryID/GetPendingRankByEntryID/MeetsInvestmentForAddByEntryID + UpdateGates. Fired by the native after any pending-build mutation (Add/Remove/Clear/Cancel/Import/Apply/SwitchActiveChrSpec).",
+      "fired_by": "native"
+    },
+    "ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED": {
+      "registered_at": ["CoATalentFrame.lua:173 (OnShow) / :179 (OnHide)", "CoATreeViewMixin.lua:82 / :95", "(indirect) FrameXML/SpecializationMenu.lua:17 (SpecializationMenuTemplate list), FrameXML/Util/SpecializationUtil.lua:5 (EventRegistry)"],
+      "handler_args": "none read; CoATalentFrame -> UpdateActiveSpec (re-reads GetActiveChrSpec), TreeView -> UpdateDropDowns (re-reads BuildCreatorUtil.GetActiveBuildID).",
+      "fired_by": "native"
+    },
+    "CHARACTER_ADVANCEMENT_UPDATE_ENTRIES_RESULT": {
+      "registered_at": ["CoATreeViewMixin.lua:80 / :93"],
+      "handler_args": "(success:boolean, reason) -> plays SOUNDKIT.UI_CLASS_TALENT_APPLY_COMPLETE on success. Result of ApplyPendingBuild.",
+      "fired_by": "native"
+    },
+    "BUILD_CREATOR_CATEGORY_RESULT": {
+      "registered_at": ["CoATalentFrame.lua:261 (BuildCreatorMenu OnLoad, permanent)"],
+      "handler_args": "(category:string) -> hides Loading, re-reads GetActiveChrSpec/GetSpecInfoByID to build the '#SPEC:<Spec>' tag, C_BuildCreator.UpdateFilter(tag, table.empty, table.empty), GetNumBuilds()==0 -> NoItemText, BuildList:RefreshScrollFrame. Reply to QueryAllBuilds.",
+      "fired_by": "native"
+    },
+    "BUILD_CREATOR_ACTIVATE_RESULT": {
+      "registered_at": ["CoATreeViewMixin.lua:83 / :96"],
+      "handler_args": "none read -> UpdateDropDowns.",
+      "fired_by": "native"
+    },
+    "BUILD_CREATOR_DEACTIVATE_RESULT": {
+      "registered_at": ["CoATreeViewMixin.lua:84 / :97"],
+      "handler_args": "none read -> UpdateDropDowns + UpdateDeactivateBuildButton(BuildCreatorUtil.GetActiveBuildID()).",
+      "fired_by": "native"
+    },
+    "BUILD_CREATOR_RATE_RESULT": {
+      "registered_at": ["Templates/CoATalentTemplates.lua:340 (every CoATalentBuildTemplate list item OnLoad, permanent)"],
+      "handler_args": "(result, buildID:string, rating:number) -> LikeButton:Enable(); if buildID matches self.data.ID then data.Upvotes = rating and UpdateRating.",
+      "fired_by": "native"
+    },
+    "GLOBAL_MOUSE_DOWN": {
+      "registered_at": ["CoATalentFrame.lua:268 / :272 (BuildCreatorMenu OnShow/OnHide)", "CoATalentFrame.xml:220 / :223 (SpecializationMenu OnShow/OnHide)"],
+      "handler_args": "none read; FrameUtil.DialogStyleGlobalMouseDown(self, toggleButton) hides the popup when the click is outside it. Retail-style event; NOT a stock 3.3.5a event (api-surface: NATIVE, Extensions.dll). Shim: emulate with a hidden full-screen mouse-catcher or a Frame OnMouseDown hook on UIParent/WorldFrame.",
+      "fired_by": "native"
+    },
+    "CHARACTER_ADVANCEMENT_ENTRY_PATCHED": {
+      "registered_at": ["(indirect) Ascension_TalentUI/TalentTreeBase.lua:35 (both trees, OnLoad)"],
+      "handler_args": "(isNew:boolean, class:string DBC token, tab:string DBC token, entryID:number) -> rebuild tree or refresh one node. Live entry hot-patching; the shim never needs to fire it.",
+      "fired_by": "native"
+    }
+  },
+  "frames": [
+    "CoATalentFrame (parent=Collections, DIALOG strata, 1294x666, hidden, inherits RaisedPortraitFrameTemplate)",
+    "CoATalentFrameSpecView", "CoATalentFrameSpecViewBackground",
+    "CoATalentFrameTreeView", "CoATalentFrameTreeViewBackground1", "CoATalentFrameTreeViewBackground3",
+    "CoATalentFrameTreeViewFXFrame", "CoATalentFrameTreeViewFXFrameChild", "CoATalentFrameTreeViewFXFrameChildCloudsContainer", "CoATalentFrameTreeViewFXFrameChildCloudsContainerClouds1", "CoATalentFrameTreeViewFXFrameChildCloudsContainerClouds2",
+    "CoATalentFrameTreeViewShadowOverlay",
+    "CoATalentFrameTreeViewClassTree", "CoATalentFrameTreeViewClassTreeLabel", "CoATalentFrameTreeViewClassTreePoints",
+    "CoATalentFrameTreeViewSpecTree", "CoATalentFrameTreeViewSpecTreeLabel", "CoATalentFrameTreeViewSpecTreePoints", "CoATalentFrameTreeViewSpecTreePassivesBackground",
+    "CoATalentFrameTreeViewBottomBar", "CoATalentFrameTreeViewBottomBarTexture",
+    "CoATalentFrameTreeViewBottomBarSpecDropDown", "CoATalentFrameTreeViewBottomBarBuildDropDown",
+    "CoATalentFrameTreeViewBottomBarSpecializationMenu", "CoATalentFrameTreeViewBottomBarBuildCreatorMenu", "CoATalentFrameTreeViewBottomBarBuildCreatorMenuNoItemText", "CoATalentFrameTreeViewBottomBarBuildCreatorMenuLoading", "CoATalentFrameTreeViewBottomBarBuildCreatorMenuBuildList", "CoATalentFrameTreeViewBottomBarBuildCreatorMenuBuildListInset",
+    "CoATalentFrameTreeViewBottomBarSaveChanges", "CoATalentFrameTreeViewBottomBarSaveChangesYellowGlow", "CoATalentFrameTreeViewBottomBarDeactivateBuild", "CoATalentFrameTreeViewBottomBarUndoButton", "CoATalentFrameTreeViewBottomBarShareBuildButton", "CoATalentFrameTreeViewBottomBarImportBuildButton", "CoATalentFrameTreeViewBottomBarResetButton", "CoATalentFrameTreeViewBottomBarResetButtonDropDown", "CoATalentFrameTreeViewBottomBarChangeSpec", "CoATalentFrameTreeViewBottomBarSearch",
+    "virtual templates (pool-instantiated, unnamed instances): CoASpecRoleTemplate, CoASpecRoleContainerTemplate, CoASpecStatTemplate, CoASpecStatContainerTemplate, CoASampleAbilityTemplate, CoATalentButtonTemplate, CoATalentButtonSquareTemplate, CoATalentButtonCircleTemplate, CoATalentButtonHexTemplate, CoATalentButtonDiamondTemplate, CoATalentChoiceButtonTemplate, CoAGateTemplate, CoASpecChoiceFXFrameTemplate, CoATreeFXFrameTemplate, CoASpecActivatedBackgroundTemplate, CoASpecChoiceTemplate, CoATalentBuildTemplate"
+  ],
+  "stock_api_assumptions": [
+    "UnitClass(\"player\") returns a CUSTOM class token for CoA characters (TINKER, NECROMANCER, REAPER, ... Enum.Class 12-32) and, after GlobalOverwrites.lua:88, four values (name, token, classID, classMask); the token is used as a key into LOCALIZED_CLASS_NAMES_MALE, CLASS_ICON_TCOORDS_ROUND, ClassConversions.ClassFileToDBC and as the C_ClassInfo.GetAllSpecs argument. IsCustomClass() (the gate for this addon existing at all) is bit.contains(Enum.ClassMask.COA, Enum.ClassMask[token]).",
+    "PlaySound() is called with numeric sound-kit ids / arrays of ids (SOUNDKIT table); stock 3.3.5a PlaySound(soundName) takes strings.",
+    "GetSpellInfo(spellID) must resolve Ascension custom spell ids (spec PassiveSpell / ExampleSpells, entry.Spells) from the patched Spell.dbc; signature itself is stock.",
+    "GLOBAL_MOUSE_DOWN is registered on plain Frames via RegisterEvent; stock 3.3.5a has no such event (RegisterEvent with an unknown name is accepted silently by the stock client, but nothing fires it).",
+    "Frame:RegisterEvent/UnregisterEvent are called with 8 custom event names; the shim's EventBus must record and dispatch them (DESIGN §3).",
+    "GREEN_FONT_COLOR / RED_FONT_COLOR / DISABLED_FONT_COLOR / ITEM_QUALITY_COLORS[Enum.ItemQuality.Uncommon] are expected to be Color objects with :GetRGB() and :WrapText(); stock defines plain {r,g,b[,hex]} tables. Ascension's SharedConstants.lua (compat/SharedXML) must load after stock FrameXML so its CreateColor versions win.",
+    "UIDropDownMenuTemplate instances are expected to have a .Button parentKey (CoATalentFrame.xml:185,202 'self.Button:SetScript' in OnLoad; CoATreeViewMixin.lua:14 dropDown.Button). Stock UIDropDownMenuTemplates.xml (MPQ) only has $parentButton with no parentKey -> nil error at addon load unless Ascension's SharedXML/UIDropDownMenuTemplates.xml:316 (parentKey=\"Button\") is shipped in the compat layer.",
+    "hooksecurefunc(C_CharacterAdvancement, \"CancelPendingBuild\", ...) at file scope: the namespace table and the field must exist before Ascension_CoATalents loads.",
+    "Button:IsEnabled() == 0 comparison (CoATalentFrame.xml:306) relies on the 3.3.5a 1/0 return, which is stock behaviour (fine).",
+    "Texture:SetAtlas / FlipX / SetPortraitTexture, Region:SetShown, Button:SetEnabled, CheckButton:SetCheckedAtlas/SetNormalAtlas/SetHighlightAtlas/GetBoolValue, Frame:CallScript are NOT stock widget methods; they come from SharedXML/TypeExtensions which patch metatables obtained from the non-stock natives GetTextureMetatable/GetButtonMetatable/GetCheckButtonMetatable/GetFrameMetatable.",
+    "StaticPopup dialog ids CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES, CONFIRM_DEACTIVATE_BUILD, CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD (and CONFIRM_APPLY_PENDING_BUILD reached via ConfirmApplyPendingBuild) must exist in StaticPopupDialogs; stock StaticPopup.lua stays in the MPQ so the shim's compat/FrameXML must add them.",
+    "HideUIPanel(Collections) needs UIPanelWindows[\"Collections\"] (Ascension FrameXML/UIParent.lua:57) registered by the shim, and UIParentLoadAddOn/CharacterAdvancement_LoadUI/ToggleCollections (Ascension UIParent.lua:307,327,655) re-created in compat/FrameXML."
+  ],
+  "data_files": [
+    "CharacterAdvancement.dbc (entry records: ID, Name, Type, NodeType, Spells, Icon, PositionX/Y, ConnectedNodes, Group, RequiredTabAEInvestment, RequiredTabTEInvestment, Class, Tab ...) via C_CharacterAdvancement.GetEntriesByClass / GetEntryByInternalID -> shim data/entries/<Class>.lua per DESIGN §4",
+    "CharacterAdvancementClassTypes.dbc / CharacterAdvancementTabTypes.dbc tokens: the (classDBC, tabDBC) name pairs passed to GetEntriesByClass / GetPendingTab*Investment / ClearPendingBuildByTab, mapped from UnitClass tokens by ClassConversions in FrameXML/Util/CharacterAdvancementUtil.lua:848 (e.g. TINKER->Tinker, SPIRITMAGE->Runemaster, WILDWALKER->Primalist, PROPHET->Venomancer, FLESHWARDEN->KnightOfXoroth; tab 'Class' + spec tabs Firearms/Invention/Mechanics ...)",
+    "ChrSpecs.dbc + ChrClassesRoles.dbc (ca-dbc/DBFilesClient_ChrSpecs.dbc, _ChrClassesRoles.dbc): the source for C_ClassInfo.GetAllSpecs / GetSpecInfo records (ID, Name, Spec, Class, Description, DifficultyRating, SpecFilename, role booleans, PrimaryStats, PassiveSpell/PassiveID, ExampleSpells); the shim must generate a Lua table for these since the natives are gone",
+    "CharacterAdvancementEssence.dbc: AE/TE budgets behind GetPendingRemainingAE/TE and the gate investments (served by the module over the wire, DESIGN §5 ESSENCE)",
+    "Hero Architect build catalogue (C_BuildCreator.*): server/web data, DESIGN §5 BUILD verbs; fields ID (uuid), Name ('#SPEC:<spec>' tagged), Subtext, Description, Icon, Roles, Upvotes",
+    "SharedXML/AtlasInfo.lua atlas table (pure Lua, shipped verbatim in compat/SharedXML) + the BLP art it points to: spec-background, spec-columndivider, spec-hover-background, spec-selected-background1..5, spec-dividerline, spec-thumbnailborder-on/off, spec-thumbnail-<class>-<spec> (fallback spec-thumbnail-hero-hero), spec-sampleabilityring, talents-background-<class>-<spec> (fallback talents-background-druid-restoration), talents-background-bottombar, talents-node-{square,circle,choice,choiceflyout-square,choiceflyout-circle}-{shadow,yellow,gray,green,red,locked,greenglow,ghost}, talents-gate, talents-gate-open, talents-button-undo, talents-animations-{gridburst,clouds,particles}, ca-passive-bg, buildcreator-class-header, build-draft-border, heart-icon; plus Interface\\TalentFrame\\TalentsMaskNode*.blp icon masks and Interface\\Icons\\<SpecFilename>",
+    "GlobalStrings: COA_CA_TITLE, COA_CA_AVAILABLE_SPECIALIZATIONS, HERO_ARCHITECT, TALENTS_IMPORT_HERO_ARCHITECT, CA_UNABLE_TO_SAVE_PENDING_BUILD, BUILD_CREATOR_NO_BUILDS, BUILD_RATING_S, BUILD_CREATOR_ROLE_S, BUILD_CREATOR_ROLE_{TANK,HEALER,DAMAGER,LEADER}, BUILD_URL_COPIED_TO_CLIPBOARD, SAMPLE_ABILITIES, SAVE_CHANGES, DEACTIVATE_BUILD, CHANGE_TALENTS, VIEW_TALENTS, ACTIVATE_TALENTS, ACTIVE, DISABLED, SPEC_COMPLEXITY_<RATING>, TALENT_FRAME_RESET_BUTTON_DROPDOWN_{TITLE,LEFT,RIGHT,ALL}, TALENT_FRAME_DISCARD_CHANGES_BUTTON_TOOLTIP, TALENT_FRAME_GATE_TOOLTIP_FORMAT, TOOLTIP_TALENT_{RANK,LEARN,UNLEARN}, TALENT_SPEND_MORE_POINTS, PRIMARY_STAT_%d_NAME_COA, the CALearnResult reason strings resolved via _G[reason], and the StaticPopup texts (CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES, CONFIRM_DEACTIVATE_BUILD, CHARACTER_ADVANCEMENT_IMPORT_PENDING_BUILD, CONFIRM_APPLY_PENDING_BUILD, APPLY, DISCARD, GO_BACK, DEACTIVATE, IMPORT_BUILD). None are defined in loose Lua under the tree.",
+    "SavedVariables CoATalentFooterLayoutDB (per-account footer offsets, version 4) - purely client-side."
+  ],
+  "protected_actions": [
+    "C_CharacterAdvancement.PickupSpell(entryID) from CATalentBaseMixin:OnDragStart (FrameXML/CharacterAdvancement/CATalentBaseMixin.lua:356) - drag a learned node to the action bar; on a stock client this must become stock PickupSpell(spellID) (or PickupSpellBookItem) which is callable from insecure code in 3.3.5a for spells in the spellbook, so it works only after the module has taught the spell.",
+    "C_CharacterAdvancement.AddByEntryID / RemoveByEntryID / ApplyPendingBuild / SwitchActiveChrSpec / ImportPendingBuild(ID) / ClearPendingBuild(ByTab) / CancelPendingBuild - all mutate server-side state; the native did that via custom opcodes, the shim does it via the ASC addon-message transport (LEARN/UNLEARN/SETCLASS/BUILD ACTIVATE). Learning a spell itself is server-side (Player::learnSpell), so no protected client function is needed.",
+    "Internal_CopyToClipboard(link) (CoATalentFrame.xml:391) - no stock equivalent from Lua; not protected, simply absent.",
+    "No CastSpellByID / SetBinding / RunMacro / SecureActionButton usage anywhere in this addon."
+  ],
+  "blocking_natives": [
+    "LOAD TIME (CoATalentFrame.xml OnLoad chain, before anything is shown): UnitClass(\"player\") returning a CoA token; C_ClassInfo.GetAllSpecs(token) and C_ClassInfo.GetSpecInfo(token, spec) with the full specInfo record (CoASpecViewMixin.lua:8,15 -> CoASpecChoiceMixin:SetSpecInfo reads Name/Class/Spec/Description/DifficultyRating/role booleans/PrimaryStats/PassiveSpell/ExampleSpells); GetSpellInfo for those spell ids; C_CharacterAdvancement table with CancelPendingBuild present (hooksecurefunc, CoATalentFrame.lua:153); GetTextureMetatable/GetButtonMetatable/GetCheckButtonMetatable/GetFrameMetatable for the TypeExtensions; the GlobalStrings above (COA_CA_TITLE etc.); Ascension's UIDropDownMenuTemplate (.Button), SpecializationMenuTemplate, UIPanelDialogTemplate, SimpleRankFrameTemplate, CATalentBaseTemplate/CATalentChoiceBaseTemplate/CAGateBaseTemplate/CALineConnectionTemplate, TalentTreeBase, RaisedPortraitFrameTemplate, StandardProportionalScrollListTemplate and the fonts GameFontHighlightHuge2/Game30Font/GameFontNormalOutline/GameFontHighlightOutline as XML templates.",
+    "ON SHOW (CoATalentFrameMixin:OnShow -> UpdateActiveSpec): C_CharacterAdvancement.GetActiveChrSpec(); C_CharacterAdvancement.CanSwitchActiveChrSpec(specID) (SpecView); C_ClassInfo.GetSpecInfoByID (Lua placeholder over GetAllSpecs/GetSpecInfo); C_CharacterAdvancement.IsPending(), CanApplyPendingBuild() (9 returns, marksCost/goldCost numbers), GetPendingRemainingAE(), GetPendingRemainingTE(), GetActiveSpecID() and C_BuildCreator.GetActiveBuild(specID) (TreeView OnShow via BuildCreatorUtil.GetActiveBuildID).",
+    "FIRST OnUpdate AFTER SHOW (TalentTreeBase.BuildTree for ClassTree and SpecTree): C_CharacterAdvancement.GetEntriesByClass(classDBC, tabDBC, false); then per node CanAddByEntryID(id,1), GetPendingRankByEntryID(id), MeetsInvestmentForAddByEntryID(id,1); per edge IsConnectionAllowed(a,b); per gate GetPendingTabAEInvestment(classDBC,'Class',0) / GetPendingTabTEInvestment(classDBC,specDBC,0). Without these the trees assert/nil-error in TalentTreeBase.lua:317-321 or CATalentBaseMixin:UpdateDisplay.",
+    "EVENTS the shim must be able to fire for the panel to update at all: CHARACTER_ADVANCEMENT_PENDING_BUILD_UPDATED (after every mutation incl. SwitchActiveChrSpec and CancelPendingBuild) and ASCENSION_CA_SPECIALIZATION_ACTIVE_ID_CHANGED; GLOBAL_MOUSE_DOWN only for closing the two footer popups."
+  ],
+  "notes": "SCOPE: this is the CoA (custom hero class) talent panel: a spec picker (SpecView, CoASpecChoiceTemplate per spec) and a two-tree view (ClassTree = tab 'Class' with AE gate currency 383080, SpecTree = the active spec tab with TE gate currency 383081) plus a footer (spec/build dropdown popups, Save/Undo/Reset/Deactivate/Share/Import/ChangeSpec, search box). It contains almost no logic of its own: rendering is TalentTreeBaseMixin (Ascension_TalentUI) + the FrameXML/CharacterAdvancement base mixins; state is 100% native C_CharacterAdvancement. LOAD ORDER: LoadOnDemand, deps Ascension_TalentUI + Ascension_Collections; the frame is parent=\"Collections\" so Collections must exist first, and Collections only registers the CoATalentFrame tab when IsCustomClass() is true at Collections OnLoad (a stock-class character gets Ascension_CharacterAdvancement instead) - the shim's UnitClass override must already return the CoA token when Ascension_Collections loads. XML ATTRIBUTE CONVENTION: TalentTreeBase reads its config from XML <Attribute> strings; values starting with 'global:' are resolved to _G lookups by AttributesToKeyValues (SharedXML/Util/Util.lua:96) - CoATalentFrame.xml overrides getNodeTemplate/getChoiceNodeTemplate/getConnectionTemplate/getGateTemplate/getGateAttachmentPoint/gateCurrencyCount/getEntryGateRequirement per tree, while getEntries (C_CharacterAdvancement.GetEntriesByClass) and getPosition (CharacterAdvancementUtil.GetEntryPosition, which uses PositionX/PositionY because Enum.Class[token] >= CustomStart) come from the TalentTreeBase template defaults (Ascension_TalentUI.xml:27-42). NAME SPACES: three different 'class/spec' identifiers flow through this addon - (1) UnitClass file token (TINKER), (2) DBC token (Tinker / Firearms) from ClassConversions, used for every C_CharacterAdvancement call, (3) specInfo.ID number used for GetActiveChrSpec/SwitchActiveChrSpec/GetSpecInfoByID; never join them by offset (memory: join CoA id spaces by NAME). Also GetActiveSpecID (Hero Architect spec slot) is a different id from GetActiveChrSpec. TREE BUILD TIMING: SetClassTab only marks dirty; BuildTree runs from an OnUpdate, so it happens on the first frame the tree is visible, not at load - GetEntriesByClass etc. are therefore 'on show' natives. TalentTreeBase.lua:317-321 asserts class/tab/getEntries/getPosition/getNodeTemplate. DUPLICATE CoATalentFrame.xml TreeView Background2 is commented out; Background3 uses an alpha animation (AnimationGroup Alpha with change=, stock 3.3.5a Alpha animations support change). COMPAT LAYER GAPS vs DESIGN §3 (which plans only .lua from Ascension FrameXML): this addon inherits XML templates from Ascension's FrameXML - SimpleRankFrameTemplate (+SimpleRankMixin, FrameXML/UIPanelTemplates.xml:1339/.lua:888), SpecializationMenuTemplate (+SpecListItemTemplate, FrameXML/SpecializationMenu.xml:76, SpecListItem.xml:89, SpecializationMenu.lua, needs SpecializationUtil which at file load calls ReadCustomWTF + C_Serialize:DeserializeDecompressFromPrint and reads SPEC_SWAP_SPELLS from FrameXML/Constants.lua:973), CATalentBaseTemplate/CATalentChoiceBaseTemplate/CAGateBaseTemplate/CALineConnectionTemplate/LocationIndicatorTemplate (FrameXML/CharacterAdvancement/CharacterAdvancementBaseTemplates.xml + 6 .lua incl. CATalentArtMixin which needs TalentButtonUtil from FrameXML/Util/TalentUtil.lua and TextureUtil.MaskSize / Icon:SetIconMask), GameFontNormalHuge2 (FrameXML/FontStyles.xml:122), plus the FrameXML/Util files CharacterAdvancementUtil.lua (also depends on Enum.CALearnResult, C_Config, C_GameMode, AtlasUtil, ItemData, Item, C_Realm.IsLive, IsConquestOfAzerothPlayer), BuildCreatorUtil.lua (CallbackRegistryMixin, SpecializationUtil, C_BuildDraft.GetDraftedBuild is referenced but only in GetDraftedBuildID), C_PrimaryStat.lua (PRIMARY_STAT_NAME_FORMAT), Constants.lua (COA_AUTO_SHOW_TALENTS_LEVEL, SPEC_SWAP_SPELLS), StaticPopup.lua dialog entries, GameTooltip.lua:1264 GameTooltip_GenericTooltip, UIParent.lua entries (UIPanelWindows.Collections, UIParentLoadAddOn, CharacterAdvancement_LoadUI, ToggleCollections) and the LoadAddOn override in GlobalOverwrites.lua:471. The stock UIPanelDialogTemplate does provide parentKey=\"title\" (stock UIPanelTemplates.xml:1016), so SpecializationMenuMixin's self.title is fine; the stock UIDropDownMenuTemplate does NOT provide .Button - ship Ascension's SharedXML/UIDropDownMenuTemplates.xml (and UIDropDownMenu.lua) or the frame errors in OnLoad. HERO ARCHITECT SUBSYSTEM: the BuildCreatorMenu / DeactivateBuild / ShareBuild / ImportBuild paths are optional for a first release; if C_BuildCreator.QueryAllBuilds never answers, the popup just shows its Loading overlay forever, and BuildCreatorUtil.ContinueOnLoad tries to load Ascension_BuildCreator (BuildCreator_LoadUI) whenever GetActiveBuild returns a non-empty id - return nil/'' from the shim to keep that addon out. UpdateDropDowns (CoATreeViewMixin.lua:162-183) has a quirk: it always resets the BuildDropDown text to TALENTS_IMPORT_HERO_ARCHITECT after scheduling ContinueOnLoad, so the build name only shows if the callback runs asynchronously later. RESET: 'Reset all' uses ClearPendingBuild(OnlyClearAllowed=true); per-tree reset uses ClearPendingBuildByTab(classDBC, tabDBC, true) because C_Player:IsCustomClass(). CANCEL HOOK: RefreshFromCancel is set by hooksecurefunc on C_CharacterAdvancement.CancelPendingBuild and consumed on the next PENDING_BUILD_UPDATED - so the shim's CancelPendingBuild must both exist at load and fire that event afterwards (even when nothing was pending) or UpdateActiveSpec is skipped. CLOSE FLOW: OnHide with IsPending() shows CLOSE_CHARACTER_ADVANCEMENT_UNSAVED_PENDING_CHANGES whose GO_BACK reopens the tab; OnShow hides that popup. FOOTER SLASH COMMANDS write CoATalentFooterLayoutDB (SavedVariables) and re-anchor the footer; harmless. SOUNDS: 4 SOUNDKIT keys + node spend/refund sounds; all numeric kit ids. CoAReader (C:\\AzerothRealm\\client-ascension\\Interface\\AddOns\\Ascension_CoAReader, James's local tool, archive-gated) already proves the two-tree render works for ANY class/spec by calling ClassTree:SetClassTab(classDBC,'Class') and TreeView:SetSpecID(id) directly - the shim's selftest can reuse that path."
+}

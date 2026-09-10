@@ -1,0 +1,2 @@
+# Compile-only and isolated Lua 5.1 verification runtime.
+lupa==2.8
