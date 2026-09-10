@@ -1,0 +1,53 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+	<!-- TemplateExtras.xml: the two virtual templates the Hero-mode panels inherit that live in
+	     Ascension FrameXML files we do not copy whole (MainMenuBarMicroButtons.xml redefines the
+	     stock micro buttons; MysticEnchantPanel.xml is a whole character-frame side panel).
+	     Minimal equivalents: the WildCard rapid-roll button that uses the first is hidden outside
+	     WildCard mode, and the second is the Hero Architect enchant-pick row, inert here. -->
+	<Button name="DraftModeMicroButtonTemplate" virtual="true" hidden="true">
+		<Size x="28" y="58"/>
+		<Layers>
+			<Layer level="OVERLAY">
+				<Texture name="$parentGlow" parentKey="Glow" alphaMode="ADD" hidden="true" setAllPoints="true"/>
+				<Texture name="$parentBorder" parentKey="Border" setAllPoints="true"/>
+			</Layer>
+		</Layers>
+		<!-- the inheriting OnLoad calls self:GetNormalTexture():SetPortraitTexture(...) -->
+		<NormalTexture name="$parentNormalTexture" setAllPoints="true"/>
+		<HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD" setAllPoints="true"/>
+	</Button>
+	<Button name="MysticEnchantArchitectTabItemTemplate" inherits="ScrollListItemTextTemplate" virtual="true">
+		<Size x="190" y="52"/>
+		<Layers>
+			<Layer level="ARTWORK">
+				<Texture name="$parentIcon" parentKey="Icon">
+					<Size x="32" y="32"/>
+					<Anchors>
+						<Anchor point="CENTER" relativePoint="LEFT" x="30"/>
+					</Anchors>
+				</Texture>
+			</Layer>
+			<Layer level="OVERLAY">
+				<Texture name="$parentQualityBorder" parentKey="QualityBorder">
+					<Size x="36" y="36"/>
+					<Anchors>
+						<Anchor point="CENTER" relativeTo="$parentIcon" y="1"/>
+					</Anchors>
+				</Texture>
+				<FontString name="$parentCount" parentKey="Count" inherits="GameFontHighlightSmall">
+					<Anchors>
+						<Anchor point="BOTTOMRIGHT" x="-4" y="4"/>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Frames>
+			<Button name="$parentRemoveButton" parentKey="RemoveButton" alpha="0.4">
+				<Size x="24" y="24"/>
+				<Anchors>
+					<Anchor point="TOPRIGHT" x="-4" y="-4"/>
+				</Anchors>
+			</Button>
+		</Frames>
+	</Button>
+</Ui>

@@ -75,17 +75,301 @@ local function inertNamespace(name, overrides)
     for k, v in pairs(overrides or {}) do ns[k] = v end
     return ns
 end
+-- The build EDITOR keeps its pending build in memory. On Ascension the native held it
+-- server-side and PublishBuild sent it to their build service; here "Create build" and
+-- "Import current build" fill this table so the editor view renders and edits (the same
+-- record shape the catalogue's builds use), and publishing answers read-only.
+local pendingBuild
+local function newPendingBuild()
+    return { Name = "", Icon = "INV_Misc_QuestionMark", Category = Enum.BuildCategory.None,
+             Description = "", Roles = "PLAYER_ROLE_NONE", PrimaryStat = "", Comment = "",
+             DifficultyRating = Enum.BuildDifficulty.Standard, Flags = 0,
+             Spells = {}, RandomEnchants = {}, ArmorTypes = {}, WeaponTypes = {} }
+end
+pendingBuild = newPendingBuild()
+local function copyRecord(t)
+    local c = {}
+    for k, v in pairs(t) do
+        if type(v) == "table" then
+            local list = {}
+            for i, x in ipairs(v) do list[i] = type(x) == "table" and copyRecord(x) or x end
+            c[k] = list
+        else
+            c[k] = v
+        end
+    end
+    return c
+end
+local function loadPendingBuild(record)
+    pendingBuild = newPendingBuild()
+    if type(record) ~= "table" then return end
+    for k, v in pairs(copyRecord(record)) do pendingBuild[k] = v end
+    pendingBuild.Spells = pendingBuild.Spells or {}
+    pendingBuild.RandomEnchants = pendingBuild.RandomEnchants or {}
+    pendingBuild.ArmorTypes = pendingBuild.ArmorTypes or {}
+    pendingBuild.WeaponTypes = pendingBuild.WeaponTypes or {}
+end
+local function findSpell(spellID)
+    for i, s in ipairs(pendingBuild.Spells) do if s.Spell == spellID then return i, s end end
+end
+local function findEnchant(enchantID)
+    for i, e in ipairs(pendingBuild.RandomEnchants) do if e.Enchant == enchantID then return i, e end end
+end
+local function findType(list, value)
+    for i, x in ipairs(list) do if x == value or (type(x) == "table" and x.Type == value) then return i end end
+end
+local function setSpellField(spellID, key, value)
+    local _, s = findSpell(spellID)
+    if s then s[key] = value end
+end
+local function setEnchantField(enchantID, key, value)
+    local _, e = findEnchant(enchantID)
+    if e then e[key] = value end
+end
 inertNamespace("C_BuildEditor", {
-    GetPendingBuild = function() return nil end,
-    CanPublishBuild = function() return false, "ASC_PREVIEW_READ_ONLY" end,
+    GetPendingBuild = function() return pendingBuild end,
+    DiscardPendingBuild = function() pendingBuild = newPendingBuild() end,
+    EditBuild = function(buildID)
+        loadPendingBuild(C_BuildCreator and C_BuildCreator.GetBuild and C_BuildCreator.GetBuild(buildID))
+    end,
+    ImportBuild = function(record) loadPendingBuild(record) end,
+    -- (canPublish, failReasons[]): the editor prints _G[reason] or reason per entry.
+    CanPublishBuild = function() return false, { "ASC_PREVIEW_READ_ONLY" } end,
+    PublishBuild = function() return false end,
     GetEssenceForLevel = function(level)
         local ae, te = ASC.Data.GetBudget(ASC.Config and ASC.Config.classByte or 28, level or 80)
         return ae or 0, te or 0
     end,
-    GetSpellByID = function() return nil end,
+    GetSpellByID = function(spellID) local _, s = findSpell(spellID) return s end,
+    DoesBuildHaveSpellID = function(spellID) return findSpell(spellID) ~= nil end,
+    CanAddSpell = function() return true end,
+    CanRemoveSpell = function() return true end,
+    AddSpell = function(spell)
+        if type(spell) ~= "table" or not spell.Spell then return end
+        if not findSpell(spell.Spell) then table.insert(pendingBuild.Spells, copyRecord(spell)) end
+    end,
+    RemoveSpell = function(spell)
+        local i = findSpell(type(spell) == "table" and spell.Spell or spell)
+        if i then table.remove(pendingBuild.Spells, i) end
+    end,
+    CanSetSpellLevel = function() return true end,
+    SetSpellLevel = function(spellID, level) setSpellField(spellID, "Level", level) end,
+    CanSetSpellFlags = function() return true end,
+    SetSpellFlags = function(spellID, flags) setSpellField(spellID, "Flags", flags) end,
+    CanSetIsCoreAbility = function() return true end,
+    SetIsCoreAbility = function(spellID, v) setSpellField(spellID, "IsCoreAbility", v and true or false) end,
+    CanSetIsOptimalAbility = function() return true end,
+    SetIsOptimalAbility = function(spellID, v) setSpellField(spellID, "IsOptimalAbility", v and true or false) end,
+    CanSetIsEmpoweringAbility = function() return true end,
+    SetIsEmpoweringAbility = function(spellID, v) setSpellField(spellID, "IsEmpoweringAbility", v and true or false) end,
+    CanSetIsSynergisticAbility = function() return true end,
+    SetIsSynergisticAbility = function(spellID, v) setSpellField(spellID, "IsSynergisticAbility", v and true or false) end,
+    DoesBuildHaveEnchant = function(enchantID) return findEnchant(enchantID) ~= nil end,
+    AddRandomEnchant = function(enchant)
+        if type(enchant) ~= "table" or not enchant.Enchant then return end
+        if not findEnchant(enchant.Enchant) then table.insert(pendingBuild.RandomEnchants, copyRecord(enchant)) end
+    end,
+    RemoveRandomEnchant = function(enchant)
+        local i = findEnchant(type(enchant) == "table" and enchant.Enchant or enchant)
+        if i then table.remove(pendingBuild.RandomEnchants, i) end
+    end,
+    SetEnchantStacks = function(enchantID, stacks) setEnchantField(enchantID, "Stacks", math.max(1, stacks or 1)) end,
+    SetEnchantLevel = function(enchantID, level) setEnchantField(enchantID, "Level", level) end,
+    CanSetEnchantFlags = function() return true end,
+    SetEnchantFlags = function(enchantID, flags) setEnchantField(enchantID, "Flags", flags) end,
+    CanAddArmorType = function() return true end,
+    AddArmorType = function(armor)
+        local value = type(armor) == "table" and armor.Type or armor
+        if value and not findType(pendingBuild.ArmorTypes, value) then
+            table.insert(pendingBuild.ArmorTypes, type(armor) == "table" and copyRecord(armor) or { Type = armor, Comment = "" })
+        end
+    end,
+    RemoveArmorType = function(armor)
+        local i = findType(pendingBuild.ArmorTypes, type(armor) == "table" and armor.Type or armor)
+        if i then table.remove(pendingBuild.ArmorTypes, i) end
+    end,
+    CanAddWeaponType = function() return true end,
+    AddWeaponType = function(weapon)
+        local value = type(weapon) == "table" and weapon.Type or weapon
+        if value and not findType(pendingBuild.WeaponTypes, value) then
+            table.insert(pendingBuild.WeaponTypes, type(weapon) == "table" and copyRecord(weapon) or { Type = weapon, Comment = "" })
+        end
+    end,
+    RemoveWeaponType = function(weapon)
+        local i = findType(pendingBuild.WeaponTypes, type(weapon) == "table" and weapon.Type or weapon)
+        if i then table.remove(pendingBuild.WeaponTypes, i) end
+    end,
+    SetName = function(v) pendingBuild.Name = v or "" end,
+    SetIcon = function(v) pendingBuild.Icon = v or "INV_Misc_QuestionMark" end,
+    SetRoles = function(v) pendingBuild.Roles = v or "PLAYER_ROLE_NONE" end,
+    SetPrimaryStat = function(v) pendingBuild.PrimaryStat = v or "" end,
+    SetDifficultyRating = function(v) pendingBuild.DifficultyRating = v or Enum.BuildDifficulty.Standard end,
+    SetCategory = function(v) pendingBuild.Category = v or Enum.BuildCategory.None end,
+    SetDescription = function(v) pendingBuild.Description = v or "" end,
+    SetComment = function(v) pendingBuild.Comment = v or "" end,
+    -- The editor's spell picker runs through the Character Advancement filtered list; the
+    -- editor never opens it here (no filtered set), so the count is honest at zero.
+    SetFilteredEntries = function() end,
+    GetNumFilteredEntries = function() return 0 end,
+    GetFilteredEntryAtIndex = function() return nil end,
 })
 inertNamespace("C_Wildcard", { CanUseRapidRolling = function() return false end })
-inertNamespace("C_MysticEnchant", { GetEnchantInfoBySpell = function() return nil end })
+inertNamespace("C_MysticEnchant", {})        -- api/C_MysticEnchant.lua defines the real surface; this only catches strays
+inertNamespace("C_MysticEnchantPreset", {})
+----------------------------------------------------------------------------------------
+-- 1b. Natives and glue the classic (Hero / Free-Pick) Character Advancement panel and the
+--     Mystic Enchant panel reach on a stock client.
+----------------------------------------------------------------------------------------
+-- The saved CVars Ascension registers natively (FrameXML\GameCVars.lua); on stock they live in
+-- the shim's saved variables through ab_CVar.lua. previewCharacterAdvancementChanges = "1" is
+-- the pending-build editing mode both panels are verified against.
+if C_CVar and C_CVar.RegisterSavedCVar then
+    C_CVar.RegisterSavedCVar("caLastClass", "")
+    C_CVar.RegisterSavedCVar("caLastSpec", "")
+    C_CVar.RegisterSavedCVar("previewCharacterAdvancementChanges", "1")
+    C_CVar.RegisterSavedCVar("allowMysticEnchantingUI", "1")
+    C_CVar.RegisterSavedCVar("showTooltipID", "0")
+end
+if not IsSpellIDKnown then function IsSpellIDKnown(spellID) return IsSpellKnown(spellID) end end
+-- Ascension's money natives (FrameXML\Util\CostUtil.lua formats every enchant / reforge
+-- cost through them); copper amounts, as everywhere else in the client.
+-- GetGoldForMoney(copper) -> gold, silver, copper (CostUtil:FormatCost unpacks all three).
+if not GetGoldForMoney then
+    function GetGoldForMoney(money)
+        money = tonumber(money) or 0
+        return math.floor(money / 10000), math.floor((money % 10000) / 100), money % 100
+    end
+end
+-- C_Spell natives the panels poll per known ability: the trainer rank-up indicator. The port has
+-- no trainer ranks for Character Advancement spells, so the highest learnable rank is the spell
+-- itself and nothing is a trainer spell (FrameXML\Util\C_Spell.lua aliases IsTrainerSpell).
+C_Spell = C_Spell or {}
+if not C_Spell.GetMaxLearnableRank then function C_Spell.GetMaxLearnableRank(spellID) return spellID end end
+if not C_Spell.IsTrainerSpell then function C_Spell.IsTrainerSpell() return false end end
+if not IsTrainerSpell then function IsTrainerSpell() return false end end
+-- On Ascension the Free-Pick essences were bag ITEMS (ItemData.ABILITY_ESSENCE 383080 /
+-- TALENT_ESSENCE 383081) and the panels read them with GetItemCount; on the port the budgets
+-- are numbers the module serves, so those two item counts answer with the remaining essence.
+do
+    local stockGetItemCount = GetItemCount
+    function GetItemCount(item, ...)
+        local id = tonumber(item) or (type(item) == "string" and tonumber(string.match(item, "item:(%d+)")))
+        local CA = C_CharacterAdvancement
+        if id == 383080 and CA and CA.GetRemainingAE then return math.max(0, CA.GetRemainingAE()) end
+        if id == 383081 and CA and CA.GetRemainingTE then return math.max(0, CA.GetRemainingTE()) end
+        return stockGetItemCount(item, ...)
+    end
+end
+-- Ascension's item natives (FrameXML\Objects\Item.lua, CurrencyBar.lua) over stock GetItemInfo,
+-- which answers only for items already in the client's cache; the fallbacks keep the currency
+-- bars drawing while the essence items load.
+local function itemInfo(item) if item == nil then return end return GetItemInfo(item) end
+-- Ascension-only items the panels name before the client has ever seen them (FrameXML\Data\Items.lua).
+local KNOWN_ITEM_NAMES = { [98463] = "Mystic Extract", [375250] = "Mark of Ascension", [383080] = "Ability Essence",
+                           [383081] = "Talent Essence", [98570] = "Mystic Orb", [98462] = "Mystic Rune",
+                           [992720] = "Untarnished Mystic Scroll" }
+if not GetItemName then
+    function GetItemName(item)
+        local name = itemInfo(item)
+        local id = tonumber(item) or (type(item) == "string" and tonumber(string.match(item, "item:(%d+)")))
+        return name or KNOWN_ITEM_NAMES[id] or ("Item " .. tostring(item))
+    end
+end
+if not GetItemQuality then function GetItemQuality(item) local _, _, quality = itemInfo(item) return quality or 1 end end
+if not GetItemIcon then function GetItemIcon(item) local _, _, _, _, _, _, _, _, _, texture = itemInfo(item) return texture end end
+if not GetItemIconInstant then function GetItemIconInstant(item) local texture = GetItemIcon(item) return texture and string.match(texture, "([^\\]+)$") or nil end end
+if not GetItemLink then function GetItemLink(item) local _, link = itemInfo(item) return link end end
+if not GetItemClassID then function GetItemClassID() return nil end end
+if not GetItemSubClassID then function GetItemSubClassID() return nil end end
+if not GetItemFlavorText then function GetItemFlavorText() return nil end end
+if not GetItemInfoInstant then
+    -- retail shape: itemID, itemType, itemSubType, itemEquipLoc, icon, classID, subclassID
+    function GetItemInfoInstant(item)
+        local name, link, _, _, _, itemType, itemSubType, _, equipLoc, texture = itemInfo(item)
+        local id = tonumber(item) or (link and tonumber(string.match(link, "item:(%d+)")))
+        if not name then return id end
+        return id, itemType, itemSubType, equipLoc, texture, nil, nil
+    end
+end
+if not GetRealmMaxLevel then function GetRealmMaxLevel() return MAX_PLAYER_LEVEL or 80 end end
+if not SendSystemMessage then
+    function SendSystemMessage(text)
+        if UIErrorsFrame then UIErrorsFrame:AddMessage(tostring(text), 1.0, 0.1, 0.1, 1.0) end
+        if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(tostring(text), 1.0, 1.0, 0.0) end
+    end
+end
+if not ShowForcedPrimaryStat then function ShowForcedPrimaryStat() return false end end
+if not WildCard_LoadUI then function WildCard_LoadUI() return false end end
+if not GetPrestigeLevel then function GetPrestigeLevel() return 0 end end
+-- account / quest natives the Hero Architect touches when shown
+C_AccountInfo = C_AccountInfo or {}
+if not C_AccountInfo.GetGMLevel then function C_AccountInfo.GetGMLevel() return 0 end end
+if not C_AccountInfo.GetCharacterAtIndex then function C_AccountInfo.GetCharacterAtIndex() return nil end end
+C_Quest = C_Quest or {}
+if not C_Quest.SendPathToAscensionEvent then function C_Quest.SendPathToAscensionEvent() end end
+-- Draft / Hand of Fate / Skill Card picks (FrameXML\Util\DraftUtil.lua polls these natives on
+-- PLAYER_ENTERING_WORLD); no draft realm exists on the port, so every pick query answers "none".
+for _, name in ipairs({ "HasDraftModePick", "HasHandOfFatePick", "HasHandOfFateSacrificePick", "IsBuildDraftModeEnabled",
+                        "IsCardSwapSacrifice", "IsLuckySkillCardDraft", "IsLuckySkillCardPick", "IsSkillCardDraft", "IsSkillCardPick" }) do
+    if not _G[name] then _G[name] = function() return false end end
+end
+for _, name in ipairs({ "GetDraftModePickCount", "GetHandOfFatePickCount", "GetHandOfFateSacrificePickCount" }) do
+    if not _G[name] then _G[name] = function() return 0 end end
+end
+for _, name in ipairs({ "GetDraftModePickSpellAtIndex", "GetHandOfFatePickSpellAtIndex", "GetHandOfFateSacrificePickSpellAtIndex", "GetSelectedHandOfFateSpell" }) do
+    if not _G[name] then _G[name] = function() return nil end end
+end
+if not HasPrestigedOnce then function HasPrestigedOnce() return false end end
+C_Aura = C_Aura or {}
+if not C_Aura.UnitHasAura then
+    function C_Aura.UnitHasAura(unit, spellID)
+        local name = GetSpellInfo(spellID)
+        if not name then return false end
+        for i = 1, 40 do
+            local buff = UnitBuff(unit, i)
+            if not buff then break end
+            if buff == name then return true end
+        end
+        return false
+    end
+end
+-- Free-Pick's "General" entries (1,803 class-agnostic abilities and talents) have no class
+-- button in Ascension's panel because its ability browser (server-fed categories, not
+-- recovered) listed them. Give them a class button instead: a pseudo-class GENERAL with one
+-- tab, resolved through the same conversion functions the panel already uses.
+do
+    local util = CharacterAdvancementUtil
+    if util then
+        local toDBC, toFile, specToDBC, specToFile = util.GetClassDBCByFile, util.GetClassFileByDBC, util.GetSpecDBCByFile, util.GetSpecFileByDBC
+        util.GetClassDBCByFile = function(f) if f == "GENERAL" then return "General" end return toDBC(f) end
+        util.GetClassFileByDBC = function(d) if d == "General" then return "GENERAL" end return toFile(d) end
+        util.GetSpecDBCByFile = function(f) if f == "GENERAL1" then return "General1" end return specToDBC(f) end
+        util.GetSpecFileByDBC = function(d) if d == "General1" then return "GENERAL1" end return specToFile(d) end
+    end
+    if CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER and not CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER.GENERAL then
+        CHARACTER_ADVANCEMENT_CLASS_SPEC_ORDER.GENERAL = { "GENERAL1" }
+        table.insert(CHARACTER_ADVANCEMENT_CLASS_ORDER, 1, "GENERAL")
+    end
+    LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE or {}
+    LOCALIZED_CLASS_NAMES_FEMALE = LOCALIZED_CLASS_NAMES_FEMALE or {}
+    LOCALIZED_CLASS_NAMES_MALE.GENERAL = LOCALIZED_CLASS_NAMES_MALE.GENERAL or "General"
+    LOCALIZED_CLASS_NAMES_FEMALE.GENERAL = LOCALIZED_CLASS_NAMES_FEMALE.GENERAL or "General"
+    if RAID_CLASS_COLORS and not RAID_CLASS_COLORS.GENERAL then RAID_CLASS_COLORS.GENERAL = RAID_CLASS_COLORS.HERO or RAID_CLASS_COLORS.PRIEST end
+    -- the class button asserts on a missing "class-round-<token>" atlas; General wears the Hero one
+    if AtlasInfo and not AtlasInfo["class-round-general"] then AtlasInfo["class-round-general"] = AtlasInfo["class-round-hero"] end
+    if C_ClassInfo and C_ClassInfo.GetSpecInfo then
+        local getSpecInfo = C_ClassInfo.GetSpecInfo
+        function C_ClassInfo.GetSpecInfo(classToken, specToken)
+            local info = getSpecInfo(classToken, specToken)
+            if info then return info end
+            if string.upper(tostring(classToken)) == "GENERAL" then
+                return { ID = 0, Class = "GENERAL", Spec = "GENERAL1", Name = "General", SpecFilename = "INV_Misc_Book_09", Description = "Abilities and talents any Hero may pick." }
+            end
+            -- the classic panel indexes the result without a nil check (CharacterAdvancement.lua:850, CAGate.lua:167)
+            return { ID = 0, Class = string.upper(tostring(classToken)), Spec = string.upper(tostring(specToken)), Name = tostring(specToken), SpecFilename = "INV_Misc_QuestionMark" }
+        end
+    end
+end
 -- Ascension native: GetMaxLevel() (the realm's level cap; Hero Architect sizes its level slider by it)
 if not GetMaxLevel then
     function GetMaxLevel() return MAX_PLAYER_LEVEL or 80 end
@@ -229,21 +513,47 @@ AppearanceUI_LoadUI = AppearanceUI_LoadUI or placeholderPanel("AppearanceWardrob
     .. "The original Ascension_AppearanceUI addon is preserved in the repository and will be wired in here if the data is ever found.")
 -- Ascension_Collections is LoadOnDemand; Ascension's UIParent loads it on first use.
 Collections_LoadUI = Collections_LoadUI or loader("Ascension_Collections")
+-- Collections decides its tab set (CoA talent panel vs the classic Hero panel, Mystic Enchants
+-- or not) from the class identity at the moment it is built, and that identity is the server's
+-- STATE. Anything that builds Collections therefore waits for the first STATE; before it the
+-- shim only knows the pack's default identity, which is wrong on every other realm mode.
+local function whenConnected(fn, tries)
+    if ASC.Live and ASC.Live.State and ASC.Live.State.connected then return fn() end
+    tries = tries or 0
+    if tries >= 40 then
+        Stock.Log("no STATE from mod-ascension-ca after 20 s; opening with the pack's default identity")
+        return fn()
+    end
+    C_Timer.After(0.5, function() whenConnected(fn, tries + 1) end)
+end
+Stock.WhenConnected = whenConnected
 local function OpenCharacterAdvancement()
-    if not Collections then Collections_LoadUI() end
-    if not Collections then Stock.Log("Collections frame is not loaded") return false end
-    local ok, err = pcall(Collections.GoToTab, Collections, Collections.Tabs.CharacterAdvancement)
-    if not ok then Stock.Log("GoToTab failed: " .. tostring(err)) end
-    return ok
+    whenConnected(function()
+        if not Collections then Collections_LoadUI() end
+        if not Collections then Stock.Log("Collections frame is not loaded") return false end
+        local ok, err = pcall(Collections.GoToTab, Collections, Collections.Tabs.CharacterAdvancement)
+        if not ok then Stock.Log("GoToTab failed: " .. tostring(err)) end
+        return ok
+    end)
+    return true
 end
 Stock.OpenCharacterAdvancement = OpenCharacterAdvancement
-function Stock.OpenHeroArchitect()
-    if not Collections then Collections_LoadUI() end
-    if not Collections then Stock.Log("Collections frame is not loaded") return false end
-    local ok, err = pcall(Collections.GoToTab, Collections, Collections.Tabs.HeroArchitect)
-    if not ok then Stock.Log("GoToTab(HeroArchitect) failed: " .. tostring(err)) end
-    return ok
+local function openTab(tabName)
+    whenConnected(function()
+        if not Collections then Collections_LoadUI() end
+        if not Collections then Stock.Log("Collections frame is not loaded") return false end
+        local id = Collections.Tabs[tabName]
+        if not id then Stock.Log("no " .. tabName .. " tab for this character") return false end
+        local ok, err = pcall(Collections.GoToTab, Collections, id)
+        if not ok then Stock.Log("GoToTab(" .. tabName .. ") failed: " .. tostring(err)) end
+        return ok
+    end)
+    return true
 end
+function Stock.OpenHeroArchitect() return openTab("HeroArchitect") end
+function Stock.OpenMysticEnchants() return openTab("MysticEnchants") end
+function Stock.OpenVanity() return openTab("Vanity") end
+function Stock.OpenWardrobe() return openTab("Wardrobe") end
 if not ToggleCollections then
     function ToggleCollections()
         if Collections and Collections:IsShown() then HideUIPanel(Collections) return end
@@ -284,6 +594,10 @@ end
 SLASH_ASCCA1 = "/ca"
 SlashCmdList.ASCCA = function(msg)
     local verb, arg = string.match(msg or "", "^%s*(%S*)%s*(.-)%s*$")
+    if verb == "enchants" then return Stock.OpenMysticEnchants() end
+    if verb == "architect" or verb == "builds" then return Stock.OpenHeroArchitect() end
+    if verb == "vanity" then return Stock.OpenVanity() end
+    if verb == "wardrobe" then return Stock.OpenWardrobe() end
     if verb == "inspect" and arg ~= "" and ASC.Live and ASC.Live.Inspect then
         local ok, why = ASC.Live.Inspect(arg, function(info, reason)
             if not info then DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Ascension:|r inspect " .. arg .. " failed (" .. tostring(reason) .. ")") return end
@@ -303,7 +617,8 @@ end
 --    that has the keyboard enabled (such a frame swallows every key, chat included), then
 --    auto-open the CA tab when Stock.autoOpenPanel is set, so tests need no chat input.
 ----------------------------------------------------------------------------------------
-Stock.autoOpenPanel = true
+Stock.autoOpenPanel = false   -- dev probe: open the CA tab 6 s after entering the world
+Stock.debugProbes = false     -- dev probe: log every visible keyboard-enabled frame at that point
 -- Test helpers (the harness drives the UI through /run lines that must stay short).
 function Stock.FindNode(entryID)
     local f = EnumerateFrames()
@@ -323,20 +638,24 @@ local probe = CreateFrame("Frame")
 probe:RegisterEvent("PLAYER_ENTERING_WORLD")
 probe:SetScript("OnEvent", function()
     C_Timer.After(6, function()
-        local f, n = EnumerateFrames(), 0
-        while f do
-            if f.IsKeyboardEnabled and f:IsKeyboardEnabled() and f:IsVisible() then
-                n = n + 1
-                local parent = f:GetParent()
-                Stock.Log("keyboard frame: " .. tostring(f:GetName()) .. " parent=" .. tostring(parent and parent:GetName()))
+        if Stock.debugProbes then
+            -- A shown keyboard-enabled frame eats every key (see the empty-keybindings trap);
+            -- this census names them so a regression is visible in the server log.
+            local f, n = EnumerateFrames(), 0
+            while f do
+                if f.IsKeyboardEnabled and f:IsKeyboardEnabled() and f:IsVisible() then
+                    n = n + 1
+                    local parent = f:GetParent()
+                    Stock.Log("keyboard frame: " .. tostring(f:GetName()) .. " parent=" .. tostring(parent and parent:GetName()))
+                end
+                f = EnumerateFrames(f)
             end
-            f = EnumerateFrames(f)
+            Stock.Log("keyboard-enabled visible frames: " .. n)
         end
-        Stock.Log("keyboard-enabled visible frames: " .. n)
         if Stock.autoOpenPanel then
             Stock.Log("auto-opening the Character Advancement tab")
             OpenCharacterAdvancement()
-            Stock.Log("errors after open: " .. #AscensionShimDB.errors)
+            Stock.Log("log lines after open: " .. #AscensionShimDB.errors)
         end
     end)
 end)

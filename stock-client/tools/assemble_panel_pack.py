@@ -28,6 +28,7 @@ MANIFEST = [
     "SharedXML/Util/Vector.lua",
     "SharedXML/Util/DrawUtil.lua",
     "SharedXML/Util/Timer.lua",
+    "SharedXML/Util/C_Deflate.lua",
     "SharedXML/Util/C_Serialize.lua",
     "SharedXML/AtlasInfo.lua",
     "SharedXML/Enum.lua",
@@ -54,6 +55,7 @@ MANIFEST = [
     "SharedXML/NineSlice.lua",
     "SharedXML/Util/FunctionUtil.lua",
     "SharedXML/Util/TimeUtil.lua",
+    "SharedXML/Util/C_Flipbook.lua",
     "SharedXML/Util/EventUtil.lua",
     "SharedXML/Util/FrameUtil.lua",
     "SharedXML/Util/PixelUtil.lua",
@@ -73,6 +75,7 @@ MANIFEST = [
     "SharedXML/FilterDropDown.xml",
     "FrameXML/UIPanelTemplates.lua",
     "FrameXML/UIPanelTemplates.xml",
+    "SharedXML/EffectTemplates.xml",
     "FrameXML/Util/C_Player.lua",
     "FrameXML/Util/C_GameMode.lua",
     "FrameXML/Util/C_PopupQueue.lua",
@@ -91,10 +94,31 @@ MANIFEST = [
     "FrameXML/SpecListItem.xml",
     "FrameXML/SpecializationMenu.xml",
     "FrameXML/CharacterAdvancement/CharacterAdvancementBaseTemplates.xml",
+    # P6: the classic (Hero / Free-Pick) Character Advancement panel and the Mystic Enchant panel
+    "SharedXML/Util/HyperlinkUtil.lua",
+    "SharedXML/Util/AccessibilityUtil.lua",
+    "FrameXML/Data/Items.lua",
+    "FrameXML/Objects/Item.lua",
+    "FrameXML/Util/DraftUtil.lua",
+    "FrameXML/SpellListItem.xml",
+    "FrameXML/Util/MysticEnchantUtil.lua",
+    "FrameXML/Util/CostUtil.lua",
+    "FrameXML/Util/EnchantCollectionUtil.lua",
+    "FrameXML/Util/MysticEnchantManagerUtil.lua",
+    "AddOns/AscensionUI/Shared/IconSelector.lua",
 ]
 # Whole directories copied so XML <Script>/<Include> references resolve (relative paths).
 DIRS = ["SharedXML/TypeExtensions", "SharedXML/TabSystem", "SharedXML/Scroll", "FrameXML/CharacterAdvancement"]
-ADDONS = ["AscensionResources", "Ascension_Collections", "Ascension_TalentUI", "Ascension_CoATalents", "Ascension_BuildCreator"]
+ADDONS = ["AscensionResources", "Ascension_Collections", "Ascension_TalentUI", "Ascension_CoATalents", "Ascension_BuildCreator",
+          "Ascension_CharacterAdvancement", "Ascension_EnchantCollection"]
+# (relative path under compat/, exact text before, text after) - see client/PATCHES.md
+TEXT_PATCHES = [
+    # The Util is FrameXML on Ascension, so issecure() holds when it writes WTF\MysticEnchantSaved.wtf.
+    # In the pack it is addon code, issecure() is always false, and every preset save would be refused.
+    ("FrameXML/Util/MysticEnchantManagerUtil.lua",
+     "\tif not issecure() then\n\t\treturn C_Logger.Error(\"Tried to write %s.wtf from insecure code!\", saveFile)\n\tend\n",
+     "\t-- stock-client port: this file loads as addon code, so the issecure() guard is removed here\n"),
+]
 HERE = os.path.dirname(os.path.abspath(__file__))
 GLUE = os.path.join(HERE, "..", "client", "Interface", "AddOns", "!AscensionShim", "compat", "zz_StockShim.lua")
 
@@ -230,6 +254,17 @@ def main():
     seen = set()
     for rel in MANIFEST:
         copy_with_refs(rel, seen)
+    # Recorded source edits to copied FrameXML files (client/PATCHES.md). Each is an exact text
+    # replacement that must match once; a miss is an error so an upstream change cannot silently
+    # drop the fix.
+    for rel, old, new in TEXT_PATCHES:
+        p = os.path.join(compat, rel)
+        if not os.path.exists(p):
+            continue
+        text = open(p, encoding="utf-8", errors="replace").read()
+        if text.count(old) != 1:
+            raise SystemExit("TEXT_PATCHES: expected exactly one match in %s" % rel)
+        open(p, "w", encoding="utf-8", newline="\n").write(text.replace(old, new))
     # Our overlay: everything under the source tree's compat/ (prelude, glue, and any file
     # that REPLACES an Ascension original at the same relative path, e.g. SharedXML/C_Hook.lua).
     overlay = os.path.dirname(GLUE)
@@ -262,15 +297,31 @@ def main():
     toc += ["", "# --- Ascension SharedXML/FrameXML compat (verbatim, FrameXML.toc order) ---", "compat\\aa_StockPrelude.lua", "compat\\ab_CVar.lua"]
     toc += ["compat\\" + rel.replace("/", "\\") for rel in MANIFEST if rel not in missing]
     # ours, from the overlay: Ascension-only definitions sliced out of files we do not copy whole
-    toc += ["compat\\FrameXML\\GameTooltipExtras.lua"]
+    toc += ["compat\\FrameXML\\GameTooltipExtras.lua", "compat\\FrameXML\\StaticPopupExtras.lua",
+            "compat\\FrameXML\\TemplateExtras.xml", "compat\\AscensionUIExtras.lua", "compat\\zz_TooltipMacros.lua"]
     toc += ["compat\\zz_AttributeNames.lua", "compat\\zz_StockShim.lua", "Bootstrap.lua"]
     with open(toc_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(toc) + "\n")
-    # 4. original addons verbatim
+    # 4. original addons verbatim -- except the TOC dependency on AscensionUI (Ascension's
+    #    always-loaded UI overhaul, not part of the pack; compat\AscensionUIExtras.lua carries the
+    #    entry points these addons call), which would make LoadAddOn fail with DEP_MISSING.
     for name in ADDONS:
         src = os.path.join(ui, "AddOns", name)
         if os.path.isdir(src):
             copytree(src, os.path.join(addons_out, name))
+            toc = os.path.join(addons_out, name, name + ".toc")
+            if os.path.exists(toc):
+                raw = open(toc, "rb").read()
+                bom = raw.startswith(b"\xef\xbb\xbf")
+                text = raw[3:].decode("utf-8", "replace") if bom else raw.decode("utf-8", "replace")
+                lines = []
+                for line in text.splitlines():
+                    if line.lower().startswith("## dependencies:"):
+                        deps = [d.strip() for d in line.split(":", 1)[1].split(",") if d.strip() and d.strip() != "AscensionUI"]
+                        line = "## Dependencies: " + ", ".join(deps) if deps else "## X-Dependencies-Removed: AscensionUI"
+                    lines.append(line)
+                with open(toc, "wb") as f:
+                    f.write((b"\xef\xbb\xbf" if bom else b"") + ("\n".join(lines) + "\n").encode("utf-8"))
         else:
             missing.append("AddOns/" + name)
     # 4b. stock-name collisions (see rename_colliding_templates)

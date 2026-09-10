@@ -1,8 +1,19 @@
 /*
  * mod-ascension-ca — AscensionCA.cpp
  *
- * Character Advancement for the stock-client port of Ascension's Conquest of Azeroth
- * on AzerothCore. The client has no custom opcodes, so everything rides on addon chat:
+ * Character Advancement for the stock-client port of Ascension on AzerothCore, in two realm
+ * modes (AscensionCA.Mode in the realm's worldserver.conf):
+ *
+ *   coa       Conquest of Azeroth: the character IS one of the 21 CoA classes (class byte
+ *             12..32, chosen at creation); one point per rank, the "Class" tab spends AE, the
+ *             active specialization's tab spends TE, budgets from the class's own essence family.
+ *   freepick  Ascension's classless Free-Pick: the character is class 10 (Hero) and picks from
+ *             the ten stock classes' trees (CA class types 1..12: the stock classes, General and
+ *             None). Abilities cost their AECost, talents their TECost per rank, budgets from
+ *             essence family 10 (AE 140 / TE 71 at level 80). Masteries and implicit traits are
+ *             granted automatically once their conditions hold.
+ *
+ * The client has no custom opcodes, so everything rides on addon chat:
  *
  *     C->S  SendAddonMessage("ASC", "CMD\t<verb>[\t<body>]", "WHISPER", me)
  *     S->C  CHAT_MSG_WHISPER / LANG_ADDON with the player as sender and target,
@@ -14,19 +25,18 @@
  *     HELLO                      -> HELLO\t<protocol>\t<mode>\t<enabled>
  *     PING                       -> PONG
  *     LOG\t<text...>             client diagnostics into the server log
- *     STATE                      -> STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<entry:rank,...>
+ *     STATE                      -> STATE\t<classByte>\t<specId>\t<ae>\t<te>\t<level>\t<chosen>\t<entry:rank,...>
  *     APPLY\t<entry:rank,...>    the COMPLETE wanted set (never a delta; the server replaces)
  *                                -> RESULT\tAPPLY\tOK | RESULT\tAPPLY\tERR\t<reason>\t<entry>, then STATE
- *     SPEC\t<id>                 activate a specialization of the character's CoA class
+ *     SPEC\t<id>                 activate a specialization of the character's CoA class (coa only)
  *                                -> RESULT\tSPEC\t..., then STATE
  *     RESET\ttalents|all         -> RESULT\tRESET\tOK, then STATE
+ *     CLASS\t<byte>[\t<uuid>]    the glue chooser's pick (coa only)
+ *     INSPECT\t<name>            another online character's advancement
  *
- * Rules (CoA model, the one the original panel displays): one point per rank; entries
- * of the "Class" tab spend AE, entries of the active specialization's tab spend TE;
- * budgets come from ascension_ca_essence(family = CoA class byte, level); RequiredIDs are
- * prerequisites (must be in the set), RequiredLevel and the Required*Investment columns
- * gate. Learning rank r grants the entry's rank spells 1..r (AzerothCore's own rank
- * chains supersede where Spell.dbc says so); dropping to rank r removes the higher ones.
+ * Reason strings are Ascension's own Enum.CALearnResult / CAUnlearnResult keys
+ * (CA_LEARN_LOW_LEVEL, ...) so the original panels can print them; the CoA-era short forms are
+ * kept for the CoA mode where the CoA panel was verified against them.
  *
  * Data: ascension_ca_* world tables from tools/gen_server_sql.py; per-character state in
  * ascension_ca_character / ascension_ca_known (characters database).
@@ -45,6 +55,7 @@
 #include "GameTime.h"
 #include "SpellMgr.h"
 #include "DBCStructure.h"
+#include "DBCStores.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 
@@ -52,6 +63,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -59,10 +71,13 @@
 
 namespace AscensionCA
 {
-    constexpr uint32 PROTOCOL = 2;
+    constexpr uint32 PROTOCOL = 3;
     constexpr std::string_view PREFIX = "ASC\t";
     constexpr std::string_view CMD = "ASC\tCMD\t";
     constexpr size_t MAX_BODY = 200;
+    constexpr uint8 HERO_CLASS_BYTE = 10;
+    constexpr uint32 FLAG_IMPLICIT_TRAIT = 0x400000; // Ascension: "Implicit Traits unlock automatically at their Class Point requirement"
+    constexpr uint32 CLASSIC_TYPE_MAX = 12;           // CA class types 1..12 = None, the ten stock classes, General
 
     struct Settings
     {
@@ -70,8 +85,11 @@ namespace AscensionCA
         std::string mode = "coa";
         bool debug = false;
         uint8 defaultClassByte = 28;
+        bool heroProficiencies = true;
     };
     Settings g;
+
+    bool IsHeroMode() { return g.mode == "freepick"; }
 
     struct Entry
     {
@@ -84,10 +102,17 @@ namespace AscensionCA
         std::string type;
         std::string name;
         uint8 maxRank = 1;
+        uint32 aeCost = 0, teCost = 0;
         uint32 reqLevel = 0;
-        uint32 reqTabAe = 0, reqTabTe = 0, reqClassAe = 0, reqClassTe = 0, reqClassPoints = 0;
-        std::vector<uint32> spells;   // index = rank - 1
-        std::vector<uint32> required; // resolved RequiredIDs
+        uint32 reqTabAe = 0, reqTabTe = 0, reqClassAe = 0, reqClassTe = 0, reqAe = 0, reqTe = 0, reqClassPoints = 0;
+        uint32 flags = 0;
+        std::vector<uint32> spells;    // index = rank - 1
+        std::vector<uint32> required;  // resolved RequiredIDs
+        std::vector<uint32> connected; // resolved ConnectedNodes (talent tree parents)
+        std::vector<uint32> masteries; // resolved Masteries (a known mastery grants this entry)
+        bool IsTalent() const { return type == "Talent"; }
+        bool IsClassic() const { return classType >= 1 && classType <= CLASSIC_TYPE_MAX; }
+        bool IsTrait() const { return (flags & FLAG_IMPLICIT_TRAIT) != 0; }
     };
     struct ClassRow
     {
@@ -123,6 +148,14 @@ namespace AscensionCA
     std::unordered_map<std::string, Archetype> archetypes;
     bool dataLoaded = false;
 
+    // Weapon and armour proficiencies Ascension's Heroes had from the start (any weapon, any
+    // armour). Learned through the normal spell path so the skill lines come with them.
+    const uint32 HERO_PROFICIENCIES[] = {
+        196, 197, 198, 199, 200, 201, 202, 227, 264, 266, 1180, 2567, 5011, 15590, 5009, // weapons
+        9078, 9077, 8737, 750, 9116,                                                   // cloth, leather, mail, plate, shield
+        674,                                                                           // dual wield
+    };
+
     struct PlayerState
     {
         uint8 classByte = 0;
@@ -147,6 +180,9 @@ namespace AscensionCA
         g.mode = sConfigMgr->GetOption<std::string>("AscensionCA.Mode", "coa");
         g.debug = sConfigMgr->GetOption<bool>("AscensionCA.Debug", false);
         g.defaultClassByte = static_cast<uint8>(sConfigMgr->GetOption<uint32>("AscensionCA.DefaultClassByte", 28));
+        g.heroProficiencies = sConfigMgr->GetOption<bool>("AscensionCA.HeroProficiencies", true);
+        if (IsHeroMode())
+            g.defaultClassByte = HERO_CLASS_BYTE;
         LOG_INFO("module", "mod-ascension-ca: enabled={} mode={} protocol={} defaultClassByte={}", g.enabled, g.mode, PROTOCOL, g.defaultClassByte);
     }
 
@@ -205,7 +241,7 @@ namespace AscensionCA
                 essence[f[0].Get<uint8>()][f[1].Get<uint8>()] = Budget{ f[2].Get<uint32>(), f[3].Get<uint32>() };
             } while (r->NextRow());
         }
-        if (QueryResult r = WorldDatabase.Query("SELECT entry, class_type, class_name, tab_name, is_class_tab, entry_type, name, max_rank, req_level, req_tab_ae, req_tab_te, req_class_ae, req_class_te, req_class_points FROM ascension_ca_entry"))
+        if (QueryResult r = WorldDatabase.Query("SELECT entry, class_type, class_name, tab_name, is_class_tab, entry_type, name, max_rank, req_level, req_tab_ae, req_tab_te, req_class_ae, req_class_te, req_class_points, ae_cost, te_cost, req_ae, req_te, flags FROM ascension_ca_entry"))
         {
             do
             {
@@ -216,6 +252,8 @@ namespace AscensionCA
                 e.type = f[5].Get<std::string>(); e.name = f[6].Get<std::string>(); e.maxRank = std::max<uint8>(1, f[7].Get<uint8>());
                 e.reqLevel = f[8].Get<uint32>(); e.reqTabAe = f[9].Get<uint32>(); e.reqTabTe = f[10].Get<uint32>();
                 e.reqClassAe = f[11].Get<uint32>(); e.reqClassTe = f[12].Get<uint32>(); e.reqClassPoints = f[13].Get<uint32>();
+                e.aeCost = f[14].Get<uint32>(); e.teCost = f[15].Get<uint32>(); e.reqAe = f[16].Get<uint32>(); e.reqTe = f[17].Get<uint32>();
+                e.flags = f[18].Get<uint32>();
                 entries[e.id] = e;
             } while (r->NextRow());
         }
@@ -233,18 +271,23 @@ namespace AscensionCA
                 it->second.spells[rank - 1] = f[2].Get<uint32>();
             } while (r->NextRow());
         }
-        if (QueryResult r = WorldDatabase.Query("SELECT entry, target FROM ascension_ca_entry_link WHERE kind = 'req' AND resolved = 1"))
+        if (QueryResult r = WorldDatabase.Query("SELECT entry, kind, target FROM ascension_ca_entry_link WHERE resolved = 1"))
         {
             do
             {
                 Field* f = r->Fetch();
                 auto it = entries.find(f[0].Get<uint32>());
-                if (it != entries.end())
-                    it->second.required.push_back(f[1].Get<uint32>());
+                if (it == entries.end())
+                    continue;
+                std::string kind = f[1].Get<std::string>();
+                uint32 target = f[2].Get<uint32>();
+                if (kind == "req") it->second.required.push_back(target);
+                else if (kind == "conn") it->second.connected.push_back(target);
+                else if (kind == "mastery") it->second.masteries.push_back(target);
             } while (r->NextRow());
         }
         dataLoaded = !entries.empty();
-        LOG_INFO("module", "mod-ascension-ca: {} entries, {} classes, {} specializations, {} essence families", entries.size(), classes.size(), specs.size(), essence.size());
+        LOG_INFO("module", "mod-ascension-ca: {} entries, {} classes, {} specializations, {} essence families, mode {}", entries.size(), classes.size(), specs.size(), essence.size(), g.mode);
     }
 
     void Send(Player* player, std::string const& body)
@@ -385,14 +428,20 @@ namespace AscensionCA
     // ---- spells ------------------------------------------------------------------------
     // A spell shows in the spellbook only under a skill-line tab the character has;
     // Ascension's SkillLineAbility puts CA spells on class skill lines (99 Demolition,
-    // 100 Invention, 102 Mechanics ... for Tinker) that a carrier-class character lacks.
+    // 100 Invention, 102 Mechanics ... for Tinker; 26 Arms, 8 Fire ... for the stock trees)
+    // that a carrier-class character lacks. Only CLASS skill lines are pre-created here
+    // (they are mono-range, 1/1); weapon and armour lines are left to Player::_addSpell,
+    // which sizes them to the level (a 1/1 weapon skill would never hit anything).
     void EnsureSkillLine(Player* player, uint32 spell)
     {
         auto bounds = sSpellMgr->GetSkillLineAbilityMapBounds(spell);
         for (auto it = bounds.first; it != bounds.second; ++it)
         {
             uint32 skill = it->second->SkillLine;
-            if (skill && !player->HasSkill(skill))
+            if (!skill || player->HasSkill(skill))
+                continue;
+            SkillLineEntry const* line = sSkillLineStore.LookupEntry(skill);
+            if (line && line->categoryId == SKILL_CATEGORY_CLASS)
                 player->SetSkill(static_cast<uint16>(skill), 0, 1, 1);
         }
     }
@@ -435,6 +484,10 @@ namespace AscensionCA
         if (Spec const* s = ActiveSpec(st))
             if (s->passiveSpell)
                 Learn(player, s->passiveSpell);
+        if (IsHeroMode() && g.heroProficiencies)
+            for (uint32 spell : HERO_PROFICIENCIES)
+                if (sSpellMgr->GetSpellInfo(spell))
+                    Learn(player, spell);
     }
 
     // ---- persistence -------------------------------------------------------------------
@@ -473,6 +526,13 @@ namespace AscensionCA
                                       guid, uint32(st.classByte), uint32(GameTime::GetGameTime().count()));
         if (classes.find(st.classByte) == classes.end())
             st.classByte = g.defaultClassByte;
+        if (IsHeroMode())
+        {
+            // one class on a Free-Pick realm: every character is a Hero, whatever a row says
+            st.classByte = HERO_CLASS_BYTE;
+            st.specId = 0;
+            st.chosen = true;
+        }
         if (QueryResult r = CharacterDatabase.Query("SELECT entry, `rank` FROM ascension_ca_known WHERE guid = {}", guid))
         {
             do
@@ -489,7 +549,8 @@ namespace AscensionCA
     // ---- validation ----------------------------------------------------------------------
     struct Verdict { bool ok = true; std::string reason; uint32 entry = 0; };
 
-    Verdict Validate(Player* player, PlayerState const& st, std::map<uint32, uint8> const& wanted)
+    // -- CoA model --------------------------------------------------------------------------
+    Verdict ValidateCoA(Player* player, PlayerState const& st, std::map<uint32, uint8> const& wanted)
     {
         ClassRow const* cls = ClassOf(st);
         if (!cls)
@@ -539,8 +600,170 @@ namespace AscensionCA
         return {};
     }
 
-    void Commit(Player* player, PlayerState& st, std::map<uint32, uint8> const& wanted)
+    // -- Free-Pick (Hero) model ---------------------------------------------------------------
+    // Costs are the harvested per-entry AECost (abilities and talent-abilities) and TECost
+    // (talents, per rank). "Class Points" -- the number Ascension's masteries and implicit
+    // traits gate on -- are taken as the essence spent in that class (AE + TE); the live client
+    // never exposed the formula, so this is the documented assumption of the port.
+    uint32 HeroAe(Entry const& e) { return e.IsTalent() ? 0 : e.aeCost; }
+    uint32 HeroTe(Entry const& e) { return e.IsTalent() ? e.teCost : 0; }
+
+    struct HeroTotals
     {
+        uint32 ae = 0, te = 0;
+        std::map<std::string, uint32> classPoints, classAe, classTe; // by class name
+        std::map<std::string, uint32> tabAe, tabTe;                  // by "Class|TAB"
+    };
+    std::string TabKey(Entry const& e) { return e.className + "|" + e.tabUpper; }
+
+    // An entry a known mastery unlocks, or an implicit trait, is granted for free once the class
+    // has enough points and the character has the entry's level; such entries are never charged
+    // and cannot be refused.
+    bool IsAutoGranted(Entry const& e, std::map<uint32, uint8> const& set, HeroTotals const& t, uint8 level)
+    {
+        if (e.reqLevel > level)
+            return false;
+        auto cp = t.classPoints.find(e.className);
+        uint32 points = cp == t.classPoints.end() ? 0 : cp->second;
+        if (e.IsTrait())
+            return points >= e.reqClassPoints;
+        for (uint32 m : e.masteries)
+        {
+            auto k = set.find(m);
+            if (k != set.end() && k->second >= 1)
+                return points >= e.reqClassPoints;
+        }
+        return false;
+    }
+
+    HeroTotals HeroSum(std::map<uint32, uint8> const& set, std::set<uint32> const* freeIds)
+    {
+        HeroTotals t;
+        for (auto const& [id, rank] : set)
+        {
+            auto it = entries.find(id);
+            if (it == entries.end() || !rank)
+                continue;
+            if (freeIds && freeIds->count(id))
+                continue;
+            Entry const& e = it->second;
+            uint32 ae = HeroAe(e) * rank, te = HeroTe(e) * rank;
+            t.ae += ae; t.te += te;
+            t.classPoints[e.className] += ae + te;
+            t.classAe[e.className] += ae; t.classTe[e.className] += te;
+            t.tabAe[TabKey(e)] += ae; t.tabTe[TabKey(e)] += te;
+        }
+        return t;
+    }
+
+    // The set of entry ids in `set` that are free because a mastery/trait grants them. Two
+    // passes: the first with everything charged, the second with the free ones removed, so a
+    // mastery's own points never bootstrap a grant.
+    std::set<uint32> HeroFreeIds(std::map<uint32, uint8> const& set, uint8 level)
+    {
+        std::set<uint32> freeIds;
+        HeroTotals t = HeroSum(set, nullptr);
+        for (auto const& [id, rank] : set)
+        {
+            auto it = entries.find(id);
+            if (it != entries.end() && IsAutoGranted(it->second, set, t, level))
+                freeIds.insert(id);
+        }
+        t = HeroSum(set, &freeIds);
+        std::set<uint32> again;
+        for (auto const& [id, rank] : set)
+        {
+            auto it = entries.find(id);
+            if (it != entries.end() && IsAutoGranted(it->second, set, t, level))
+                again.insert(id);
+        }
+        return again;
+    }
+
+    Verdict ValidateHero(Player* player, PlayerState const& st, std::map<uint32, uint8> const& wanted)
+    {
+        Budget b = BudgetFor(st, player->GetLevel());
+        for (auto const& [id, rank] : wanted)
+        {
+            auto it = entries.find(id);
+            if (it == entries.end())
+                return { false, "CA_LEARN_UNKNOWN", id };
+            Entry const& e = it->second;
+            if (!e.IsClassic())
+                return { false, "CA_LEARN_WRONG_CLASS", id };
+            if (rank < 1 || rank > e.maxRank)
+                return { false, "CA_LEARN_ALREADY_KNOWN", id };
+            if (e.reqLevel > player->GetLevel())
+                return { false, "CA_LEARN_LOW_LEVEL", id };
+            for (uint32 req : e.required)
+            {
+                auto r = wanted.find(req);
+                if (r == wanted.end() || r->second < 1)
+                    return { false, "CA_LEARN_MISSING_REQUIRED_ID", id };
+            }
+            for (uint32 parent : e.connected)
+            {
+                auto r = wanted.find(parent);
+                if (r == wanted.end() || r->second < 1)
+                    return { false, "CA_LEARN_MISSING_CONNECTED_ENTRIES", id };
+            }
+        }
+        std::set<uint32> freeIds = HeroFreeIds(wanted, player->GetLevel());
+        HeroTotals t = HeroSum(wanted, &freeIds);
+        if (t.ae > b.ae)
+            return { false, "CA_LEARN_MISSING_AE", 0 };
+        if (t.te > b.te)
+            return { false, "CA_LEARN_MISSING_TE", 0 };
+        for (auto const& [id, rank] : wanted)
+        {
+            if (freeIds.count(id))
+                continue;
+            Entry const& e = entries.at(id);
+            uint32 ae = HeroAe(e) * rank, te = HeroTe(e) * rank;
+            std::string tab = TabKey(e);
+            if (e.reqAe && t.ae - ae < e.reqAe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_AE", id };
+            if (e.reqTe && t.te - te < e.reqTe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_TE", id };
+            if (e.reqTabAe && t.tabAe[tab] - ae < e.reqTabAe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_AE", id };
+            if (e.reqTabTe && t.tabTe[tab] - te < e.reqTabTe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_TE", id };
+            if (e.reqClassAe && t.classAe[e.className] - ae < e.reqClassAe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_AE", id };
+            if (e.reqClassTe && t.classTe[e.className] - te < e.reqClassTe)
+                return { false, "CA_LEARN_NOT_ENOUGH_INVESTED_TE", id };
+            if (e.reqClassPoints && t.classPoints[e.className] - ae - te < e.reqClassPoints)
+                return { false, "CA_LEARN_CONDITIONS_FAILED", id };
+        }
+        return {};
+    }
+
+    // Free-Pick: everything the picks unlock for free (mastery-owned entries, implicit traits)
+    // joins the known set at rank 1; anything that no longer qualifies leaves it.
+    void HeroAddAutoGrants(std::map<uint32, uint8>& wanted, uint8 level)
+    {
+        std::set<uint32> freeIds = HeroFreeIds(wanted, level);
+        HeroTotals t = HeroSum(wanted, &freeIds);
+        for (auto const& [id, e] : entries)
+        {
+            if (!e.IsClassic() || wanted.count(id))
+                continue;
+            if (IsAutoGranted(e, wanted, t, level))
+                wanted[id] = 1;
+        }
+    }
+
+    Verdict Validate(Player* player, PlayerState const& st, std::map<uint32, uint8> const& wanted)
+    {
+        return IsHeroMode() ? ValidateHero(player, st, wanted) : ValidateCoA(player, st, wanted);
+    }
+
+    void Commit(Player* player, PlayerState& st, std::map<uint32, uint8> const& wantedIn)
+    {
+        std::map<uint32, uint8> wanted = wantedIn;
+        if (IsHeroMode())
+            HeroAddAutoGrants(wanted, player->GetLevel());
         // removals and rank drops first, then additions
         for (auto const& [id, oldRank] : st.known)
         {
@@ -583,6 +806,17 @@ namespace AscensionCA
     void HandleApply(Player* player, PlayerState& st, std::string const& list)
     {
         std::map<uint32, uint8> wanted = ParseSet(list);
+        if (IsHeroMode())
+        {
+            // the client echoes auto-granted entries back as part of the complete set; they are
+            // recomputed from the picks, so drop them before validating
+            std::map<uint32, uint8> picks;
+            std::set<uint32> freeIds = HeroFreeIds(wanted, player->GetLevel());
+            for (auto const& [id, rank] : wanted)
+                if (!freeIds.count(id))
+                    picks[id] = rank;
+            wanted = picks;
+        }
         Verdict v = Validate(player, st, wanted);
         if (!v.ok)
         {
@@ -599,7 +833,7 @@ namespace AscensionCA
     {
         ClassRow const* cls = ClassOf(st);
         auto it = specs.find(specId);
-        if (!cls || it == specs.end() || it->second.classToken != cls->token)
+        if (IsHeroMode() || !cls || it == specs.end() || it->second.classToken != cls->token)
         {
             Send(player, "RESULT\tSPEC\tERR\tinvalid-spec\t" + std::to_string(specId));
             return;
@@ -660,9 +894,15 @@ namespace AscensionCA
 
     // CLASS\t<classByte>[\t<archetypeUUID>]: the glue chooser's pick, delivered by the addon
     // pack on the character's first world entry. Accepted once, while the character has no
-    // Character Advancement rows yet.
+    // Character Advancement rows yet. A Free-Pick realm has one class and refuses it.
     void HandleClass(Player* player, PlayerState& st, std::vector<std::string> const& args)
     {
+        if (IsHeroMode())
+        {
+            Send(player, "RESULT\tCLASS\tERR\twrong-mode\t" + std::to_string(HERO_CLASS_BYTE));
+            SendState(player, st);
+            return;
+        }
         uint32 byte = args.size() > 1 ? static_cast<uint32>(std::strtoul(args[1].c_str(), nullptr, 10)) : 0;
         std::string uuid = args.size() > 2 ? args[2] : "";
         auto cls = classes.find(static_cast<uint8>(byte));
@@ -736,13 +976,18 @@ namespace AscensionCA
             + "\t" + std::to_string(target->GetLevel()) + "\t" + EncodeKnown(other));
     }
 
+    // RESET\ttalents keeps the abilities (CoA: the Class tab; Free-Pick: every non-talent entry);
+    // RESET\tall clears everything.
     void HandleReset(Player* player, PlayerState& st, std::string const& what)
     {
         std::map<uint32, uint8> keep;
         if (what != "all")
             for (auto const& [id, rank] : st.known)
-                if (entries.at(id).classTab)
+            {
+                Entry const& e = entries.at(id);
+                if (IsHeroMode() ? !e.IsTalent() : e.classTab)
                     keep[id] = rank;
+            }
         Commit(player, st, keep);
         Send(player, "RESULT\tRESET\tOK");
         SendState(player, st);

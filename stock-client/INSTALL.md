@@ -14,9 +14,19 @@ Windows or Linux AzerothCore build environment.
 ```
 cd stock-client
 python -B tools/gen_ca_data.py --harvest <advancement.tsv> --dbc-export <ca-dbc-export> --essence-dbc <CharacterAdvancementEssence.dbc> --specs-dbc <ChrSpecs.dbc> --chrclasses-dbc <Ascension ChrClasses.dbc> --out data
-python -B tools/build_addon_pack.py --dataset unattributed-7f0c805382 --class-byte 28 --level 80 --catalogue data/build-catalogue --out build/p2-core-preview
+python -B tools/gen_enchant_data.py --harvest-zip <ascension-harvest-export.zip> --out data/enchants
+python -B tools/build_addon_pack.py --dataset unattributed-7f0c805382 --class-byte 28 --level 80 --catalogue data/build-catalogue --enchants data/enchants --out build/p2-core-preview
 python tools/assemble_panel_pack.py --core build/p2-core-preview --ui-tree <ui-tree>/Interface --out build/p2-panel
-python tools/gen_glue_data.py --dataset data/datasets/unattributed-7f0c805382 --chrclasses <Ascension ChrClasses.dbc> --atlas <ui-tree>/Interface/SharedXML/AtlasInfo.lua --out client/Interface/GlueXML/AscensionCreateData.lua
+python tools/gen_glue_data.py --dataset data/datasets/unattributed-7f0c805382 --chrclasses <Ascension ChrClasses.dbc> --atlas <ui-tree>/Interface/SharedXML/AtlasInfo.lua --coa-realm "Conquest of Azeroth" --out client/Interface/GlueXML/AscensionCreateData.lua
+```
+
+Always run `build_addon_pack.py` before `assemble_panel_pack.py`: the assembler copies the
+core pack from `build/p2-core-preview`, so an assemble on its own ships the previous core.
+`--coa-realm` (repeatable) names every realm whose character-creation screen shows the CoA
+class chooser; on any other realm (a Free-Pick / Hero realm) the chooser stays hidden and
+creation is stock.
+
+```
 ```
 
 `<ui-tree>` is Ascension's extracted Interface tree (their SharedXML/FrameXML/AddOns from
@@ -51,8 +61,11 @@ Window size: the Collections panel is 1294 UI units wide and Ascension scales th
    values the core has no enum for; every change is journaled to `sanitized-for-core.json`
    -- 10,359 of 209,509 spells lose a slot, 430 CA entries are affected). Then open the
    CoA skill lines to carrier classes:
-   `python tools/patch_skill_race_class.py <dbc-dir>/SkillRaceClassInfo.dbc <dbc-dir>/SkillRaceClassInfo.dbc`
-   (the same patched file is in `server/dbc-overrides`).
+   `python tools/patch_skill_race_class.py <dbc-dir>/SkillRaceClassInfo.dbc <dbc-dir>/SkillRaceClassInfo.dbc --skillline <dbc-dir>/SkillLine.dbc --open-categories 6,7,8`
+   (the same patched file is in `server/dbc-overrides`). `--open-categories 6,7,8` also opens
+   every weapon, class and armour skill line to all races and classes, which a Free-Pick
+   (Hero) character needs because it learns abilities from all ten stock classes; leave it
+   off for a CoA-only server.
 3. Characters database: widen `character_achievement.achievement` and
    `character_achievement_progress.criteria` to `int unsigned` (Ascension achievement ids
    reach 322,523), then apply `server/sql/characters/ascension_ca_characters.sql`.
@@ -62,10 +75,37 @@ Window size: the Collections panel is 1294 UI units wide and Ascension scales th
    consolidator's `import_world.py` (see the repository root `docs/`).
 5. `worldserver.conf`: `DataDir` = the DBC set above; the module's keys
    (`AscensionCA.Enable = 1`, `AscensionCA.Mode = "coa"`, `AscensionCA.DefaultClassByte = 28`)
-   can live in the main config or in `modules/mod_ascension_ca.conf`.
+   go in the realm's own `worldserver.conf`, **never** in `configs/modules/mod_ascension_ca.conf`:
+   AzerothCore loads the module directory after the main file and a key found there
+   overwrites the main file's value, so one module conf would force every realm that
+   shares the binaries into the same mode. The shipped `conf/mod_ascension_ca.conf.dist`
+   is documentation only and defines no `AscensionCA.*` key on purpose.
 6. Start the worldserver first and wait for `mod-ascension-ca: 10255 entries, 32 classes,
    101 specializations` in the log before the authserver; a realmlist row whose `flag`
    is 3 makes the authserver refuse to start.
+
+### 3b. A second realm in Free-Pick (Hero) mode from the same binaries
+
+One server directory can back a CoA realm and a Hero realm at once; each is one
+worldserver process with its own config and characters database:
+
+1. Copy `worldserver.conf` to `worldserver-hero.conf` and change: `RealmID` (a second
+   `realmlist` row, e.g. `Ascension`), `WorldServerPort` (e.g. 8090), `SOAP.Port`,
+   `LogsDir` (its own directory; readiness is judged from that file),
+   `CharacterDatabaseInfo` (its own database, created empty and populated by the
+   worldserver's auto-setup, then `server/sql/characters/*.sql` and the files under
+   `server/sql/characters/updates/`), `AscensionCA.Mode = "freepick"` and
+   `AscensionCA.DefaultClassByte = 10`.
+2. Start it with `worldserver.exe -c configs/worldserver-hero.conf`. Both realms share the
+   authserver, the auth database and the world database; the client picks the realm on its
+   realm list (`SET realmName "<name>"` in `WTF/Config.wtf` remembers the choice).
+3. The Hero realm needs the `--open-categories 6,7,8` skill-line patch from step 2 in both
+   the server DBC set and the client's `patch-Y.MPQ`; without it a Hero cannot learn the
+   weapon skills its cross-class abilities sit on.
+
+Hero characters are created as a stock class (the chooser is hidden on realms not named
+by `--coa-realm`); the module forces class byte 10 and the Hero rules
+(`server/mod-ascension-ca/README.md`, "Rules (Free-Pick / Hero model)").
 
 ## 4. What to expect in game
 
@@ -76,5 +116,15 @@ Window size: the Collections panel is 1294 UI units wide and Ascension scales th
 - Activate a specialization, click nodes, Save Changes: spells land in the spellbook under
   the class skill-line tab and on the action bar; right-click + Save unlearns.
 - `/ca inspect <name>` prints an online character's class, specialization and known set.
+- On a Free-Pick (Hero) realm: the stock character-select screen has no create key, so
+  `INSERT` or `F5` opens creation. `/ca` opens Ascension's classic Character Advancement
+  panel (class list with General, Abilities / Talents / Mastery tabs, essence header);
+  abilities cost Ability Essence, talents Talent Essence, masteries and traits are granted
+  automatically once the class points and level are met. `/ca enchants` opens the Mystic
+  Enchant collection over the 3,822 recovered enchants (the Collection tab defaults to the
+  Known filter, so a fresh character sees an empty page until the filter is changed; no
+  costs, slots or altars were recovered, so nothing can be applied). `/ca architect` lists
+  the 357 recovered Dawnrise community builds; the build editor works locally and cannot
+  publish.
 - Errors: the shim writes Lua errors to the server log as `ASC LOG [<name>] ...`; XML
   template/font problems only appear in the client's `Logs\FrameXML.log`.

@@ -15,6 +15,16 @@ local STOCK_TOKEN = { [1] = "WARRIOR", [2] = "PALADIN", [3] = "HUNTER", [4] = "R
 local buttons = {}
 local selected -- row of ASC_CREATE_CLASSES
 
+-- One client serves both stock-client realms; the chooser belongs to the Conquest of Azeroth
+-- one. ASC_CREATE_COA_REALMS (generated) names those realms; on any other realm (the Free-Pick
+-- "Ascension" realm, where every character is a Hero) the stock create screen is untouched.
+local function coaRealm()
+    if ASC_CREATE_COA_REALMS == nil then return true end
+    local name = GetServerName and GetServerName()
+    return name ~= nil and ASC_CREATE_COA_REALMS[name] == true
+end
+AscensionCreate_IsCoARealm = coaRealm
+
 -- index (1-based, into GetAvailableClasses() triples) of the first carrier the selected race can be
 local function carrierIndex(row)
     local list = { GetAvailableClasses() }
@@ -136,6 +146,12 @@ local stockEnumerate = CharacterCreateEnumerateClasses
 function CharacterCreateEnumerateClasses(...)
     stockEnumerate(...)
     if not ASC_CREATE_CLASSES then return end
+    if not coaRealm() then
+        for _, b in ipairs(buttons) do b:Hide() end
+        selected = nil
+        return
+    end
+    for _, b in ipairs(buttons) do b:Show() end
     for i = 1, (MAX_CLASSES_PER_RACE or 10) do
         local b = _G["CharacterCreateClassButton" .. i]
         if b then b:Hide() end
@@ -148,12 +164,28 @@ end
 local stockSetClass = SetCharacterClass
 function SetCharacterClass(id)
     stockSetClass(id)
-    if selected and ASC_CREATE_CLASSES then describe(selected) end
+    if selected and ASC_CREATE_CLASSES and coaRealm() then describe(selected) end
+end
+
+-- Character select is keyboard-navigable in the stock client except for one button: Create
+-- New Character has no key. INSERT opens it (the stock create screen focuses the name box, so
+-- a name and ENTER finish the job), which is also what lets a screen reader or a test harness
+-- create a character without a mouse.
+local stockSelectKey = CharacterSelect_OnKeyDown
+if stockSelectKey then
+    function CharacterSelect_OnKeyDown(self, key, ...)
+        if (key == "INSERT" or key == "F5") and SetGlueScreen then
+            PlaySound("gsCharacterSelectionCreateNew")
+            SetGlueScreen("charcreate") -- what CharSelectCreateCharacterButton's OnClick does (CharacterSelect.lua:534)
+            return
+        end
+        return stockSelectKey(self, key, ...)
+    end
 end
 
 local stockOkay = CharacterCreate_Okay
 function CharacterCreate_Okay()
-    if selected and ASC_CREATE_CLASSES then
+    if selected and ASC_CREATE_CLASSES and coaRealm() then
         local name = CharacterCreateNameEdit:GetText() or ""
         pcall(SetCVar, ASC_CREATE_MAILBOX, "ASC:" .. name .. ":" .. selected.byte .. ":")
     end

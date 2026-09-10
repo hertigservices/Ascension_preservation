@@ -1,27 +1,46 @@
 [worldserver]
 
 ###################################################################################################
-# mod-ascension-ca: Character Advancement for the stock-client port of Ascension (CoA first)
+# mod-ascension-ca: Character Advancement for the stock-client port of Ascension
+#
+# The realm MODE is a property of the realm profile, so every AscensionCA.* key lives in that
+# profile's worldserver.conf (or worldserver-<mode>.conf), NOT here. AzerothCore loads
+# configs/modules/*.conf after worldserver.conf and a later file overwrites an earlier one
+# (Config.cpp AddKey), so a value set in this file would silently win over the realm's own
+# setting -- which is exactly how one server directory can back a CoA realm and a Free-Pick
+# realm at the same time. This file therefore defines no gameplay keys.
 #
 #    AscensionCA.Enable
 #        Description: Serve Character Advancement to the addon pack over addon whispers.
 #        Default:     1
 #
 #    AscensionCA.Mode
-#        Description: Realm mode announced to the addon pack: coa | freepick | wildcard
+#        Description: Realm mode announced to the addon pack: coa | freepick
+#                     coa      -- Conquest of Azeroth: the character IS one of the 21 CoA classes
+#                                 (class byte 12..32), Class tab spends AE, active specialization
+#                                 spends TE, budgets from the class's own essence family.
+#                     freepick -- Hero / Free-Pick: the character is class 10 (Hero) and picks
+#                                 from the ten stock classes' abilities and talents; abilities
+#                                 cost their AECost, talents their TECost per rank, budgets from
+#                                 essence family 10 (AE 140 / TE 71 at 80).
 #        Default:     "coa"
 #
 #    AscensionCA.DefaultClassByte
-#        Description: CoA class byte assigned to a character that has no ascension_ca_character
-#                     row yet (28 = Tinker). Character creation (P4) sets the real one.
+#        Description: Class byte assigned to a character that has no ascension_ca_character
+#                     row yet. 28 (Tinker) on a CoA realm until the chooser's CLASS arrives;
+#                     10 (Hero) on a Free-Pick realm.
 #        Default:     28
+#
+#    AscensionCA.HeroProficiencies
+#        Description: Free-Pick only: grant every weapon and armour proficiency at login, the way
+#                     Ascension's Heroes could use any weapon and wear any armour.
+#        Default:     1
 #
 #    AscensionCA.Debug
 #        Description: Log every verb and every spell learned/removed.
 #        Default:     0
 ###################################################################################################
 
-AscensionCA.Enable = 1
-AscensionCA.Mode = "coa"
-AscensionCA.DefaultClassByte = 28
-AscensionCA.Debug = 0
+# Keep this file free of AscensionCA.* assignments (see above). This marker only proves the
+# module config was read; the worldserver refuses an empty file.
+AscensionCA.ConfigDistVersion = 2
