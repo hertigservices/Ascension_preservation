@@ -157,6 +157,91 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(luamerge.merge_auctionator(state,g,"hash",{"captured":""},[]),1)
         self.assertIn("warcraft-reborn-horde",state['auctionator_observations'])
 
+    def test_public_source_locators_never_depend_on_machine_paths(self):
+        import audit_publish
+        sources=[{"id":"1","sha256":"a"*64,"path":"D:/private/Account/name/file.wdb"},{"id":"2","sha256":"a"*64,"path":"//host/private/file.wdb"}]
+        rows=export.public_source_rows(sources)
+        self.assertEqual(rows[0]["path"],"sources/1/"+"a"*64+".wdb")
+        self.assertNotEqual(rows[0]["path"],rows[1]["path"])
+        self.assertTrue(audit_publish.safe_source_paths(('id\tsha256\tpath\n1\t'+'a'*64+'\t'+rows[0]['path']+'\n').encode()))
+        for path in ['D:/private/file.wdb','//host/share/file.wdb','/private/file.wdb','../file.wdb','file:///private','','relative.wdb']:
+            self.assertFalse(audit_publish.safe_source_paths(('id\tsha256\tpath\n1\t'+'a'*64+'\t'+path+'\n').encode()))
+
+    def test_event_argument_strings_remain_strings(self):
+        g=luaser.loads('CoASniffDB={events={{e="EVENT",a="1:number=1"},{e="EMPTY",a="(no args)"}}}')
+        state={};luamerge.merge_coasniff(state,g,"hash",{},[])
+        self.assertEqual(state["coasniff"]["EVENT"]["args"],["1:number=1"])
+        self.assertEqual(state["coasniff"]["EMPTY"]["args"],["(no args)"])
+
+    def test_gather_replay_prior_winner_requires_fresh_observation(self):
+        state={};conflicts=[]
+        prior={"GatherMate2HerbDB":{"1":{"10":7}}}
+        def add(node):
+            luamerge.merge_gathermate(state,luaser.loads('GatherMate2HerbDB={[1]={[10]='+str(node)+'}}'),"hash",{"replay_gathermate":prior},conflicts)
+        add(4);self.assertEqual(state["gathermate"]["GatherMate2HerbDB"]["1"]["10"],4)
+        add(7);add(8)
+        self.assertEqual(state["gathermate"]["GatherMate2HerbDB"]["1"]["10"],7)
+        self.assertEqual(len(conflicts),2)
+
+    def test_localized_constant_explanations_do_not_suppress_counts(self):
+        expect={"constant":{"union/x.tsv.gz:zero":"observed zero"},"counts":{"by-locale/frFR/union/x.tsv.gz:live":2}}
+        self.assertEqual(audit_columns.explained(expect,"by-locale/frFR/union/x.tsv.gz:zero"),"observed zero")
+        self.assertIsNone(audit_columns.explained(expect,"by-locale/frFR/union/x.tsv.gz:live"))
+        fails=[];audit_columns.compare_counts(expect,{"by-locale/frFR/union/x.tsv.gz:live":0},fails,[])
+        self.assertTrue(fails)
+
+    def test_harvest_replay_preferences_need_observed_values(self):
+        import harvestmerge
+        dst={};conflicts=[];prior={"x":7,"zero":0,"missing":99}
+        harvestmerge._deep_union(dst,{"x":4,"zero":0},(),conflicts,preferred=prior)
+        self.assertEqual(dst,{"x":4,"zero":0})
+        harvestmerge._deep_union(dst,{"x":7,"zero":8},(),conflicts,preferred=prior)
+        harvestmerge._deep_union(dst,{"x":9},(),conflicts,preferred=prior)
+        self.assertEqual(dst,{"x":7,"zero":8})
+        self.assertEqual(len(conflicts),2)
+
+    def test_selftest_preserves_modes_and_locales(self):
+        import selftest,gzip
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);sources=[]
+            for loc,slug,payload in [('enUS','a',b'en'),('enUS','b',b'en'),('frFR','a',b'fr')]:
+                header=struct.pack('<4sI4sIII',b'BOMW',12340,loc[::-1].encode(),0,0,0)
+                data=header+struct.pack('<II',7,len(payload))+payload+b'\0'*8
+                src=root/(loc+'-'+slug+'.wdb');src.write_bytes(data)
+                sources.append({'sha256':hashlib.sha256(data).hexdigest(),'path':str(src),'slug':slug,'locale':loc,'group':slug})
+                pub=root/'wdb';target=(pub/slug if loc=='enUS' else pub/'by-locale'/loc/slug)/'creaturecache.wdb.gz';target.parent.mkdir(parents=True,exist_ok=True)
+                with gzip.open(target,'wb') as f:f.write(data)
+            with patch.object(selftest,'PUB',str(root/'wdb')):
+                counts,issues=selftest.check_cache('creaturecache',sources,False)
+                self.assertFalse(issues);self.assertEqual(counts['verbatim'],3)
+                (root/'wdb/by-locale/frFR/a/creaturecache.wdb.gz').unlink()
+                _,issues=selftest.check_cache('creaturecache',sources,False)
+                self.assertTrue(issues)
+
+    def test_nested_source_schema_still_gets_privacy_scan(self):
+        import audit_publish,contextlib,io
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=root/'lootcollector/sources.tsv';p.parent.mkdir()
+            p.write_text('sha256\tkind\tbytes\tstatus\tdiscoveries\trealms\n'+'a'*64+'\tlua\t1\tok\t1\tcoa\n')
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(audit_publish.main(str(root)),0)
+            p.write_text(p.read_text()+'C:/Users/private/Account/player/file.lua\n')
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertNotEqual(audit_publish.main(str(root)),0)
+
+    def test_replay_rejects_data_hidden_behind_empty_sources(self):
+        with patch.object(luamerge,'load_state',return_value={"sources":{},"harvest":{"unverified":"value"}}):
+            with self.assertRaises(RuntimeError):luamerge.run_merge({})
+
+    def test_unexpected_published_wdb_fails(self):
+        import selftest,gzip
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'fake/creaturecache.wdb.gz';p.parent.mkdir()
+            with gzip.open(p,'wb') as f:f.write(b'fake')
+            with patch.object(selftest,'PUB',d):
+                counts,issues=selftest.check_cache('creaturecache',[],False)
+                self.assertTrue(issues);self.assertEqual(counts['unexpected_file'],1)
+
     def test_missing_output_column_fails_gate(self):
         fails=[]
         audit_columns.compare_counts({'counts':{'union/a.tsv.gz:name':1}}, {},fails,[])

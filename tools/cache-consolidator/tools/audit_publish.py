@@ -104,6 +104,31 @@ def walk(root, skipped=None):
         yield p, rel
 
 
+def safe_source_paths(data):
+    try:
+        lines = data.decode("utf-8").splitlines()
+        columns = lines[0].split("\t")
+        if len(columns) != len(set(columns)) or not {"path", "id", "sha256"} <= set(columns):
+            return False
+        seen = set()
+        for line in lines[1:]:
+            if not line:
+                continue
+            values = line.split("\t")
+            if len(values) != len(columns):
+                return False
+            row = dict(zip(columns, values))
+            sid, digest = row["id"], row["sha256"]
+            if not re.fullmatch(r"[0-9]+", sid) or not re.fullmatch(r"[0-9a-f]{64}", digest) or sid in seen:
+                return False
+            if row["path"] != f"sources/{sid}/{digest}.wdb":
+                return False
+            seen.add(sid)
+        return True
+    except (UnicodeError, ValueError, IndexError):
+        return False
+
+
 def main(root=export.OUT):
     hits = {}
     unreadable = []
@@ -124,6 +149,8 @@ def main(root=export.OUT):
                 unreadable.append((rel, str(e)))
                 continue
         scanned += 1
+        if rel.replace("\\", "/") in ("sources.tsv", "sources.tsv.gz") and not safe_source_paths(b):
+            hits.setdefault("invalid-source-path", []).append((rel, b"provenance must use relative public locators"))
         for name, pat in PATTERNS.items():
             for m in pat.finditer(b):
                 frag = m.group(0)

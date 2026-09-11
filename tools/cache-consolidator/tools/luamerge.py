@@ -38,7 +38,7 @@ is the exception: it keys its own database by "<Realm> - <Mode>", so it splits.
 """
 import os, sys, json, hashlib, time, re, copy
 
-PROCESSING_REVISION = "2026-09-11.2"
+PROCESSING_REVISION = "2026-09-11.3"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, modes, luaser, harvestmerge, reference_merge, capture_dates
@@ -458,6 +458,11 @@ def merge_gathermate(state, g, sid, meta, conflicts):
                 key = str(coord)
                 if key in z and z[key] != node:
                     conflicts.append(((dbname, zone, coord), z[key], node))
+                    # During a controlled replay, preserve a prior winner only
+                    # when these freshly parsed bytes independently observe it.
+                    prior = meta.get("replay_gathermate", {}).get(dbname, {}).get(str(zone), {})
+                    if key in prior and node == prior[key]:
+                        z[key] = node
                     continue
                 z[key] = node
                 n += 1
@@ -485,7 +490,7 @@ def merge_coasniff(state, g, sid, meta, conflicts):
             continue
         rec = store.setdefault(name, {"args": [], "seen": 0})
         rec["seen"] += 1
-        a = json.dumps(harvestmerge.to_py(args), sort_keys=True, ensure_ascii=False) if args is not None else ""
+        a = args if isinstance(args, str) else (json.dumps(harvestmerge.to_py(args), sort_keys=True, ensure_ascii=False) if args is not None else "")
         if a and a not in rec["args"]:
             rec["args"].append(a)
             rec["args"].sort()
@@ -517,9 +522,9 @@ def save_state(state):
     os.replace(tmp, STATE)
 
 
-def run_merge(replay_sources=None):
+def run_merge(replay_sources=None, replay_gathermate=None, replay_harvest=None):
     state = load_state()
-    if replay_sources is not None and state.get("sources"):
+    if any(x is not None for x in (replay_sources, replay_gathermate, replay_harvest)) and state != {"sources": {}}:
         raise RuntimeError("Replay baseline requires a fresh shadow Lua state")
     if state.get("sources") and state.get("processing_revision") != PROCESSING_REVISION:
         raise RuntimeError("Lua processing rules changed: controlled replay into a fresh shadow state is required")
@@ -561,6 +566,10 @@ def run_merge(replay_sources=None):
             if field in original:
                 cls[field] = original[field]
         meta = {"captured": original["captured"] if "captured" in original else capture_dates.source_date(path)}
+        if replay_gathermate is not None and key == "gathermate2.lua":
+            meta["replay_gathermate"] = replay_gathermate
+        if replay_harvest is not None and key == "wildcardharvest.lua":
+            meta["replay_harvest"] = replay_harvest
         trial = copy.deepcopy(state)
         trial.get("retained_records", {}).pop(sid, None)
         file_conflicts = []
@@ -977,8 +986,13 @@ if __name__ == "__main__":
     parser.add_argument("--replay-baseline-state", help="Private prior state; fresh shadow replay only")
     args = parser.parse_args()
     baseline_sources = None
+    baseline_gathermate = None
+    baseline_harvest = None
     if args.replay_baseline_state:
         with open(args.replay_baseline_state, encoding="utf-8") as f:
-            baseline_sources = json.load(f)["sources"]
-    st = run_merge(baseline_sources)
+            baseline = json.load(f)
+            baseline_sources = baseline["sources"]
+            baseline_gathermate = baseline.get("gathermate", {})
+            baseline_harvest = baseline.get("harvest", {})
+    st = run_merge(baseline_sources, baseline_gathermate, baseline_harvest)
     sys.exit(0 if run_export(st) else 1)

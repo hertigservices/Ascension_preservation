@@ -338,19 +338,8 @@ def main():
         flag = "" if not (bad or inexact) else f"  !! {bad} failed, {inexact} inexact"
         print(f"  {cache:<18} union {rows:>6}  distinct {len(recs):>6}{flag}")
 
-    # Provenance must not carry this machine's layout. Keep the path RELATIVE to the
-    # archive root -- still says which submission a record came from, names no one.
-    pub_srcs = []
-    for s in srcs:
-        s = dict(s)
-        p = s["path"].replace("\\", "/")
-        for prefix in (config.WORK + "/", os.path.dirname(config.WORK) + "/"):
-            if p.startswith(prefix):
-                p = p[len(prefix):]
-                break
-        s["path"] = scrub.scrub_path(p)
-        pub_srcs.append(s)
-    merge.write_tsv(f"{OUT}/sources.tsv", merge.SRC_COLS, pub_srcs)
+    # Public locators are independent of machine layout and replay roots.
+    merge.write_tsv(f"{OUT}/sources.tsv", merge.SRC_COLS, public_source_rows(srcs))
     write_docs(OUT, caches, slugs, stats, mode_rows, srcs)
     write_file_guide(OUT, stats)
 
@@ -358,6 +347,19 @@ def main():
         for gone in prune(root, written):
             print(f"  pruned stale {os.path.basename(root)}/{gone}")
     print(f"\nexported -> {OUT}  ({time.time()-t0:.0f}s)")
+
+
+def public_source_rows(srcs):
+    """Opaque stable locators; actual archive paths remain in private state."""
+    rows = []
+    for source in srcs:
+        row = dict(source)
+        sid, digest = str(row["id"]), row["sha256"]
+        if not sid.isascii() or not sid.isdigit() or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("Invalid source identity; refusing public provenance")
+        row["path"] = f"sources/{sid}/{digest}.wdb"
+        rows.append(row)
+    return rows
 
 
 def write_file_guide(out, stats):

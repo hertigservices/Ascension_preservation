@@ -352,7 +352,7 @@ def _observe(stats, path, *values):
         slot[_key(v)] = slot.get(_key(v), 0) + 1
 
 
-def _deep_union(dst, src, path, conflicts, stats=None):
+def _deep_union(dst, src, path, conflicts, stats=None, preferred=None):
     """Union two static tables. Scalar disagreement is reported, newest wins.
 
     Four things are NOT disagreements and must not be reported as such:
@@ -364,11 +364,13 @@ def _deep_union(dst, src, path, conflicts, stats=None):
                    a non-zero reading is the only one that saw anything
     """
     for k, v in src.items():
+        prior = preferred.get(k) if isinstance(preferred, dict) else None
+        has_prior = isinstance(preferred, dict) and k in preferred
         p = path + (k,)
         if k not in dst:
             dst[k] = v
         elif isinstance(dst[k], dict) and isinstance(v, dict):
-            _deep_union(dst[k], v, p, conflicts, stats)
+            _deep_union(dst[k], v, p, conflicts, stats, prior)
         elif isinstance(dst[k], list) and isinstance(v, list):
             before = len(dst[k])
             dst[k] = _union_list(dst[k], v)
@@ -381,7 +383,8 @@ def _deep_union(dst, src, path, conflicts, stats=None):
             dst[k] = max(str(dst[k]), str(v))
         elif _probed(p):
             _observe(stats, p, dst[k], v)
-            dst[k] = v
+            if not (has_prior and dst[k] == prior):
+                dst[k] = v
         elif _unobserved(dst[k]) and not _unobserved(v):
             dst[k] = v
             if stats is not None:
@@ -391,7 +394,8 @@ def _deep_union(dst, src, path, conflicts, stats=None):
                 stats["filled"] = stats.get("filled", 0) + 1
         else:
             conflicts.append((p, _brief(dst[k]), _brief(v)))
-            dst[k] = v
+            if not (has_prior and dst[k] == prior):
+                dst[k] = v
 
 
 def merge_wildcardharvest(state, g, sid, meta, conflicts):
@@ -401,6 +405,7 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
         return 0
 
     names = own_names(db)
+    preferred = meta.get("replay_harvest", {})
     store = state.setdefault("harvest", {})
     store.setdefault("_names_seen", 0)
     n = 0
@@ -469,7 +474,7 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
                 if other is not None and to_py(other) == py[dup]:
                     del py[dup]
             _deep_union(by.setdefault(str(realm), {}), py,
-                        ("byRealm", str(realm)), conflicts, stats)
+                        ("byRealm", str(realm)), conflicts, stats, preferred.get("byRealm", {}).get(str(realm)))
             n += 1
         # The top-level copies belong to whichever realm this file was saved
         # on. byRealm names exactly one, so there is no guessing to do.
@@ -482,7 +487,7 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
                 py = to_py(sub)
                 assert_clean(py, names, branch)
                 _deep_union(by[realm].setdefault(branch, {}), py,
-                            ("byRealm", realm, branch), conflicts, stats)
+                            ("byRealm", realm, branch), conflicts, stats, preferred.get("byRealm", {}).get(realm, {}).get(branch))
                 n += 1
     else:
         for branch in REALM_SCOPED:
@@ -493,7 +498,7 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
             assert_clean(py, names, branch)
             _deep_union(
                 by.setdefault(UNATTRIBUTED, {}).setdefault(branch, {}),
-                py, ("byRealm", UNATTRIBUTED, branch), conflicts, stats)
+                py, ("byRealm", UNATTRIBUTED, branch), conflicts, stats, preferred.get("byRealm", {}).get(UNATTRIBUTED, {}).get(branch))
             n += 1
 
     # ---- reference branches: deep union of static tables
@@ -505,7 +510,7 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
         assert_clean(py, names, branch)
         if isinstance(py, dict):
             _deep_union(store.setdefault(branch, {}), py, (branch,),
-                        conflicts, stats)
+                        conflicts, stats, preferred.get(branch))
         else:
             store[branch] = py
         n += 1
@@ -520,7 +525,10 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
             for spell, rec in byid.hash.items():
                 py = to_py(rec)
                 assert_clean(py, names, "spells.%s" % spell)
-                spells.setdefault(str(spell), py)
+                if py == preferred.get("spells", {}).get(str(spell)):
+                    spells[str(spell)] = py
+                else:
+                    spells.setdefault(str(spell), py)
                 n += 1
 
     for branch in DROP:

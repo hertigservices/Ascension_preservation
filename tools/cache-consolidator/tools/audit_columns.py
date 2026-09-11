@@ -142,6 +142,10 @@ def explained(expect, key):
     LOSS -- the per-column count in `counts` is what guards that, and it is
     compared for every column whether or not anything explains it.
     """
+    if key.startswith("by-locale/"):
+        parts = key.split("/", 2)
+        if len(parts) == 3 and parts[2].startswith(("by-mode/", "union/")):
+            key = parts[2]
     if key in expect["constant"]:
         return expect["constant"][key]
     for pat, why in expect["constant"].items():

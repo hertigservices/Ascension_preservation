@@ -38,7 +38,8 @@ only the game can say that. See VERIFYING-THE-DATA.md for the in-game half.
 import os, sys, io, gzip, json, hashlib, argparse, collections, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import config, wdblib
+import config, wdblib, merge, re
+from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -76,39 +77,46 @@ def resolve(labels):
 
 
 def originals():
-    """Every submitted .wdb still on disk, with the mode it was filed under.
-
-    Read from the ledger, because the ledger is what records which upload a
-    file came from; the path is then resolved back to the actual bytes. A file
-    whose extract directory has since been removed is skipped and counted, not
-    silently ignored.
-    """
+    """Keep each private source placement; a hash may belong to several modes."""
     with io.open(config.LEDGER, encoding="utf-8") as f:
         led = json.load(f)
-    slug_of = {}
-    with io.open(os.path.join(config.OUT, "sources.tsv"), encoding="utf-8") as f:
-        cols = f.readline().rstrip("\n").split("\t")
-        for line in f:
-            r = dict(zip(cols, line.rstrip("\n").split("\t")))
-            if r.get("sha256"):
-                slug_of[r["sha256"]] = r.get("slug") or "unknown"
     out, gone = [], 0
-    for h, rec in led.items():
-        slug = slug_of.get(h)
-        if not slug:
-            continue
-        path = resolve(rec.get("sources") or [])
+    verified = {}
+    for row in merge.read_tsv(os.path.join(config.STORE, "sources.tsv"), merge.SRC_COLS):
+        h = row["sha256"]
+        path = row.get("path")
+        if not path or not os.path.isfile(path):
+            path = resolve((led.get(h) or {}).get("sources") or [])
         if path is None:
             gone += 1
             continue
-        out.append({"sha256": h, "cache": rec.get("cache"), "slug": slug,
-                    "path": path, "group": rec.get("group") or ""})
+        if path not in verified:
+            with open(path, "rb") as f:
+                verified[path] = hashlib.file_digest(f, "sha256").hexdigest()
+        if verified[path] != h:
+            raise RuntimeError("Retained source content does not match its recorded digest")
+        out.append({**row, "path": path, "slug": row.get("slug") or "unknown",
+                    "locale": row.get("locale") or "unknown"})
     return out, gone
 
 
-def read_published(cache, slug):
-    """The published file for one cache in one mode, decompressed."""
-    p = f"{PUB}/{slug}/{cache}.wdb.gz"
+def published_inventory(cache=None):
+    root = Path(PUB)
+    return {p.relative_to(root).as_posix() for p in root.rglob("*")
+            if p.is_file() and p.name.lower().endswith(".wdb.gz")
+            and (cache is None or p.name.lower() == cache.lower() + ".wdb.gz")}
+
+
+def published_relative(cache, slug, locale):
+    prefix = "" if locale == "enUS" else f"by-locale/{locale}/"
+    return f"{prefix}{slug}/{cache}.wdb.gz"
+
+
+def read_published(cache, slug, locale="enUS"):
+    """The published file for exactly one cache, mode, and locale."""
+    if not re.fullmatch(r"[a-z]{2}[A-Z]{2}", locale):
+        raise ValueError("Unverified locale cannot be rebuilt")
+    p = str(Path(PUB) / published_relative(cache, slug, locale))
     if not os.path.exists(p):
         return None
     with gzip.open(p, "rb") as f:
@@ -119,24 +127,31 @@ def check_cache(cache, srcs, verbose):
     """Run all four checks for one cache type across every mode."""
     res = collections.Counter()
     problems = []
+    expected_paths = set()
     by_slug = collections.defaultdict(list)
     for s in srcs:
-        by_slug[s["slug"]].append(s)
+        locale = s.get("locale", "unknown")
+        if not re.fullmatch(r"[a-z]{2}[A-Z]{2}", locale):
+            res["unrebuildable_sources"] += 1
+            continue
+        by_slug[(locale, s["slug"])].append(s)
 
     # Every header a real client wrote for this cache, for check 3.
     real_headers = set()
 
-    for slug in sorted(by_slug):
+    for locale, slug in sorted(by_slug):
+        real_headers = set()
         # ---- ground truth: what the clients wrote, for this mode
         # entry -> {payload sha1}. Several clients may disagree about one
         # entry; every version any of them wrote is legitimate ground truth.
         truth = collections.defaultdict(set)
         who = {}
-        for s in by_slug[slug]:
+        for s in by_slug[(locale, slug)]:
             try:
-                b = io.open(s["path"], "rb").read()
+                with io.open(s["path"], "rb") as f:
+                    b = f.read()
             except OSError as e:
-                problems.append(f"{cache}/{slug}: cannot read {s['path']}: {e}")
+                problems.append(f"{cache}/{locale}/{slug}: cannot read {s['path']}: {e}")
                 continue
             info = wdblib.inspect(s["path"], data=b)
             if not info.standard:
@@ -149,28 +164,29 @@ def check_cache(cache, srcs, verbose):
         if not truth:
             continue
 
-        pub = read_published(cache, slug)
+        expected_paths.add(published_relative(cache, slug, locale))
+        pub = read_published(cache, slug, locale)
         if pub is None:
             # Not every mode publishes every cache; only a mode that HAS source
             # records and no published file is a real problem.
-            problems.append(f"{cache}/{slug}: {len(truth):,} records from real "
+            problems.append(f"{cache}/{locale}/{slug}: {len(truth):,} records from real "
                             f"clients but nothing published for this mode")
             res["mode_missing"] += 1
             continue
 
         # ---- check 3: is the header a real one?
         if bytes(pub[:24]) not in real_headers:
-            problems.append(f"{cache}/{slug}: published header is not "
+            problems.append(f"{cache}/{locale}/{slug}: published header is not "
                             f"byte-identical to any real client's header")
             res["fake_header"] += 1
 
         # ---- check 4: intact and client-shaped
-        info = wdblib.inspect(f"{cache}/{slug}", data=pub)
+        info = wdblib.inspect(f"{cache}/{locale}/{slug}", data=pub)
         if not info.standard:
-            problems.append(f"{cache}/{slug}: header not recognised: {info.note}")
+            problems.append(f"{cache}/{locale}/{slug}: header not recognised: {info.note}")
             res["bad_header"] += 1
         if not info.clean_end:
-            problems.append(f"{cache}/{slug}: no clean record terminator -- "
+            problems.append(f"{cache}/{locale}/{slug}: no clean record terminator -- "
                             f"the client will reject this file")
             res["unclean"] += 1
 
@@ -180,11 +196,11 @@ def check_cache(cache, srcs, verbose):
             d = sha1(payload)
             seen[entry] = d
             if entry not in truth:
-                problems.append(f"{cache}/{slug}: entry {entry} is published "
+                problems.append(f"{cache}/{locale}/{slug}: entry {entry} is published "
                                 f"but no client ever sent it")
                 res["invented_entry"] += 1
             elif d not in truth[entry]:
-                problems.append(f"{cache}/{slug}: entry {entry} has a payload "
+                problems.append(f"{cache}/{locale}/{slug}: entry {entry} has a payload "
                                 f"no client ever wrote")
                 res["invented_payload"] += 1
             else:
@@ -193,7 +209,7 @@ def check_cache(cache, srcs, verbose):
         # ---- check 2: nothing lost
         for entry, digests in truth.items():
             if entry not in seen:
-                problems.append(f"{cache}/{slug}: entry {entry} was in a "
+                problems.append(f"{cache}/{locale}/{slug}: entry {entry} was in a "
                                 f"submitted file and is not published")
                 res["lost"] += 1
             elif seen[entry] not in digests:
@@ -208,6 +224,9 @@ def check_cache(cache, srcs, verbose):
         if verbose:
             print(f"    {slug:<22} {len(truth):>8,} source records, "
                   f"{len(seen):>8,} published")
+    for rel in sorted(published_inventory(cache) - expected_paths):
+        problems.append(f"Unexpected published WDB without matching source placement: {rel}")
+        res["unexpected_file"] += 1
     return res, problems
 
 
@@ -234,16 +253,20 @@ def main(argv=None):
     print(f"checking {sum(len(v) for v in by_cache.values()):,} submitted file(s) "
           f"against the published dataset")
     if gone:
-        print(f"  ({gone} ledger entries have no file on disk any more; skipped)")
+        print(f"  ({gone} private source placements have no retained file; verification incomplete)")
     print()
 
     total, all_problems = collections.Counter(), []
+    if not a.cache:
+        for rel in sorted(published_inventory()):
+            if Path(rel).name[:-7] not in by_cache:
+                all_problems.append(f"Unexpected published cache: {rel}")
     for cache in sorted(by_cache):
         r, p = check_cache(cache, by_cache[cache], a.verbose)
         total.update(r)
         all_problems += p
         flag = "!!" if (r["lost"] or r["invented_entry"] or r["invented_payload"]
-                        or r["fake_header"] or r["unclean"]) else "ok"
+                        or r["fake_header"] or r["unclean"] or p) else "ok"
         print(f"  {flag} {cache:<18} {r['verbatim']:>9,} verbatim  "
               f"{r['superseded']:>7,} superseded  {r['lost']:>5,} lost  "
               f"{r['invented_entry'] + r['invented_payload']:>5,} invented")
@@ -266,11 +289,11 @@ def main(argv=None):
         for line in all_problems[:20]:
             print("    " + line)
     print(f"\ndone in {time.time()-t0:.0f}s")
-    if bad:
+    if bad or all_problems or gone:
         print("FAILED: the published dataset does not match what the clients wrote.")
         return 1
-    print("PASSED: every published record is a real client's bytes, and none "
-          "were dropped.")
+    print(f"  {total['unrebuildable_sources']:,} sources with unknown locale remain raw-only; excluded from client rebuild checks.")
+    print("PASSED: tested locale/mode WDB records match retained client bytes with no missing entries.")
     print("This does not prove the game accepts the files -- see "
           "VERIFYING-THE-DATA.md for the in-game test.")
     return 0

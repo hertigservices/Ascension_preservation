@@ -23,6 +23,9 @@
         1
       ],
       "reason": "Newest-capture union selection changed four Sealed Coffin records from Season 9 (2026-03-23) to Free-Pick (2026-08-06). Original submitted WDB bytes verify all three Free-Pick quest-item fields are zero. All four older nonzero records remain byte-identical in raw/gameobjectcache.pack.gz and their values remain in by-mode/season-9/gameobjectcache.tsv.gz. This is an explained cross-mode winner change, not lost payloads; only these three count baselines were corrected."
+    },
+    "2026-09-11-gossip-privacy": {
+      "reason": "25 independently privacy-rejected observations from four content-hash-verified originals exactly account for the 20 removed baseline gossip keys. Originals retained privately; no held key remains public. Only gossip counts 35 to 15 and options 29 to 13 adjusted; quests stay 5."
     }
   },
   "_readme": [
@@ -61,7 +64,11 @@
     "lua/harvest/vendors.tsv:cost_item_2": "GetMerchantItemCostInfo always returns a fixed SIX-slot cost array, so slots 2 and 3 exist for every row whether or not anything is in them. Across 7,582 item readings in the raw captures every single array is 6 long, and only slot 1 ever carries a currency -- it holds {n=3, texture, count, itemLink} while the other five are the empty {n=2, [2]=0}. So: no vendor item we have captured costs more than one currency. That is a fact about these 88 vendor pages, not a gap. It stops being true the moment somebody captures a vendor that charges two currencies at once, and this line should then be deleted rather than reworded.",
     "lua/harvest/vendors.tsv:cost_item_3": "Same fixed 6-slot array as cost_item_2; see that entry.",
     "raw/*.tsv.gz:*": "Same fixed-width record layouts as by-mode; see the by-mode entry.",
-    "union/*.tsv.gz:*": "Same fixed-width record layouts as by-mode; see the by-mode entry."
+    "union/*.tsv.gz:*": "Same fixed-width record layouts as by-mode; see the by-mode entry.",
+    "lua/harvest/vendors.tsv:cost_item_4": "The retained 88-page vendor corpus was checked directly: all 3,791 item slots have at most one valid currency cost; none uses cost positions 4 or 5 of the fixed six-slot arrays. Verified again with the production helper during the 2026-09-11 controlled replay.",
+    "lua/harvest/vendors.tsv:cost_count_4": "The retained 88-page vendor corpus was checked directly: all 3,791 item slots have at most one valid currency cost; none uses cost positions 4 or 5 of the fixed six-slot arrays. Verified again with the production helper during the 2026-09-11 controlled replay.",
+    "lua/harvest/vendors.tsv:cost_item_5": "The retained 88-page vendor corpus was checked directly: all 3,791 item slots have at most one valid currency cost; none uses cost positions 4 or 5 of the fixed six-slot arrays. Verified again with the production helper during the 2026-09-11 controlled replay.",
+    "lua/harvest/vendors.tsv:cost_count_5": "The retained 88-page vendor corpus was checked directly: all 3,791 item slots have at most one valid currency cost; none uses cost positions 4 or 5 of the fixed six-slot arrays. Verified again with the production helper during the 2026-09-11 controlled replay."
   },
   "counts": {
     "by-mode/coa-alpha/creaturecache.tsv.gz:HealthModifier": 1358,
@@ -4810,16 +4817,16 @@
     "lua/harvest/enums.json:VanityFlags": 3,
     "lua/harvest/enums.json:WeaponSIDSubClass": 15,
     "lua/harvest/enums.json:WeaponSubClassSID": 15,
-    "lua/harvest/gossips.tsv:captured": 35,
-    "lua/harvest/gossips.tsv:mode": 35,
-    "lua/harvest/gossips.tsv:n_options": 29,
+    "lua/harvest/gossips.tsv:captured": 15,
+    "lua/harvest/gossips.tsv:mode": 15,
+    "lua/harvest/gossips.tsv:n_options": 13,
     "lua/harvest/gossips.tsv:n_quests": 5,
-    "lua/harvest/gossips.tsv:npc": 35,
-    "lua/harvest/gossips.tsv:npc_key": 35,
-    "lua/harvest/gossips.tsv:options": 29,
-    "lua/harvest/gossips.tsv:realm": 35,
-    "lua/harvest/gossips.tsv:rows": 35,
-    "lua/harvest/gossips.tsv:text": 35,
+    "lua/harvest/gossips.tsv:npc": 15,
+    "lua/harvest/gossips.tsv:npc_key": 15,
+    "lua/harvest/gossips.tsv:options": 13,
+    "lua/harvest/gossips.tsv:realm": 15,
+    "lua/harvest/gossips.tsv:rows": 15,
+    "lua/harvest/gossips.tsv:text": 15,
     "lua/harvest/observed.json:*": 46,
     "lua/harvest/roleRequirements.json:*": 1,
     "lua/harvest/roleRequirements.json:*.[]": 5,

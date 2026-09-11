@@ -69,3 +69,20 @@ Sol adversarial reviews cover recovery, privacy, each correction found during
 replay, and the final baseline comparison. Passing a source test does not approve
 a replay candidate for live promotion. Static column expectations are supplemented
 by a direct comparison with the snapshotted currently published Lua output.
+
+Public source paths are opaque locators (`sources/<id>/<sha256>.wdb`), not local
+archive paths or download URLs. The private source ledger retains the actual path.
+The publication audit cross-checks each locator against its unique source ID and
+content hash, including when a replay uses a different workspace root.
+
+### Explicit privacy baseline correction
+
+The controlled replay held 25 ambiguous gossip observations from four retained, content-hash-verified originals. Those observations account for exactly the 20 distinct gossip keys removed from the previous 35-row export. Each original record reproduced the privacy rejection; no held key remains public and no original evidence is missing. Only the demonstrated gossip count floors were adjusted (35 to 15; option-bearing rows 29 to 13). Both quest counters remain 5. This does not accept unrelated decreases or erase originals. Vendor cost positions 4 and 5 were independently checked across all 3,791 retained item slots and documented as unused.
+
+### Repeated Sol review findings
+
+Independent Sol reviews were repeated over transactional recovery, privacy, candidate outputs, and rollout. They caught double-encoded event argument strings, order-dependent Lua winner changes, a verifier that collapsed source placements by hash, incomplete published-file inventory checks, and a replay guard that could admit data behind an empty source registry. Regression tests now cover these cases. Controlled replay starts with canonical empty state; previous GatherMate nodes and harvest scalar/spell winners are preferences only when freshly parsed, privacy-checked source observations reproduce them. Missing old observations are never inserted from the baseline. Disagreements remain in private conflict records.
+
+The repaired WDB verifier keeps mode and locale separate, validates retained source content hashes, inventories all published WDB files, and fails missing or unexpected files. Unknown-locale records remain in raw packs and indexes and are validated there; they are not assigned an invented client locale.
+
+Mode-specific exports rank observations using dates from that mode. Previously a payload observed in several modes could borrow a newer date from a different mode. Independent source traces verified this for creature 198 and items 558976, 559702 and 559704: the newer aggregate dates were not newer CoA observations. All competing payloads remain retained; the stock-client exporter continues to use the selected mode before the union. Equal mode dates retain the established payload-digest tie-break.
