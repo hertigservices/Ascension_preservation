@@ -62,6 +62,9 @@ MODE_TABLE = {
     UNKNOWN:               (UNKNOWN,               UNKNOWN,               ""),
 }
 
+# Snapshot before classify() can add user-defined mode labels.
+CANONICAL_MODE_LABELS = frozenset(MODE_TABLE) - {UNKNOWN}
+
 # "Area 52 - Free-Pick" splits, but "Free-Pick" itself must not: require a space
 # AFTER the dash, which the mode's own internal hyphen never has.
 SPLIT = re.compile(r"\s*-\s+")

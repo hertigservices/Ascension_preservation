@@ -52,6 +52,7 @@ class IncrementalTests(unittest.TestCase):
         self.sources.append(dict(zip(merge.SRC_COLS,
             [sid, 'a'*64, cache, cache+'.wdb', 'g', 'realm', 'Free-Pick',
              'free-pick', 'folder', '1', '2026-01-01', str(donor)])))
+        self.sources[-1]["locale"] = "enUS"
         folder = self.store/cache
         folder.mkdir()
         (folder/'pack.bin').write_bytes(struct.pack('<II', 1, len(payload))+payload)

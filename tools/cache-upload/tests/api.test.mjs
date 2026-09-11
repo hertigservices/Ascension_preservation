@@ -336,3 +336,51 @@ test("collector stream requires admin and exposes only status metadata", async()
   assert.deepEqual(Object.keys(response.body.submissions[0]).sort(),["bytes","commit_sha","created","id","modes","status"].sort());
   assert.deepEqual(response.body.submissions[0].modes,["unknown"]);
 });
+
+
+test("unfinished submissions survive age and completed objects release quota while receipts remain", async () => {
+  const env=environment();const s=await create(env);
+  env.db.prepare("UPDATE submissions SET status='received',expires=0 WHERE id=?").run(s.id);
+  await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+  assert.equal(env.db.prepare('SELECT status FROM submissions WHERE id=?').get(s.id).status,'received');
+  const claim=(await call(env,'collector/claim','POST',{},env.COLLECTOR_TOKEN)).body.submission;
+  assert.equal(claim.id,s.id);
+  await call(env,`collector/${s.id}/ack`,'POST',{status:'published',commit:'a'.repeat(40)},env.COLLECTOR_TOKEN,{'X-Lease':claim.lease});
+  const failDelete=env.BUCKET.delete;env.BUCKET.delete=async()=>{throw Error('transient storage failure')};
+  await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+  assert.equal(env.db.prepare('SELECT objects_deleted FROM submissions WHERE id=?').get(s.id).objects_deleted,0);
+  env.BUCKET.delete=failDelete;
+  await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+  assert.equal(env.db.prepare('SELECT objects_deleted FROM submissions WHERE id=?').get(s.id).objects_deleted,1);
+  assert.equal((await call(env,`submissions/${s.id}/status`,'GET',null,s.receiptToken)).body.status,'published');
+});
+
+test("review-held objects are never aged out",async()=>{
+ const env=environment();const s=await create(env);
+ env.db.prepare("UPDATE submissions SET status='needs_review',expires=0 WHERE id=?").run(s.id);
+ await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+ assert.equal(env.db.prepare('SELECT objects_deleted FROM submissions WHERE id=?').get(s.id).objects_deleted,0);
+});
+
+
+test("interrupted finalization resumes accepted copies after staging expires",async()=>{
+ const env=environment();const s=await create(env);
+ await call(env,`submissions/${s.id}/files/0`,'PUT',wdb(),s.uploadToken);
+ const put=env.BUCKET.put;
+ env.BUCKET.put=async(k,b,o)=>{await put(k,b,o);if(k.startsWith('accepted/'))throw Error('crash after accepted write')};
+ assert.equal((await call(env,`submissions/${s.id}/complete`,'POST',{},s.uploadToken)).code,503);
+ assert.equal(env.db.prepare('SELECT status FROM submissions WHERE id=?').get(s.id).status,'finalizing');
+ env.BUCKET.put=put;
+ await env.BUCKET.delete(`staging/${s.id}/0`);
+ env.db.prepare('UPDATE submissions SET expires=0 WHERE id=?').run(s.id);
+ await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+ assert.equal(env.db.prepare('SELECT status FROM submissions WHERE id=?').get(s.id).status,'received');
+ assert.ok(await env.BUCKET.head(`accepted/${s.id}/0`));
+});
+
+test("incomplete expired finalization becomes visible review work without deletion",async()=>{
+ const env=environment();const s=await create(env);
+ env.db.prepare("UPDATE submissions SET status='finalizing',expires=0 WHERE id=?").run(s.id);
+ await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
+ assert.equal(env.db.prepare('SELECT status FROM submissions WHERE id=?').get(s.id).status,'needs_review');
+});

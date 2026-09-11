@@ -63,7 +63,7 @@ test("code and harvest data are held for review, identity removed, utf8 preserve
   const result = sanitizeLua(
     "wildcardharvest.lua",
     bytes(
-      'AscensionRebirthHarvestDB={identity={["Secretchar@1"]={}},gossips={[1]={text="Greetings, Secretchar. café"}},enums={A=1},spellsByChar={Secretchar={1}}}',
+      'AscensionRebirthHarvestDB={identity={["Secretchar@1"]={}},gossips={[1]={text="Greetings, traveler. café"}},enums={A=1},spellsByChar={Secretchar={1}}}',
     ),
   );
   assert.equal(result.review, true);
@@ -164,7 +164,7 @@ test("Ascension capture formats retain references, remove private branches and a
   const harvest = sanitizeLua(
     "ascensionharvest.lua",
     bytes(
-      'AscensionHarvestDB={realms={Realm={items={[1]={name="Sword",player="Alice"}},cursor=900}},sweeps={Realm={quest={data={[7]="Help Alice"},miss={[8]=true},cursor=10}}},watch={Realm={spells={[42]="Fireball",Alice="private"},casters={Alice=1},gossip={secret=1},fx={private=1}}},gear={Alice=1},addon={ASC_GUILD="secret"},dumps={private=1}}',
+      'AscensionHarvestDB={realms={Realm={items={[1]={name="Sword",player="Alice"}},cursor=900}},sweeps={Realm={quest={data={[7]="Help the village"},miss={[8]=true},cursor=10}}},watch={Realm={spells={[42]="Fireball",Alice="private"},casters={Alice=1},gossip={secret=1},fx={private=1}}},gear={Alice=1},addon={ASC_GUILD="secret"},dumps={private=1}}',
     ),
     ["Alice"],
   );
@@ -222,4 +222,26 @@ import * as contractPolicy from "../shared/policy.mjs";
 test("Python collector policy contract matches the browser and validator policy", () => {
   const contract=JSON.parse(readFileSync(new URL("../shared/policy-contract.json",import.meta.url),"utf8"));
   assert.deepEqual(contract,{policy:contractPolicy.POLICY_VERSION,names:[...contractPolicy.WDB_NAMES,...contractPolicy.LUA_NAMES],modes:contractPolicy.MODES,folders:contractPolicy.MODE_FOLDERS,review:contractPolicy.REVIEW_LUA_NAMES});
+});
+
+
+test("schema-aware policy preserves game names and enums without rewriting ambiguous text", () => {
+  const source='AscensionRebirthHarvestDB={identity={Storm={}},enums={Account=1,UnitType={Player=2}},wildcard={tokens={name="Scroll",count=17},eligibilityReasons={locked="Level too low"}},spellsByChar={Storm={[42]={name="Storm Hammer"}}}}';
+  const result=sanitizeLua("wildcardharvest.lua",bytes(source),["Storm"]);
+  const text=new TextDecoder().decode(result.data);
+  assert.match(text,/Storm Hammer/);
+  assert.match(text,/Account/);assert.match(text,/Player/);
+  assert.match(text,/eligibilityReasons/);assert.match(text,/spellsByChar/);
+  assert.doesNotMatch(text,/\["identity"\]|\["count"\]|\["Storm"\]/);
+  assert.deepEqual(sanitizeLua("wildcardharvest.lua",result.data).data,result.data);
+  assert.throws(()=>sanitizeLua("wildcardharvest.lua",bytes('AscensionRebirthHarvestDB={gossips={[1]={text="Hello Storm"}}}'),["Storm"]),/Ambiguous name/);
+});
+
+
+test("compound identity keys are held, unrelated words are preserved",()=>{
+ for(const key of ["Storm - Realm","Owner: Storm"])
+  assert.throws(()=>sanitizeLua("wildcardharvest.lua",bytes(`AscensionRebirthHarvestDB={gossips={["${key}"]={text="safe"}}}`),["Storm"]),/Ambiguous name/);
+ assert.doesNotThrow(()=>sanitizeLua("wildcardharvest.lua",bytes('AscensionRebirthHarvestDB={gossips={Stormwind={text="safe"}}}'),["Storm"]));
+ for(const source of ['AscensionRebirthHarvestDB={gossips={[1]={name="Storm"}}}', 'AscensionRebirthHarvestDB={byRealm={realm={title="Storm"}}}'])
+  assert.throws(()=>sanitizeLua("wildcardharvest.lua",bytes(source),["Storm"]),/Ambiguous name/);
 });

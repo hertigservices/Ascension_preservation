@@ -955,8 +955,7 @@ export default function Home() {
             <p>
               Filtering reduces personal data before upload. It cannot guarantee
               that every free-text field is anonymous. The server validates
-              again, and the consolidator checks publication. Private upload and
-              review copies expire after seven days. Accepted game data is
+              again, and the consolidator checks publication. Unfinished submissions and review copies are retained until resolved. Published upload copies are removed after processing; abandoned uploads expire after seven days. Accepted game data is
               retained for preservation, including in the consolidator and
               published dataset. No original folder paths or account names are
               sent as metadata.

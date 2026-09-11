@@ -36,7 +36,7 @@ def rules():
     # Any local Python/rule/config change conservatively invalidates all entries.
     here = Path(__file__).resolve().parent
     paths = sorted(p for p in here.iterdir() if p.suffix in ('.py', '.json'))
-    paths += [Path(config.WORK) / 'config.json']
+    paths += [Path(config.WORK) / 'config.json', Path(config.WORK) / 'modes.json']
     return fingerprint(paths, [sys.version, sys.platform, zlib.ZLIB_RUNTIME_VERSION,
                                config.WORK, config.OUT, config.STORE])
 

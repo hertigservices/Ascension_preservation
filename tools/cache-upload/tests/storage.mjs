@@ -8,6 +8,7 @@ export function environment() {
       "utf8",
     ).replaceAll("--> statement-breakpoint", ""),
   );
+  db.exec(readFileSync(new URL("../drizzle/0001_safe_retention.sql", import.meta.url), "utf8"));
   const objects = new Map();
   const DB = {
     prepare(sql) {

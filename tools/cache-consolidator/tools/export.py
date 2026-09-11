@@ -33,7 +33,7 @@ mtime=0 on every write, because gzip otherwise stamps the clock into its header
 and an unchanged rebuild would then show up as a diff in every single file.
 """
 import capture_dates
-import os, io, sys, gzip, json, struct, time, contextlib, collections
+import os, io, sys, gzip, json, struct, time, contextlib, collections, re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wdblib, modes, merge, scrub, config, build_cache
@@ -52,7 +52,7 @@ def decode_itemname(entry, payload):
         return {"entry": entry, "name": "", "InventoryType": 0}, 0
     name = wdblib.decode_str(payload[:z])
     inv = struct.unpack_from("<I", payload, z + 1)[0] if z + 5 <= len(payload) else 0
-    return {"entry": entry, "name": name.replace("\t", " "), "InventoryType": inv}, z + 5
+    return {"entry": entry, "name": name.replace("\t", " ").replace("\r", " ").replace("\n", " "), "InventoryType": inv}, z + 5
 
 
 DECODERS = {
@@ -65,7 +65,7 @@ DECODERS = {
     "itemnamecache":   (decode_itemname,       ["entry", "name", "InventoryType"]),
 }
 
-PROV = ["_modes", "_captured", "_sources"]
+PROV = ["_modes", "_captured", "_sources", "_locales"]
 
 GZ = ".gz"
 
@@ -160,6 +160,8 @@ def load_cache(cache):
     capture_context = {}
     for r in idx:
         capture_dates.attach_context(r, sources, capture_context)
+        r["locales"] = r.get("locales") or ",".join(sorted({sources[sid].get("locale") or "unknown" for sid in r["srcs"].split(",")}))
+        r["_source_rows"] = sources
         off, size = int(r["offset"]), int(r["size"])
         payload = blob[off + 8: off + 8 + size]
         out.append((int(r["entry"]), r["sha1"], r, payload))
@@ -167,14 +169,30 @@ def load_cache(cache):
     return out
 
 
-def pick_winners(recs, mode=None):
+def pick_winners(recs, mode=None, locale=None):
     """entry -> (sha1, row, payload); dated captures take precedence; undated observations remain stable."""
     by_entry = collections.defaultdict(list)
     for entry, sha1, r, payload in recs:
         if mode is not None and mode not in r["modes"].split(","):
             continue
+        supported = r.get("locales", "unknown").split(",")
+        if locale is not None and locale not in supported:
+            continue
+        if locale is not None and r.get("_source_rows"):
+            ids = [sid for sid in r["srcs"].split(",")
+                   if (r["_source_rows"][sid].get("locale") or "unknown") == locale
+                   and (mode is None or r["_source_rows"][sid]["slug"] == mode)]
+            if not ids:
+                continue
+            dates = [r["_source_rows"][sid]["captured"] for sid in ids if r["_source_rows"][sid]["captured"]]
+            r = dict(r, srcs=",".join(ids), locales=locale,
+                     modes=",".join(sorted({r["_source_rows"][sid]["slug"] for sid in ids})),
+                     first_captured=min(dates, default=""), last_captured=max(dates, default=""))
+            # Date ranking and provenance must describe this locale's sources.
+            capture_dates.attach_context(r, r["_source_rows"], {})
         by_entry[entry].append((sha1, r, payload))
-    return {e: max(v, key=lambda t: capture_dates.winner_rank(t[1], t[0], mode))
+    return {e: max(v, key=lambda t: (("enUS" in t[1].get("locales", "").split(",")) if locale is None else True,
+                                    capture_dates.winner_rank(t[1], t[0], mode)))
             for e, v in by_entry.items()}
 
 
@@ -202,9 +220,12 @@ def write_view(path, cache, winners, note_cols=True, mode=None):
                 d["_modes"] = r["modes"]
                 d["_captured"] = capture_dates.winner_date(r, mode)
                 d["_sources"] = len(r["srcs"].split(","))
+                d["_locales"] = r.get("locales", "unknown")
             f.write("\t".join(str(d.get(c, "")).replace("\t", " ").replace("\n", " ")
                               for c in allcols) + "\n")
-    return len(winners), bad, inexact
+    if bad or inexact:
+        raise RuntimeError(f"{cache}: {bad} undecodable and {inexact} inexact records; raw originals retained, publication blocked")
+    return len(winners) - bad, bad, inexact
 
 
 def prune(root, keep, protect=()):
@@ -280,6 +301,18 @@ def main():
             category_ok = category_ok and not any(result[1:])
             written.append(f"{OUT}/by-mode/{slug}/{cache}.tsv{GZ}")
             mode_rows[slug][cache] = len(wm)
+        # Additive locale views: do not collapse translated variants into one row.
+        for locale in sorted({loc for _, _, row, _ in recs for loc in row["locales"].split(",")}):
+            if not re.fullmatch(r"[a-z]{2}[A-Z]{2}|unknown", locale):
+                raise RuntimeError("Invalid locale in record provenance")
+            for slug in [None] + slugs:
+                selected = pick_winners(recs, mode=slug, locale=locale)
+                if not selected:
+                    continue
+                rel = f"by-mode/{slug}" if slug else "union"
+                path = f"{OUT}/by-locale/{locale}/{rel}/{cache}.tsv"
+                write_view(path, cache, selected, mode=slug)
+                written.append(path + GZ)
         # ---- raw, deterministic ---------------------------------------------
         os.makedirs(f"{OUT}/raw", exist_ok=True)
         buf = bytearray()
@@ -288,11 +321,11 @@ def main():
         write_gz(f"{OUT}/raw/{cache}.pack.gz", bytes(buf))
         with gz_text(f"{OUT}/raw/{cache}.index.tsv{GZ}") as f:
             f.write("\t".join(["entry", "sha1", "size", "modes", "first_captured",
-                                "last_captured", "n_sources"]) + "\n")
+                                "last_captured", "n_sources", "locales"]) + "\n")
             for e, s, r, _p in recs:
                 f.write(f"{e}\t{s}\t{r['size']}\t{r['modes']}\t"
                         f"{r['first_captured']}\t{r['last_captured']}\t"
-                        f"{len(r['srcs'].split(','))}\n")
+                        f"{len(r['srcs'].split(','))}\t{r['locales']}\n")
         written += [f"{OUT}/raw/{cache}.pack.gz", f"{OUT}/raw/{cache}.index.tsv{GZ}"]
         stats[cache]["records"] = len(recs)
         rows, bad, inexact = stats[cache]["union"]
@@ -321,7 +354,7 @@ def main():
     write_docs(OUT, caches, slugs, stats, mode_rows, srcs)
     write_file_guide(OUT, stats)
 
-    for root in (f"{OUT}/by-mode", f"{OUT}/union", f"{OUT}/raw"):
+    for root in (f"{OUT}/by-mode", f"{OUT}/union", f"{OUT}/raw", f"{OUT}/by-locale"):
         for gone in prune(root, written):
             print(f"  pruned stale {os.path.basename(root)}/{gone}")
     print(f"\nexported -> {OUT}  ({time.time()-t0:.0f}s)")

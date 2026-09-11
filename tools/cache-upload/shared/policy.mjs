@@ -67,7 +67,7 @@ export function canonicalName(path) {
     .pop()
     .toLowerCase()
     .replace(/\.bak$/, "");
-  return /^wildcardharvest[\w.\-()' ]*\.lua$/.test(n)
+  return (/^wildcardharvest[\w.\-()' ]*\.lua$/.test(n) || /^harvest_v[456]_early\.lua$/.test(n))
     ? "wildcardharvest.lua"
     : n;
 }
@@ -259,7 +259,6 @@ const DROP = new Set([
   "profilekeys",
   "profiles",
   "identity",
-  "spellsbychar",
   "lastguid",
   "lasttime",
   "player",
@@ -273,48 +272,48 @@ const DROP = new Set([
   "macros",
   "hotbars",
   "toons",
-  "calls",
-  "tokens",
-  "rapidrollingstate",
-  "eligibility",
-  "eligibilityreasons",
-  "startingchoice",
 ]);
-function scrub(v, identifiers, depth = 0) {
+function containsIdentity(value, id) {
+  return new RegExp("(?<![\\p{L}\\p{N}_])" + id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\p{L}\\p{N}_])", "giu").test(value);
+}
+function scrub(v, identifiers, depth = 0, path = []) {
   if (depth > 64) throw Error("Nesting limit");
+  const lowerPath = path.map(p => p.toLowerCase());
   if (v instanceof Map) {
     const t = table();
     for (const [k, x] of v) {
       if (
         typeof k === "string" &&
-        (DROP.has(k.toLowerCase()) ||
-          identifiers.some((id) => id.toLowerCase() === k.toLowerCase()))
+        DROP.has(k.toLowerCase()) && !lowerPath.includes("enums")
       )
         continue;
-      const nk = typeof k === "string" ? scrub(k, identifiers, depth + 1) : k;
+      if (lowerPath.includes("tokens") && typeof k === "string" && ["count", "owned", "quantity"].includes(k.toLowerCase())) continue;
+      // Structural labels are not identities merely because a player used one
+      // as a character name. Values are checked in their schema context below.
+      const enumLabel = lowerPath.includes("enums") && typeof x === "number" && /^(account|player|creature)$/i.test(String(k));
+      if (typeof k === "string" && !enumLabel && identifiers.some(id => containsIdentity(k, id)))
+        throw Error("Ambiguous name in addon key; original retained on your computer for private review");
+      const nk = k;
       if (t.has(nk))
         throw Error("Redacted key collision; needs private review");
-      t.set(nk, scrub(x, identifiers, depth + 1));
+      t.set(nk, scrub(x, identifiers, depth + 1, [...path, String(k)]));
     }
     return t;
   }
   if (typeof v === "string") {
-    let s = v
-      .replace(/[\w.+-]+@[\w.-]+\.[\w.-]+/g, "<redacted-email>")
-      .replace(/0x[\da-f]{16}/gi, "<redacted-guid>");
+    // Never silently rewrite game text. Ambiguous free text stays on the
+    // contributor's disk, with an explicit error, until it can be reviewed.
+    if (/[\w.+-]+@[\w.-]+\.[\w.-]+/.test(v) || /0x[\da-f]{16}/i.test(v))
+      throw Error("Possible private identifier in addon text; original retained on your computer");
+    const gameField = /^(mobspellsdb\.global\.mobs\.(?:\d+\.){1,2}|ascensionrebirthharvestdb\.spellsbychar\.\d+\.\d+\.)(name|schoolname)$/.test(lowerPath.join("."));
     for (const id of identifiers) {
-      if (id.length >= 3)
-        s = s.replace(
-          new RegExp(
-            "(?<![\\p{L}\\p{N}_])" +
-              id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-              "(?![\\p{L}\\p{N}_])",
-            "giu",
-          ),
-          "$n",
-        );
+      // A compound name at an exact known record path is game text. A value
+      // equal to the identity is still ambiguous even at that path.
+      if (gameField && v.toLowerCase() !== id.toLowerCase()) continue;
+      if (id.length >= 3 && new RegExp("(?<![\\p{L}\\p{N}_])" + id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\p{L}\\p{N}_])", "giu").test(v))
+        throw Error("Ambiguous name in addon text; original retained on your computer for private review");
     }
-    return s;
+    return v;
   }
   return v;
 }
@@ -448,9 +447,7 @@ export function sanitizeLua(name, b, identifiers = []) {
     case "wildcardharvest.lua": {
       const h = get(g, "AscensionRebirthHarvestDB");
       identityNames(get(h, "identity"), identifiers);
-      out.set(
-        "AscensionRebirthHarvestDB",
-        pick(h, [
+      const selected = pick(h, [
           "version",
           "captured",
           "vendors",
@@ -464,8 +461,15 @@ export function sanitizeLua(name, b, identifiers = []) {
           "battlegrounds",
           "skillCards",
           "roleRequirements",
-        ]),
-      );
+        ]);
+      const byChar = get(h, "spellsByChar");
+      if (byChar instanceof Map) {
+        const anonymous = table();
+        let i = 0;
+        for (const records of byChar.values()) if (records instanceof Map) anonymous.set(++i, records);
+        if (anonymous.size) selected.set("spellsByChar", anonymous);
+      }
+      out.set("AscensionRebirthHarvestDB", selected);
       review = true;
       break;
     }

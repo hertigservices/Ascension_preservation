@@ -159,11 +159,11 @@ def eligible_completed(work,out,inputs,retained=None):
             # Zero leaves can be a successful merge (empty addon database or
             # records already represented). Require the metadata written only
             # after the merger returns, not a missing-global/parse-error entry.
-            successful_zero = source.get('records') == 0 and {
+            successful_zero = source.get('records') == 0 and source.get('status') == 'empty_supported' and {
                 'filename','group','realm','mode','slug','captured','submission'
             } <= source.keys()
             return (source.get('spec')==key and not source.get('error')
-                    and not source.get('empty') and type(source.get('records')) is int
+                    and not source.get('empty') and not source.get('retained_records') and type(source.get('records')) is int
                     and (source['records']>0 or successful_zero))
         if intake.split_archive(p.name)[1] in intake.ARCHIVE_EXT:
             folder=archives.get(sha)

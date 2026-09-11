@@ -237,6 +237,26 @@
     {
       "source": "tools/cache-consolidator/tools/test_worldforged.py",
       "destination": "tools/test_worldforged.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/merge_checkpoint.py",
+      "destination": "tools/merge_checkpoint.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_pipeline_recovery.py",
+      "destination": "tools/test_pipeline_recovery.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_contribute_privacy.py",
+      "destination": "tools/test_contribute_privacy.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/compare_replay.py",
+      "destination": "tools/compare_replay.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_compare_replay.py",
+      "destination": "tools/test_compare_replay.py"
     }
   ]
 }

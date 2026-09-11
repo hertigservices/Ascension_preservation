@@ -31,21 +31,24 @@ OUT = export.OUT + "/wdb"
 
 # itemtextcache carries the text of MAIL and letters the player read -- that is other
 # people's writing, not game content. Never republish it.
-NEVER_PUBLISH = {"itemtextcache"}
+NEVER_PUBLISH = {"itemtextcache", "wowcache", "lua", ".merge-transaction"}
 
 
-def header_for(cache, slug, srcs):
-    """Verbatim 24-byte header from the newest real file of this cache type.
-    Prefers a file from the same mode; falls back to any file of that type."""
-    cands = [s for s in srcs if s["cache"] == cache and s["records"] != "0"
-             and os.path.exists(s["path"])]
+def header_for(cache, slug, srcs, locale="enUS"):
+    """Use an observed header of the correct locale, persisted before archiving."""
+    cands = [s for s in srcs if s["cache"] == cache and str(s["records"]) != "0"]
     same = [s for s in cands if s["slug"] == slug]
     for pool in (same, cands):
         for s in sorted(pool, key=lambda r: r["captured"], reverse=True):
-            with open(s["path"], "rb") as f:
-                h = f.read(wdblib.HEADER_LEN)
-            if len(h) == wdblib.HEADER_LEN:
-                return h, s
+            try:
+                h = bytes.fromhex(s.get("header_hex", ""))
+                if len(h) != wdblib.HEADER_LEN:
+                    with open(s["path"], "rb") as f:
+                        h = f.read(wdblib.HEADER_LEN)
+                if len(h) == wdblib.HEADER_LEN and wdblib.read_header(h)[2] == locale:
+                    return h, s
+            except (OSError, ValueError):
+                continue
     return None, None
 
 
@@ -108,7 +111,7 @@ def main():
         if not recs:
             continue
         for slug in slugs:
-            w = export.pick_winners(recs, mode=slug)
+            w = export.pick_winners(recs, mode=slug, locale="enUS")
             if not w:
                 continue
             header = donors[slug]
@@ -131,6 +134,28 @@ def main():
                 failures.append(f"{slug}/{cache}: {detail}")
             built[slug][cache] = (len(w), len(data), os.path.getsize(p), ok)
 
+        for locale in sorted({loc for _, _, row, _ in recs for loc in row.get("locales", "unknown").split(",")} - {"enUS", "unknown"}):
+            if not __import__('re').fullmatch(r"[a-z]{2}[A-Z]{2}", locale):
+                raise RuntimeError("Invalid locale")
+            for slug in slugs:
+                w = export.pick_winners(recs, mode=slug, locale=locale)
+                if not w:
+                    continue
+                header = header_for(cache, slug, srcs, locale)[0]
+                if header is None:
+                    failures.append(f"{locale}/{slug}/{cache}: no header donor")
+                    continue
+                p = f"{OUT}/by-locale/{locale}/{slug}/{cache}.wdb.gz"
+                data = build_wdb(header, w)
+                ok, detail = verify(data, w, p)
+                if not ok:
+                    failures.append(detail)
+                    continue
+                export.write_gz(p, data)
+                with gzip.open(p, "rb") as f:
+                    if f.read() != data:
+                        raise RuntimeError("Localized WDB compression mismatch")
+                written.append(p)
         if inputs != signature({slug: header_for(cache, slug, srcs)[0] for slug in slugs}):
             raise RuntimeError('merged inputs or header donors changed during rebuild')
         if len(failures) == failure_start:
@@ -151,6 +176,8 @@ def main():
     else:
         print("\nall rebuilt caches re-parsed and matched payload-for-payload")
 
+    if failures:
+        return 1
     write_readme(built)
     # A mode that no longer exists must not leave a stale .wdb behind: it would
     # look exactly like a current one and hand someone a cache we cannot vouch
@@ -197,6 +224,7 @@ def write_readme(built):
           "name one. Those are safe to use anywhere; its quest text may not be."]
     L += ["", "`itemtextcache` is deliberately never published: it holds the text of mail",
           "and letters the player read, which is other people's writing, not game data.\n"]
+    os.makedirs(OUT, exist_ok=True)
     with open(f"{OUT}/README.md", "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(L) + "\n")
 

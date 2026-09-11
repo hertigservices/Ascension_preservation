@@ -53,7 +53,7 @@ node node_modules/wrangler/bin/wrangler.js d1 create ascension-contribution-queu
 node node_modules/wrangler/bin/wrangler.js r2 bucket create ascension-contribution-private
 ```
 
-Create a Turnstile widget in the Cloudflare dashboard restricted to the final hostname (for example the chosen `workers.dev` hostname). Keep its secret off chat and source control. R2 must have public access disabled. Configure a bucket lifecycle rule to delete upload objects after seven days and abort incomplete multipart uploads; the collector also deletes expired objects and metadata. Lifecycle expiration is required to enforce retention when the local computer is offline.
+Create a Turnstile widget in the Cloudflare dashboard restricted to the final hostname (for example the chosen `workers.dev` hostname). Keep its secret off chat and source control. R2 must have public access disabled. Configure seven-day object expiration ONLY for the `staging/` prefix, plus abort incomplete multipart uploads. Never apply age-only expiration to `accepted/` or legacy root objects. The scheduled Worker performs status-aware cleanup independently of the local collector.
 
 Build first, then prepare ignored local configuration:
 
@@ -89,7 +89,7 @@ After verifying the first actual contribution, install the optional user-session
 powershell -File collector/install-startup.ps1 -ConfigPath C:/AscensionArchive/upload-private/collector-config.json
 ```
 
-The task uses limited privileges, runs at sign-in, and checks every 30 seconds. If the PC is off, the private queue waits; seven-day retention still applies. This is a sign-in task, not a Windows service that runs while nobody is logged in. The collector code is installed separately, and its limited-privilege startup task is enabled and running. The first real publication receipt remains to be checked.
+The task uses limited privileges, runs at sign-in, and checks every 30 seconds. If the PC is off, accepted submissions remain queued until processing resumes. This is a sign-in task, not a Windows service that runs while nobody is logged in. The collector code is installed separately, and its limited-privilege startup task is enabled and running. The first real publication receipt remains to be checked.
 
 The public upload Worker never needs a GitHub token. Use a dedicated non-admin collector account where practical. Validation is a separate process with restricted inherited environment, bounded input and heap/time limits, **not an OS security sandbox**. It still runs with the service account's filesystem permissions. No shell or Lua interpreter executes uploaded content. Raw archives never reach the collector. Dedicated account/VM isolation is appropriate before anonymous public traffic; do not use an administrator account with broad unrelated credentials.
 
@@ -100,7 +100,7 @@ The public upload Worker never needs a GitHub token. Use a dedicated non-admin c
 - The collector resumes verified downloads, uses an OS advisory lock, renews its server lease, retries transient publication failures, and retains a result receipt before acknowledgment. After five processing attempts, the submission becomes review-required.
 - Exact repeated accepted bundles share a content-derived inbox path. Partial overlaps and anonymous submissions are observations, not proof of independent people. No executable AIO code is promoted by anonymous corroboration counts.
 - Original realm-directory text and timestamps are not uploaded in this version. Detected/selected **mode** is preserved per file; ambiguous data stays unknown. Generated mode folders use an explicitly unknown realm. The manifest is private provenance and retains per-file hashes; ingestion time must not be described as the original capture date. Extending capture/realm metadata requires a reviewed policy change.
-- Private upload/download/review copies expire after seven days. Accepted filtered game data remains in the consolidator and public archive. Published Git history cannot be recalled by deleting a receipt. Reviews must happen before expiry or the contributor must resubmit.
+- Abandoned staging uploads expire after seven days. Accepted unfinished submissions and review holds remain private until resolved. Published upload objects are deleted by scheduled cleanup; capacity is released only after deletion succeeds. Receipts remain available. Local successful download copies can age out; unresolved local review material is retained. Published Git history cannot be recalled by deleting a receipt.
 - `needs_review` can include a commit link when the accepted portion was published and held files remain. Review files are under the private job directory, outside all scan roots. This first version requires a maintainer to inspect and manually release such files; there is no automatic review approval endpoint.
 - Stop new intake by setting `UPLOADS_ENABLED=false` and redeploying. Existing upload tokens can finish an admitted submission until expiry. Stop local processing with `Stop-ScheduledTask -TaskName 'Ascension Private Upload Collector'` if installed. Pause/delete the task separately to prevent future sign-ins from restarting it.
 
@@ -163,3 +163,16 @@ The desktop window has separate Manual inbox and Live contributions tabs. The co
 Consolidate now queues manual work. Online batches finish first, with one manual request allowed after each batch to prevent starvation. The publisher owns preparation, collision handling, a fresh five-second content stability check, consolidation and filing under the same lock. Transient manual failures back off automatically for up to five attempts; the live tab can retry a failed manual request. A paused collector leaves requests queued and reports its unavailability.
 
 Only roots with supported contents accounted for in merger/export state can be marked completed. Archives require exact extraction-hash evidence. Failed archives and unsupported-only inputs remain pending. A mixed bundle whose supported data was published can be archived with its explicitly ledgered unread WDB files preserved; the completion journal and `archive/RETAINED-FILES.md` identify those files for future parser work. Zero-record Lua captures qualify only with successful merger completion metadata; bare zero counts do not prove completion. Filing rechecks every original file hash, preserves names, refuses archive collisions and never deletes raw evidence. Changed or newly arriving roots remain in place. Historical archive data stays available to the pipeline for provenance and recovery, but is excluded from pending-inbox counts and watcher triggers. The Tidy button files only journaled completed inputs, never arbitrary inbox folders.
+
+## September 2026 review repairs
+
+Apply `0001_safe_retention.sql` before deploying this revision. Build the site,
+then run `node scripts/build-production.mjs`; deploy `dist/server/production.js`
+with a five-minute cron trigger. The wrapper includes resumable finalization and
+status-aware cleanup. Preserve existing secrets and binding IDs. Replace any
+all-prefix R2 expiration with `staging/`-only expiration before enabling this code.
+
+Browser, API, collector and CLI helper share the structural sanitizer. Known
+identities in ambiguous free text or compound keys cause an explicit hold/refusal,
+not fabricated `$n` substitutions. Original files remain on the sender's device.
+Exact supported game-reference fields and numeric enum labels retain their text.

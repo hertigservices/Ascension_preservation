@@ -114,3 +114,5 @@ Run each `tools/cache-consolidator/tools/test_*.py` script with Python. In
 The desktop tests require Tk; Windows Python includes it. These tests use synthetic
 inputs and temporary directories. They do not establish in-game compatibility or
 perform a production Cloudflare challenge or GitHub dataset push.
+
+See [review repairs and controlled replay](REVIEW-REPROCESSING.md) for the September 2026 recovery and privacy changes.

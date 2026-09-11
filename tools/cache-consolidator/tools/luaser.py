@@ -74,11 +74,11 @@ _ESCAPES = {"a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r",
 
 def _unescape(raw):
     """Decode a quoted Lua string literal body (quotes already stripped)."""
-    out, i, n = [], 0, len(raw)
+    out, i, n = bytearray(), 0, len(raw)
     while i < n:
         c = raw[i]
         if c != "\\":
-            out.append(c)
+            out.extend(c.encode("utf-8"))
             i += 1
             continue
         i += 1
@@ -89,15 +89,23 @@ def _unescape(raw):
             j = i
             while j < n and j - i < 3 and raw[j].isdigit():
                 j += 1
-            out.append(chr(int(raw[i:j])))
+            value = int(raw[i:j])
+            if value > 255:
+                raise LuaError("decimal escape is not a byte")
+            out.append(value)
             i = j
-        elif e == "x" and i + 2 < n:          # \xHH
-            out.append(chr(int(raw[i + 1:i + 3], 16)))
+        elif e == "x":          # \xHH
+            if i + 2 >= n or not re.fullmatch(r"[0-9a-fA-F]{2}", raw[i + 1:i + 3]):
+                raise LuaError("invalid hex byte escape")
+            out.append(int(raw[i + 1:i + 3], 16))
             i += 3
         else:
-            out.append(_ESCAPES.get(e, e))
+            out.extend(_ESCAPES.get(e, e).encode("utf-8"))
             i += 1
-    return "".join(out)
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LuaError("string contains non-UTF-8 bytes; retained for review") from exc
 
 
 def _tokens(src):
@@ -225,7 +233,7 @@ def loads(src):
 
 
 def load(path):
-    with open(path, encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="strict") as f:
         return loads(f.read())
 
 

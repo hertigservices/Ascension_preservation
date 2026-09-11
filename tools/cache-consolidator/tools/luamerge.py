@@ -36,7 +36,9 @@ per-mode folder. Most of these addons keep one account-wide table with no record
 of which realm an observation came from, and are published unsplit. Auctionator
 is the exception: it keys its own database by "<Realm> - <Mode>", so it splits.
 """
-import os, sys, json, hashlib, time, re
+import os, sys, json, hashlib, time, re, copy
+
+PROCESSING_REVISION = "2026-09-11.2"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, modes, luaser, harvestmerge, reference_merge, capture_dates
@@ -132,6 +134,7 @@ SPECS = {
 # Files whose name carries a date or a label rather than being fixed. Matched
 # only after the exact table above misses, so an exact name always wins.
 PATTERNS = (
+    (re.compile(r"^harvest_v[456]_early\.lua$", re.I), "wildcardharvest.lua"),
     (re.compile(r"^wildcardharvest[\w.\-()' ]*\.lua$", re.I), "wildcardharvest.lua"),
 )
 
@@ -353,11 +356,30 @@ def merge_aio(state, g, sid, meta, conflicts):
     return n
 
 
-def merge_auctionator(state, g, sid, meta, conflicts):
-    """Prices are observations, so the newest capture wins outright.
+def auctionator_record(value):
+    """Recognize the observed v4 market record; unknown fields require review.
 
-    Widening a price into a range would assert a spread nobody ever saw, and
-    averaging two scans months apart describes no real market."""
+    mr is the most recent lowest buyout. History and lastScan are preserved
+    verbatim, without inferring a timestamp unit or averaging observations.
+    """
+    if value.array or not {"id", "mr", "cc", "sc", "lastScan"} <= value.hash.keys():
+        raise luaser.LuaError("unsupported_schema: Auctionator market record")
+    out = {}
+    for key, field in value.hash.items():
+        if key == "id":
+            if not isinstance(field, str) or not re.fullmatch(r"[0-9]+(?::[0-9]+)?", field):
+                raise luaser.LuaError("unsupported_schema: Auctionator item id")
+        elif key in {"mr", "cc", "sc", "lastScan"} or isinstance(key, str) and re.fullmatch(r"[HL][0-9]+", key):
+            if type(field) is not int or field < 0:
+                raise luaser.LuaError("unsupported_schema: Auctionator numeric field")
+        else:
+            raise luaser.LuaError("unsupported_schema: Auctionator record field")
+        out[key] = field
+    return out
+
+
+def merge_auctionator(state, g, sid, meta, conflicts):
+    """Keep complete validated market branches; privately hold unknown schemas."""
     tree = g.get("AUCTIONATOR_PRICE_DATABASE")
     if not isinstance(tree, luaser.Table):
         return 0
@@ -365,17 +387,46 @@ def merge_auctionator(state, g, sid, meta, conflicts):
     n = 0
     for group, gt in tree.hash.items():
         if not isinstance(gt, luaser.Table):
-            continue          # __dbversion is a scalar; skip it
+            if group == "__dbversion":
+                continue
+            raise luaser.LuaError("unsupported_schema: Auctionator root field")
+        if not len(gt):
+            continue
         cls = modes.classify(str(group))
+        parsed = []
+        try:
+            if cls["mode"] not in modes.CANONICAL_MODE_LABELS or gt.array:
+                raise luaser.LuaError("unsupported_schema: Auctionator market group")
+            shapes = set()
+            for item, value in gt.hash.items():
+                observation = auctionator_record(value) if isinstance(value, luaser.Table) else None
+                price = observation["mr"] if observation is not None else value
+                shapes.add(observation is not None)
+                if not isinstance(item, str) or type(price) not in (int, float) or not __import__("math").isfinite(price) or price < 0:
+                    raise luaser.LuaError("unsupported_schema: Auctionator scalar price")
+                parsed.append((item, price, observation))
+            if len(shapes) > 1:
+                raise luaser.LuaError("unsupported_schema: mixed Auctionator branch")
+        except luaser.LuaError:
+            digest = hashlib.sha256(luaser.dumps({"observation": gt}).encode("utf-8")).hexdigest()
+            hold = {"branch": "auctionator", "record_sha256": digest, "reason": "unsupported_market_schema"}
+            held = state.setdefault("retained_records", {}).setdefault(sid, [])
+            if hold not in held:
+                held.append(hold)
+            continue
         slug = cls["slug"]
         bucket = store.setdefault(slug, {"mode": cls["mode"], "realm": cls["realm"],
                                          "group": str(group), "items": {}})
-        for item, price in gt.hash.items():
-            if isinstance(price, luaser.Table):
-                continue
-            prev = bucket["items"].get(str(item))
-            if prev is None or meta["captured"] >= prev[1]:
-                bucket["items"][str(item)] = [price, meta["captured"]]
+        for item, price, observation in parsed:
+            if observation is not None:
+                encoded = json.dumps(observation, sort_keys=True, separators=(",", ":"))
+                digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+                variants = state.setdefault("auctionator_observations", {}).setdefault(slug, {}).setdefault(item, {})
+                capture = variants.setdefault(digest, {"record": observation, "sources": {}})
+                capture["sources"][sid] = meta["captured"]
+            prev = bucket["items"].get(item)
+            if prev is None or (meta["captured"] or "") >= (prev[1] or ""):
+                bucket["items"][item] = [price, meta["captured"]]
             n += 1
     return n
 
@@ -434,7 +485,7 @@ def merge_coasniff(state, g, sid, meta, conflicts):
             continue
         rec = store.setdefault(name, {"args": [], "seen": 0})
         rec["seen"] += 1
-        a = str(args) if args is not None else ""
+        a = json.dumps(harvestmerge.to_py(args), sort_keys=True, ensure_ascii=False) if args is not None else ""
         if a and a not in rec["args"]:
             rec["args"].append(a)
             rec["args"].sort()
@@ -466,8 +517,13 @@ def save_state(state):
     os.replace(tmp, STATE)
 
 
-def run_merge():
+def run_merge(replay_sources=None):
     state = load_state()
+    if replay_sources is not None and state.get("sources"):
+        raise RuntimeError("Replay baseline requires a fresh shadow Lua state")
+    if state.get("sources") and state.get("processing_revision") != PROCESSING_REVISION:
+        raise RuntimeError("Lua processing rules changed: controlled replay into a fresh shadow state is required")
+    state["processing_revision"] = PROCESSING_REVISION
     files = discover()
     conflicts, added, skipped = [], 0, 0
     print(f"{len(files)} SavedVariables files match a known spec")
@@ -477,12 +533,12 @@ def run_merge():
         # A file that failed to parse is retried on every run: the usual reason
         # for the failure is a gap in our parser, so improving the parser has to
         # be enough to pick the file up without hand-clearing the store.
-        if prev is not None and not prev.get("error"):
+        if prev is not None and not prev.get("error") and prev.get("processing_revision") == PROCESSING_REVISION:
             skipped += 1
             continue
         try:
             g = luaser.load(path)
-        except luaser.LuaError as e:
+        except (luaser.LuaError, UnicodeError, OSError) as e:
             # A hand-edited file -- one a submitter redacted by hand -- may no
             # longer be valid Lua. Report it rather than dropping it silently.
             print(f"  UNPARSEABLE {os.path.basename(path)}: {e}")
@@ -494,19 +550,68 @@ def run_merge():
             print(f"  no {'/'.join(spec['globals'])} in {os.path.basename(path)},"
                   f" skipping")
             state["sources"][sid] = {"filename": os.path.basename(path),
-                                     "spec": key, "records": 0, "empty": True}
+                                     "spec": key, "records": 0, "error": "unsupported_schema: expected global missing"}
             continue
-        grp = group_of(path)
+        original = (replay_sources or {}).get(sid, {})
+        grp = original.get("group", group_of(path))
         cls = modes.classify(grp) if grp else {"realm": "", "mode": "unknown",
                                                "slug": "unknown",
                                                "source": "account-wide"}
-        meta = {"captured": capture_dates.source_date(path)}
-        n = MERGERS[key](state, g, sid, meta, conflicts)
+        for field in ("realm", "mode", "slug"):
+            if field in original:
+                cls[field] = original[field]
+        meta = {"captured": original["captured"] if "captured" in original else capture_dates.source_date(path)}
+        trial = copy.deepcopy(state)
+        trial.get("retained_records", {}).pop(sid, None)
+        file_conflicts = []
+        try:
+            n = MERGERS[key](trial, g, sid, meta, file_conflicts)
+            if n == 0:
+                # An empty expected payload is different from an unrecognised shape.
+                expected = [g.get(gn) for gn in spec["globals"] if gn in g]
+                if key == "mobspells.lua":
+                    value = g.get("MobSpellsDB")
+                    for part in ("global", "mobs"):
+                        value = value.get(part) if isinstance(value, luaser.Table) else None
+                    expected = [value]
+                if key == "wildcardharvest.lua":
+                    tree = g.get(harvestmerge.GLOBAL)
+                    branches = (*harvestmerge.SNAPSHOT, *harvestmerge.REFERENCE, *harvestmerge.REALM_SCOPED, "byRealm", "spellsByChar")
+                    expected = [tree.get(branch) for branch in branches if isinstance(tree, luaser.Table) and branch in tree]
+                if key == "auctionator_price_database.lua":
+                    tree = g.get("AUCTIONATOR_PRICE_DATABASE")
+                    if isinstance(tree, luaser.Table) and not tree.array:
+                        expected = [value for label, value in tree.hash.items() if str(label).lower() != "__dbversion"]
+                        if not expected and all(str(label).lower() == "__dbversion" for label in tree.hash):
+                            expected = [luaser.Table()]
+                if key == "coasniff.lua":
+                    tree = g.get("CoASniffDB")
+                    expected = [tree.get("events") if isinstance(tree, luaser.Table) else None]
+                if not expected or not all(isinstance(v, luaser.Table) and len(v) == 0 for v in expected):
+                    raise luaser.LuaError("unsupported_schema: no recognised records consumed")
+        except (harvestmerge.LeakError, ValueError, TypeError, UnicodeError) as exc:
+            # The trial is discarded in its entirety: partial mutations never leak
+            # into other files. Do not put private values in public diagnostics.
+            state.get("conflicts", {}).pop(sid, None)
+            state["sources"][sid] = {"filename": os.path.basename(path), "spec": key,
+                "records": 0, "error": type(exc).__name__, "status": "needs_review",
+                "processing_revision": PROCESSING_REVISION}
+            print(f"  RETAINED {key}: {type(exc).__name__}; original remains private")
+            continue
+        state = trial
+        conflicts.extend(file_conflicts)
+        state.setdefault("conflicts", {})[sid] = [
+            {"path": [str(p) for p in where], "previous": old, "observed": new}
+            for where, old, new in file_conflicts]
         state["sources"][sid] = {
             "filename": os.path.basename(path), "spec": key,
             "group": grp, "realm": cls["realm"], "mode": cls["mode"],
             "slug": cls["slug"], "records": n, "captured": meta["captured"],
-            "submission": submission_of(path),
+            "submission": original["submission"] if "submission" in original else submission_of(path),
+            "processing_revision": PROCESSING_REVISION,
+            "status": ("processed_with_retained" if state.get("retained_records", {}).get(sid)
+                       else "processed" if n else "empty_supported"),
+            "retained_records": len(state.get("retained_records", {}).get(sid, [])),
         }
         added += 1
         print(f"  + {os.path.basename(path):<32} {n:>6,} leaves   "
@@ -748,6 +853,10 @@ def write_auctionator(state):
         db.hash[bucket["group"]] = t
     path = f"{OUT}/Auctionator_Price_Database.lua"
     luaser.dump({"AUCTIONATOR_PRICE_DATABASE": db}, path)
+    observations = state.get("auctionator_observations")
+    if observations:
+        with open(f"{OUT}/Auctionator.observations.json", "w", encoding="utf-8", newline="\n") as f:
+            json.dump(observations, f, indent=1, sort_keys=True, ensure_ascii=False)
     return path, f"{n:,} item prices across {len(db.hash)} modes"
 
 
@@ -823,7 +932,7 @@ def verify(state):
         checked += 1
         try:
             g = luaser.load(p)
-        except luaser.LuaError as e:
+        except (luaser.LuaError, UnicodeError, OSError) as e:
             print(f"  VERIFY FAILED {fn}: {e}")
             bad += 1
             continue
@@ -863,5 +972,13 @@ def verify(state):
 
 
 if __name__ == "__main__":
-    st = run_merge()
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--replay-baseline-state", help="Private prior state; fresh shadow replay only")
+    args = parser.parse_args()
+    baseline_sources = None
+    if args.replay_baseline_state:
+        with open(args.replay_baseline_state, encoding="utf-8") as f:
+            baseline_sources = json.load(f)["sources"]
+    st = run_merge(baseline_sources)
     sys.exit(0 if run_export(st) else 1)

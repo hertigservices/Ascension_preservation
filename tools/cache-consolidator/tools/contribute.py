@@ -49,29 +49,25 @@ WHY IT DOES NOT MERGE ANYTHING
     So this tool only ever describes what YOUR client saw. Merging happens once,
     centrally, where the count can be kept honest.
 
-WHY THE FILE IT MAKES IS SO SMALL
-
-    Almost everything in your cache is already in the archive. The bundle carries
-    a fingerprint (entry id + sha1) for every record you have -- that is what
-    gets counted for corroboration -- but the actual bytes only for records the
-    archive has never seen. Pass --index pointed at a copy of the published
-    cachedata/raw/ folder to get that saving; without it, everything is packed
-    and the bundle is much larger, which still works.
-
 WHAT COMES OUT
 
-    A .zip holding
-        manifest.json     what this is, which realm and mode, what was skipped
-                          and why, and the record fingerprints
-        new/<cache>.pack  only the records the archive did not already have
-        lua/<name>.lua    the allow-listed addon files, scrubbed
+    A compressed ZIP containing complete WDB observations. --index reports how
+    many records are new; it does not remove known records. Central intake reads
+    the actual WDB records rather than trusting fingerprint-only claims.
+
+        manifest.json                  modes, counts and skipped files
+        new/<locale>/<group>/*.wdb      complete observed WDB records
+        lua/capture-N/<addon>.lua       distinct structurally filtered captures
+
+    Lua filtering requires Node and the shared cache-upload policy module. If
+    either is unavailable, Lua stays on your computer; use the browser uploader.
     Open it. It is meant to be inspectable before you send it.
 """
 import os, re, sys, csv, gzip, json, glob, zipfile, hashlib, struct, argparse, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import wdblib, scrub, modes
+import wdblib, scrub, modes, config
 
 FORMAT = 1                      # bundle format version, so a reader can tell
 LOCALES = ("enUS", "enGB", "deDE", "frFR", "esES", "esMX", "ruRU", "koKR",
@@ -272,7 +268,7 @@ def plan_cache(path, group, locale, index_dir):
     out = {"file": name, "cache": stem, "group": group, "locale": locale,
            "policy": policy, "why": why, "bytes": len(b),
            "records": 0, "new": 0, "fingerprints": [], "pack": b"",
-           "note": ""}
+           "note": "", "header": b[:wdblib.HEADER_LEN]}
     if policy != scrub.PUBLISH:
         return out
     if not info.standard:
@@ -285,8 +281,9 @@ def plan_cache(path, group, locale, index_dir):
     for entry, size, payload in wdblib.iter_records(b):
         h = sha1(payload)
         fps.append((entry, h))
-        if known is None or h not in known:
-            packed += struct.pack("<II", entry, len(payload)) + payload
+        # Fingerprints alone are not currently consumed by central intake.
+        # Ship the complete observation; central record merging performs dedup.
+        packed += struct.pack("<II", entry, len(payload)) + payload
     out["records"] = len(fps)
     out["fingerprints"] = fps
     out["pack"] = bytes(packed)
@@ -295,6 +292,38 @@ def plan_cache(path, group, locale, index_dir):
     out["note"] = ("no index given, packing every record"
                    if known is None else f"{len(known):,} already archived")
     return out
+
+
+def sanitize_savedvariables(path):
+    """Run the same non-executing parser/policy used by browser and collector.
+    Missing Node/policy is an explicit refusal, never a regex-only fallback.
+    """
+    import subprocess, shutil
+    from pathlib import Path
+    candidates = [Path(__file__).resolve().parents[2]/"cache-upload/shared/policy.mjs",
+                  Path(config.WORK).parent/"upload-service/shared/policy.mjs"]
+    policy = next((p for p in candidates if p.is_file()), None)
+    node = shutil.which("node") or os.environ.get("ASCENSION_NODE")
+    if not policy or not node:
+        raise ValueError("Shared structural policy requires Node; use the browser uploader")
+    raw = Path(path).read_bytes()
+    if len(raw) > 8*1024*1024:
+        raise ValueError("Lua input exceeds supported bound")
+    source = raw.decode("utf-8", "strict")
+    script = """import {sanitizeLua, canonicalName, identifiersFromPath, bytes} from %s;
+import {readFileSync} from 'node:fs';
+const input=JSON.parse(readFileSync(0,'utf8'));
+const name=canonicalName(input.path);
+const result=sanitizeLua(name,bytes(input.source),identifiersFromPath(input.path));
+process.stdout.write(JSON.stringify({name,text:new TextDecoder().decode(result.data)}));
+""" % json.dumps(policy.as_uri())
+    result = subprocess.run([node,"--input-type=module","-e",script],
+        input=json.dumps({"source":source,"path":str(path)}), text=True,
+        encoding="utf-8", capture_output=True, timeout=60)
+    if result.returncode:
+        raise ValueError("Structural filtering refused this file")
+    out=json.loads(result.stdout)
+    return out["text"],out["name"]
 
 
 def plan(root, index_dir):
@@ -313,21 +342,18 @@ def plan(root, index_dir):
             skipped.append((c["file"], c["why"]))
     lua_seen = set()
     for path, name, why, allowed in find_lua(root):
-        if not allowed:
-            skipped.append((name, why))
+        try:
+            clean, canonical = sanitize_savedvariables(path)
+        except (ValueError, OSError, __import__("subprocess").TimeoutExpired) as exc:
+            skipped.append((name, "Structural filtering unavailable or requires private review; original retained"))
             continue
-        # The same addon file exists per-account and per-character. They are the
-        # same addon's data; keep the first and count the rest as duplicates
-        # rather than sending several near-copies of one file.
-        if name.lower() in lua_seen:
+        digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
+        if digest in lua_seen:
             continue
-        lua_seen.add(name.lower())
-        with open(path, "rb") as f:
-            raw = f.read()
-        text = raw.decode("utf-8", "replace")
-        clean, findings = scrub.scrub_text(text)
-        luas.append({"file": name, "why": why, "bytes": len(raw),
-                     "text": clean, "findings": findings})
+        lua_seen.add(digest)
+        luas.append({"file": f"capture-{len(luas)+1}/{canonical}", "why": why,
+                     "bytes": len(clean.encode("utf-8")), "text": clean,
+                     "findings": {"structurally_filtered": 1}})
     return caches, luas, skipped, seen_group
 
 
@@ -401,9 +427,8 @@ def write_bundle(out, root, caches, luas, skipped, groups):
         "caches": [{"cache": c["cache"], "group": c["group"],
                     "locale": c["locale"], "records": c["records"],
                     "new": c["new"],
-                    # Every record's fingerprint travels, not just the new ones.
-                    # This is what lets the archive count how many independent
-                    # people saw the same bytes without shipping the bytes again.
+                    # Descriptive manifest only; central intake consumes the
+                    # complete WDB records, not unauthenticated fingerprint claims.
                     "fingerprints": [[e, h] for e, h in c["fingerprints"]]}
                    for c in caches],
         "lua": [{"file": l["file"], "bytes": l["bytes"],
@@ -423,7 +448,7 @@ def write_bundle(out, root, caches, luas, skipped, groups):
             json.dumps(manifest, indent=1, sort_keys=True).encode("utf-8"))
         for c in caches:
             if c["pack"]:
-                put(f"new/{c['group']}/{c['cache']}.pack", c["pack"])
+                put(f"new/{c['locale']}/{c['group']}/{c['cache']}.wdb", c["header"] + c["pack"] + bytes(8))
         for l in luas:
             put(f"lua/{l['file']}", l["text"].encode("utf-8"))
     return out, os.path.getsize(out)
@@ -434,7 +459,7 @@ def main():
         description="Package your Ascension cache data for contribution.")
     ap.add_argument("--install", help="path to your Ascension folder")
     ap.add_argument("--index", help="a copy of the published cachedata/raw folder, "
-                                    "so only unseen records are packed")
+                                    "to report unseen records (complete observations are still packed)")
     ap.add_argument("--out", help="bundle to write (default: alongside this tool)")
     ap.add_argument("--write", action="store_true",
                     help="actually write the bundle; without it this only reports")

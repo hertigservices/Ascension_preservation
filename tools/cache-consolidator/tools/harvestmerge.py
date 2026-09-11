@@ -23,7 +23,7 @@ WHY THIS IS A SEPARATE MODULE
 THE BRANCHES, AND WHAT EACH ONE GETS
 
     vendors           SNAPSHOT  per (realm, npc), newest capture wins
-    gossips           SNAPSHOT  per (realm, npc), with $n restored
+    gossips           SNAPSHOT  per (realm, npc), ambiguous records held privately
     advancement       PER REALM the Character Advancement node database
     wildcard          PER REALM roll statics, events and the roll spell pool
     byRealm           PER REALM the two above, plus API surfaces and skillCards
@@ -85,23 +85,14 @@ WHY VENDORS AND GOSSIP ARE SNAPSHOTS, NOT ACCUMULATORS
     tables, so they deep-union and a scalar disagreement is a conflict worth
     printing rather than a value to average.
 
-RESTORING $n RATHER THAN REDACTING IT
+AMBIGUOUS IDENTITY TEXT
 
-    Gossip text arrives with the *server's* $n already substituted by the
-    client, so a line the server wrote as "Greetings, $n." is on disk as
-    "Greetings, Onichan."  Blanking it would lose the sentence; leaving it
-    would publish a character name.
-
-    The file names its own characters, in the identity branch, which is the
-    one branch we refuse to publish.  So identity is read first and used as the
-    substitution key -- every character name this submitter played is put back
-    to $n -- and then dropped.  After that a second pass re-scans every string
-    we are about to publish for any of those names and refuses the whole file
-    if one survived, because a silent miss here is a leak.
-
-    Substitution is word-boundary only.  A character named after a common word
-    would otherwise rewrite the game's own text, and mangling server prose to
-    protect a name that is not really there is its own kind of data loss.
+    A name in gossip may be substituted player text or an ordinary game word.
+    Without an independent template, neither rewriting it nor publishing it is
+    justified. Identity metadata supplies comparison tokens but is never exported.
+    Each ambiguous gossip observation is retained privately with an opaque digest;
+    clean observations in the same file can still merge. Other branch ambiguity
+    stops that file's trial merge. Original raw input remains available for review.
 """
 import json
 import os
@@ -266,19 +257,13 @@ def own_names(db):
 
 
 def restore_tokens(text, names):
-    """Put $n back where the client substituted a character name.
-
-    Returns (text, n_substitutions). Word-boundary only, longest name first so
-    a name that contains another is not half-replaced.
-    """
+    """Compatibility hook: retain original text and report zero substitutions."""
     if not text or not names:
         return text, 0
-    n = 0
-    for nm in sorted(names, key=len, reverse=True):
-        pat = re.compile(r"\b%s\b" % re.escape(nm))
-        text, k = pat.subn("$n", text)
-        n += k
-    return text, n
+    # Without an independent original template a matching word might be a game
+    # term (e.g. Storm). Never silently replace it. assert_clean holds ambiguity.
+    return text, 0
+
 
 
 def assert_clean(obj, names, where):
@@ -290,14 +275,17 @@ def assert_clean(obj, names, where):
     def walk(v, path):
         if isinstance(v, dict):
             for k, x in v.items():
-                if pat.search(str(k)):
-                    raise LeakError("%s: key %r still names a character" % (path, k))
+                enum_label = path.lower().startswith("enums") and isinstance(x, (int, float)) and str(k).lower() in ("player", "account", "creature")
+                if not enum_label and pat.search(str(k)):
+                    raise LeakError("ambiguous identity key in game reference data")
                 walk(x, path + "." + str(k))
         elif isinstance(v, list):
             for i, x in enumerate(v):
                 walk(x, "%s[%d]" % (path, i))
         elif isinstance(v, str) and pat.search(v):
-            raise LeakError("%s: %r still names a character" % (path, v[:80]))
+            game_field = re.fullmatch(r"spells\.\d+\.(name|schoolName)", path, re.I)
+            if not game_field or any(v.casefold() == n.casefold() for n in names):
+                raise LeakError("ambiguous identity in game reference text")
 
     walk(obj, where)
 
@@ -436,7 +424,19 @@ def merge_wildcardharvest(state, g, sid, meta, conflicts):
                     if isinstance(txt, str):
                         py["text"], k = restore_tokens(txt, names)
                         store["_names_seen"] += k
-                assert_clean(py, names, "%s.%s.%s" % (branch, realm, npc))
+                try:
+                    assert_clean(py, names, "%s.%s.%s" % (branch, realm, npc))
+                except LeakError:
+                    if branch != "gossips":
+                        raise
+                    # Hold this whole observation, never fabricate replacement text.
+                    # The private source hash plus record digest identifies it for replay.
+                    digest = __import__("hashlib").sha256(json.dumps(py, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+                    hold = {"branch": "gossips", "record_sha256": digest, "reason": "ambiguous_identity"}
+                    held = state.setdefault("retained_records", {}).setdefault(sid, [])
+                    if hold not in held:
+                        held.append(hold)
+                    continue
                 key = str(npc)
                 prev = rb.get(key)
                 # 'at' is the client's own capture clock; the file mtime is not,
@@ -549,10 +549,11 @@ VENDOR_COLS = ["realm", "mode", "npc", "npc_key", "npc_name", "slot",
                "money_cost", "quantity", "available", "usable", "extended_cost",
                "honor_cost", "arena_cost", "cost_item_1", "cost_count_1",
                "cost_item_2", "cost_count_2", "cost_item_3", "cost_count_3",
+               "cost_item_4", "cost_count_4", "cost_item_5", "cost_count_5",
                "captured"]
 
 GOSSIP_COLS = ["realm", "mode", "npc", "npc_key", "text", "n_options",
-               "options", "n_quests", "captured"]
+               "options", "n_quests", "quests", "captured"]
 
 
 def _tsv(path, cols, rows):
@@ -611,7 +612,7 @@ def vendor_rows(store):
                     if not cid or not cval:
                         continue
                     k += 1
-                    if k > 3:
+                    if k > 5:
                         break
                     row["cost_item_%d" % k] = cid
                     row["cost_count_%d" % k] = cval
@@ -644,6 +645,7 @@ def gossip_rows(store):
                 "options": json.dumps(real, ensure_ascii=False,
                                       sort_keys=True) if real else "",
                 "n_quests": nq,
+                "quests": json.dumps(quests, ensure_ascii=False, sort_keys=True),
                 "captured": rec.get("at", ""),
             })
     return out

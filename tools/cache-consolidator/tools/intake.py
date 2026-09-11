@@ -329,15 +329,18 @@ def scan():
                     # make it flip between runs.
                     if ledger[h].get("group") in AMBIGUOUS and grp not in AMBIGUOUS:
                         ledger[h]["group"] = grp
-                    continue
+                    if ledger[h].get("parser_revision") == "2026-09-11.2":
+                        continue
+                previous = ledger.get(h, {})
                 info = wdblib.inspect(p.replace("\\", "/"))
                 ledger[h] = {
                     "sha256": h, "filename": fn, "size": os.path.getsize(p),
                     "cache": info.cache, "label": info.label, "build": info.build,
                     "locale": info.locale, "records": info.records,
                     "standard": info.standard, "clean_end": info.clean_end,
-                    "note": info.note or "", "group": grp, "sources": [lbl],
-                    "first_seen": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "note": info.note or "", "group": grp, "sources": previous.get("sources", [lbl]),
+                    "parser_revision": "2026-09-11.2",
+                    "first_seen": previous.get("first_seen", time.strftime("%Y-%m-%d %H:%M:%S")),
                 }
     with open(LEDGER, "w", encoding="utf-8") as f:
         json.dump(ledger, f, indent=1)

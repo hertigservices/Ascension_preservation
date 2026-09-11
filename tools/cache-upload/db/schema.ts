@@ -8,6 +8,8 @@ export const submissions = sqliteTable(
     ipHash: text("ip_hash").notNull(),
     manifest: text("manifest").notNull(),
     bytes: integer("bytes").notNull(),
+    storageVersion: integer("storage_version").notNull().default(0),
+    objectsDeleted: integer("objects_deleted").notNull().default(0),
     created: integer("created").notNull(),
     expires: integer("expires").notNull(),
     status: text("status").notNull().default("uploading"),

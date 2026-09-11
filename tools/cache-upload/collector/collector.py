@@ -437,6 +437,11 @@ def cleanup_local(state):
         if not job.is_dir() or job.is_symlink() or not re.fullmatch('[a-f0-9-]{36}',job.name): continue
         try: metadata=json.loads((job/'retention.json').read_text())
         except (OSError,ValueError): continue
+        try:
+            journal=json.loads((job/'result.json').read_text(encoding='utf-8'))
+            result=journal.get('result',journal)
+        except (OSError,ValueError): continue
+        if result.get('status') != 'published' or (job/'pending-ack.json').exists(): continue
         if metadata['expires'] >= time.time(): continue
         for name in ['download','review']:
             path=(job/name).resolve()

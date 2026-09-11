@@ -21,7 +21,7 @@ OUT_REP = config.WORK + "/decoded/creature_report.md"
 
 COLS = ["entry","name","subname","IconName","type_flags","type","family","rank",
         "KillCredit1","KillCredit2","modelid1","modelid2","modelid3","modelid4",
-        "HealthModifier","ManaModifier","RacialLeader","movementId"]
+        "HealthModifier","ManaModifier","RacialLeader","movementId"] + ["questItem%d" % i for i in range(1, 7)]
 
 def sanitize(s):
     return s.replace("\t"," ").replace("\r"," ").replace("\n"," ").replace("\\","/")
@@ -66,7 +66,7 @@ def decode_creature(entry, payload):
     d["HealthModifier"]=fmtf(c.f32())
     d["ManaModifier"]=fmtf(c.f32())
     d["RacialLeader"]=c.u8()
-    for _ in range(6): c.u32()                         # questItems[6]
+    for i in range(1, 7): d["questItem%d" % i] = c.u32()
     d["movementId"]=c.u32()
     return d, c.o
 

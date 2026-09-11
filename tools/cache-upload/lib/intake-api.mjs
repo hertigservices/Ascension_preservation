@@ -97,7 +97,7 @@ async function rowFor(r, env, id, kind) {
     (await sha256(new TextEncoder().encode(bearer(r)))) !== row[kind + "_hash"]
   )
     fail(404, "Receipt not found");
-  if (row.expires < now()) fail(410, "This submission has expired");
+  if (row.status === "uploading" && row.expires < now()) fail(410, "This submission has expired");
   return row;
 }
 export async function handle(r, env, path) {
@@ -110,6 +110,7 @@ export async function handle(r, env, path) {
         fileLimit: FILE_LIMIT,
         totalLimit: TOTAL_LIMIT,
         retentionDays: 7,
+        retention: "Abandoned uploads expire after seven days; unfinished and review-held submissions remain until resolved.",
       });
     if (!env.DB || !env.BUCKET)
       fail(
@@ -183,11 +184,11 @@ export async function handle(r, env, path) {
       // One conditional INSERT serializes admission and capacity reservation in D1.
       const result = await query(
         env,
-        `INSERT INTO submissions (id,upload_hash,receipt_hash,ip_hash,manifest,bytes,created,expires,status,lease_until,attempts)
-   SELECT ?,?,?,?,?,?,?,?,'uploading',0,0 WHERE
+        `INSERT INTO submissions (id,upload_hash,receipt_hash,ip_hash,manifest,bytes,created,expires,status,lease_until,attempts,storage_version)
+   SELECT ?,?,?,?,?,?,?,?,'uploading',0,0,1 WHERE
    (SELECT count(*) FROM submissions WHERE ip_hash=? AND created>?)<5 AND
    (SELECT count(*) FROM submissions WHERE created>?)<100 AND
-   (SELECT coalesce(sum(bytes),0) FROM submissions) + ? <= 2147483648`,
+   (SELECT coalesce(sum(bytes),0) FROM submissions WHERE objects_deleted=0) + ? <= 2147483648`,
         id,
         await sha256(new TextEncoder().encode(uploadToken)),
         await sha256(new TextEncoder().encode(receiptToken)),
@@ -252,7 +253,7 @@ export async function handle(r, env, path) {
         }
         if ((await sha256(clean.data)) !== f.sha256)
           fail(422, "Privacy filtering must be applied before upload");
-        await env.BUCKET.put(`${id}/${f.index}`, data, {
+        await env.BUCKET.put(uploadKey(row, f), data, {
           httpMetadata: { contentType: "application/octet-stream" },
           customMetadata: { sha256: f.sha256 },
         });
@@ -260,22 +261,16 @@ export async function handle(r, env, path) {
       }
       if (action === "complete" && r.method === "POST") {
         origin(r, env);
-        if (row.status !== "uploading") return json({ status: row.status });
-        for (const f of manifest.files) {
-          const object = await env.BUCKET.head(`${id}/${f.index}`);
-          if (
-            !object ||
-            object.size !== f.size ||
-            object.customMetadata?.sha256 !== f.sha256
-          )
-            fail(409, "Some files have not finished uploading");
+        if (!["uploading", "finalizing"].includes(row.status)) return json({ status: row.status });
+        if (row.status === "uploading") {
+          for (const file of manifest.files) {
+            const object = await env.BUCKET.head(uploadKey(row, file));
+            if (!validObject(object, file)) fail(409, "Some files have not finished uploading");
+          }
+          const claim = await query(env, "UPDATE submissions SET status='finalizing',lease_until=0 WHERE id=? AND status='uploading'", id).run();
+          if (claim.meta.changes !== 1) fail(409, "Upload changed before completion; retry");
         }
-        await query(
-          env,
-          "UPDATE submissions SET status='received' WHERE id=? AND status='uploading'",
-          id,
-        ).run();
-        return json({ status: "received" });
+        return json({status: await finishUpload(env, row)});
       }
     }
     if (path.startsWith("collector/")) {
@@ -289,10 +284,9 @@ export async function handle(r, env, path) {
           t = now();
         const row = await query(
           env,
-          `UPDATE submissions SET status='processing',lease=?,lease_until=?,attempts=attempts+1 WHERE id=(SELECT id FROM submissions WHERE (status='received' OR (status='processing' AND lease_until<?)) AND lease_until<? AND expires>? AND attempts<5 ORDER BY created LIMIT 1) RETURNING id,manifest,lease,expires`,
+          `UPDATE submissions SET status='processing',lease=?,lease_until=?,attempts=attempts+1 WHERE id=(SELECT id FROM submissions WHERE (status='received' OR (status='processing' AND lease_until<?)) AND lease_until<? AND attempts<5 ORDER BY created LIMIT 1) RETURNING id,manifest,lease,expires`,
           lease,
           t + 7200,
-          t,
           t,
           t,
         ).first();
@@ -341,7 +335,7 @@ export async function handle(r, env, path) {
         if (cm[2].startsWith("files/") && r.method === "GET") {
           const f = JSON.parse(row.manifest).files[Number(cm[3])];
           if (!f) fail(404, "File not found");
-          const obj = await env.BUCKET.get(`${row.id}/${f.index}`);
+          const obj = await env.BUCKET.get(acceptedKey(row, f));
           if (!obj) fail(404, "File not found");
           return new Response(obj.body, {
             headers: {
@@ -394,23 +388,7 @@ export async function handle(r, env, path) {
         }
       }
       if (path === "collector/cleanup" && r.method === "POST") {
-        // Keep the DB reservation until every object is deleted. A retry is safe.
-        const rows = await query(
-          env,
-          "SELECT id,manifest FROM submissions WHERE expires < ? LIMIT 20",
-          now(),
-        ).all();
-        for (const row of rows.results) {
-          for (const f of JSON.parse(row.manifest).files)
-            await env.BUCKET.delete(`${row.id}/${f.index}`);
-          await query(env, "DELETE FROM submissions WHERE id=?", row.id).run();
-        }
-        await query(
-          env,
-          "UPDATE submissions SET status='needs_review',message='Processing requires maintainer attention.' WHERE attempts>=5 AND (status='received' OR (status='processing' AND lease_until<?))",
-          now(),
-        ).run();
-        return json({ removed: rows.results.length });
+        return json(await cleanup(env));
       }
     }
     fail(404, "Not found");
@@ -427,5 +405,69 @@ export async function handle(r, env, path) {
       },
       503,
     );
+  }
+}
+
+// Safe both from the collector and an independent scheduled Worker. Unfinished
+// accepted submissions and intentional review holds do not expire with age.
+function uploadKey(row, file) {
+  return `${row.storage_version === 1 ? "staging/" : ""}${row.id}/${file.index}`;
+}
+function acceptedKey(row, file) {
+  return `${row.storage_version === 1 ? "accepted/" : ""}${row.id}/${file.index}`;
+}
+export async function cleanup(env) {
+  const unfinished = await query(env,"SELECT * FROM submissions WHERE status='finalizing' AND lease_until<? ORDER BY created LIMIT 5",now()).all();
+  for (const row of unfinished.results) {
+    try { await finishUpload(env,row); }
+    catch (error) {
+      if (error instanceof HttpError && row.expires < now())
+        await query(env,"UPDATE submissions SET status='needs_review',message='Interrupted upload retained for recovery.' WHERE id=? AND status='finalizing' AND lease_until=0",row.id).run();
+    }
+  }
+  // Transition first: completion and cleanup compete on this one atomic state
+  // change. Legacy uploading rows lack isolated staging and stay retained.
+  await query(env, "UPDATE submissions SET status='deleting' WHERE status='uploading' AND storage_version=1 AND expires<?", now()).run();
+  const rows = await query(env,
+    "SELECT id,manifest,status,storage_version FROM submissions WHERE objects_deleted=0 AND status IN ('published','deleting') ORDER BY created LIMIT 20").all();
+  let removed = 0;
+  for (const row of rows.results) {
+    for (const file of JSON.parse(row.manifest).files) {
+      await env.BUCKET.delete(uploadKey(row, file));
+      if (row.status === "published") await env.BUCKET.delete(acceptedKey(row, file));
+    }
+    if (row.status === "deleting") {
+      await query(env, "DELETE FROM submissions WHERE id=? AND status='deleting'", row.id).run();
+      removed++;
+    } else {
+      await query(env, "UPDATE submissions SET objects_deleted=1 WHERE id=? AND status='published'", row.id).run();
+    }
+  }
+  await query(env, "UPDATE submissions SET status='needs_review',message='Processing requires maintainer attention.' WHERE attempts>=5 AND (status='received' OR (status='processing' AND lease_until<?))", now()).run();
+  return {removed, released: rows.results.length};
+}
+
+function validObject(object, file) {
+  return object && object.size === file.size && object.customMetadata?.sha256 === file.sha256;
+}
+async function finishUpload(env, row) {
+  const owner = random();
+  const owned = await query(env, "UPDATE submissions SET lease=?,lease_until=? WHERE id=? AND status='finalizing' AND lease_until<?", owner, now()+600, row.id, now()+1).run();
+  if (owned.meta.changes !== 1) return "finalizing";
+  try {
+    for (const file of JSON.parse(row.manifest).files) {
+      // Existing accepted parts survive a crash even after staging expires.
+      if (validObject(await env.BUCKET.head(acceptedKey(row, file)), file)) continue;
+      const object = await env.BUCKET.get(uploadKey(row, file));
+      if (!validObject(object, file)) fail(409, "An unfinished upload needs recovery");
+      await env.BUCKET.put(acceptedKey(row, file), object.body, {
+        customMetadata:{sha256:file.sha256}, httpMetadata:{contentType:"application/octet-stream"},
+      });
+      await query(env,"UPDATE submissions SET lease_until=? WHERE id=? AND status='finalizing' AND lease=?",now()+600,row.id,owner).run();
+    }
+    const done = await query(env,"UPDATE submissions SET status='received',lease=NULL,lease_until=0 WHERE id=? AND status='finalizing' AND lease=?",row.id,owner).run();
+    return done.meta.changes === 1 ? "received" : "finalizing";
+  } finally {
+    await query(env,"UPDATE submissions SET lease_until=0,lease=NULL WHERE id=? AND status='finalizing' AND lease=?",row.id,owner).run();
   }
 }

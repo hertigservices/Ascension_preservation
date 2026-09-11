@@ -368,11 +368,12 @@ def check_json(path, rel, expect, fails, notes, counts):
 
 def compare_counts(expect, counts, fails, grew):
     base = expect["counts"]
-    for k, now in sorted(counts.items()):
+    for k in sorted(set(counts) | set(base)):
+        now = counts.get(k, 0)
         was = base.get(k)
         if was is None:
             continue
-        if now < was - max(1, int(was * SHRINK_TOLERANCE)):
+        if k not in counts or now < was - max(1, int(was * SHRINK_TOLERANCE)):
             fails.append(("SHRANK", k, "%d -> %d (%+d)" % (was, now, now - was)))
         elif now > was:
             grew.append((k, was, now))

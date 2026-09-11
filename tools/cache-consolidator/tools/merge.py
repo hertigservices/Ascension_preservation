@@ -24,19 +24,21 @@ Layout under merged/:
 Re-run after dropping new caches in.  Existing records are never rewritten; only new
 ones append, so the store is safe to interrupt.
 """
-import os, sys, json, struct, hashlib, collections, time
+import os, sys, json, struct, hashlib, collections, time, re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import wdblib, modes, config, intake, capture_dates
+import wdblib, modes, config, intake, capture_dates, merge_checkpoint
+
+PARSER_REVISION = "2026-09-11.2"
 
 STORE   = config.STORE
 SOURCES = config.SOURCES
 SCAN_ROOTS = config.SCAN_ROOTS + [config.EXTRACT]
 
 SRC_COLS = ["id", "sha256", "cache", "filename", "group", "realm", "mode", "slug",
-            "mode_source", "records", "captured", "path"]
+            "mode_source", "records", "captured", "path", "locale", "build", "header_hex", "parser_revision"]
 IDX_COLS = ["entry", "sha1", "size", "offset", "modes", "srcs",
-            "first_captured", "last_captured"]
+            "first_captured", "last_captured", "locales"]
 
 # fingerprint inference thresholds for submissions zipped from above the realm folder
 INFER_MIN_SHARED = 500
@@ -46,6 +48,10 @@ INFER_MIN_AGREE  = 0.90
 # modes score an exact 0.0000% margin, and the cache that can never drops below
 # 0.04%, so anything in between separates the two cleanly.
 INFER_MIN_MARGIN = 0.0001
+
+
+def clean_locale(value):
+    return value if isinstance(value, str) and re.fullmatch(r"[a-z]{2}[A-Z]{2}", value) else "unknown"
 
 
 def read_tsv(path, cols):
@@ -58,6 +64,8 @@ def read_tsv(path, cols):
             if not line.strip():
                 continue
             vals = line.rstrip("\n").split("\t")
+            if len(vals) != len(head):
+                raise ValueError(f"Malformed TSV row in {path}; expected {len(head)} fields, got {len(vals)}")
             out.append(dict(zip(head, vals)))
     return out
 
@@ -68,7 +76,10 @@ def write_tsv(path, cols, rows):
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("\t".join(cols) + "\n")
         for r in rows:
-            f.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
+            values = [str(r.get(c, "")) for c in cols]
+            if any(any(ch in value for ch in "\t\r\n") for value in values):
+                raise ValueError("Unsafe TSV field; original data retained")
+            f.write("\t".join(values) + "\n")
     os.replace(tmp, path)
 
 
@@ -168,6 +179,7 @@ def infer_mode(cache, fingerprint, profiles):
 
 def load_store():
     """Return (sources_by_key, index_by_cache, next_id)."""
+    merge_checkpoint.recover(STORE)
     srcs = {}
     for r in read_tsv(SOURCES, SRC_COLS):
         srcs[(r["sha256"], r["group"])] = r
@@ -196,8 +208,25 @@ def main():
     os.makedirs(STORE, exist_ok=True)
     srcs, index, next_id = load_store()
     known_keys = set(srcs)
+    try:
+        with open(config.LEDGER, encoding="utf-8") as f:
+            ledger = json.load(f)
+    except FileNotFoundError:
+        ledger = {}
+    for row in srcs.values():
+        record = ledger.get(row["sha256"], {})
+        row["locale"] = clean_locale(row.get("locale") or record.get("locale"))
+        row["build"] = row.get("build") or record.get("build") or ""
+        cls = modes.classify(row["group"])
+        if cls["source"] in ("override", "modes.json"):
+            for name in ("mode", "realm", "slug"):
+                row[name] = cls[name]
+            row["mode_source"] = cls["source"]
     disk = scan_disk()
-    new_keys = [k for k in disk if k not in known_keys]
+    new_keys = [k for k in disk if k not in known_keys or
+                srcs[k].get("parser_revision") != PARSER_REVISION]
+    for k in known_keys & disk.keys():
+        srcs[k]["path"] = disk[k]
     print(f"sources on disk: {len(disk)}  already merged: {len(known_keys)}  "
           f"new: {len(new_keys)}")
 
@@ -210,16 +239,19 @@ def main():
         p = disk[(h, g)]
         info = wdblib.inspect(p)
         cls = modes.classify(g)
-        captured = capture_dates.source_date(p)
+        prior = srcs.get((h, g))
+        captured = prior["captured"] if prior is not None else capture_dates.source_date(p)
         row = {"id": "", "sha256": h, "cache": info.cache,
                "filename": os.path.basename(p), "group": g,
                "realm": cls["realm"], "mode": cls["mode"], "slug": cls["slug"],
                "mode_source": cls["source"], "records": info.records,
-               "captured": captured, "path": p}
+               "captured": captured, "path": p, "locale": clean_locale(info.locale),
+               "build": info.build, "header_hex": "", "parser_revision": PARSER_REVISION}
         recs = []
         if info.standard and info.records:
             with open(p, "rb") as f:
                 b = f.read()
+            row["header_hex"] = b[:wdblib.HEADER_LEN].hex()
             fp = {}
             for entry, size, payload in wdblib.iter_records(b):
                 s1 = hashlib.sha1(payload).hexdigest()
@@ -268,7 +300,14 @@ def main():
     added = collections.Counter(); dup = collections.Counter()
     packs = {}
     for key, row, recs in pending:
-        row["id"] = str(next_id); next_id += 1
+        if key in srcs:
+            row["id"] = srcs[key]["id"]
+            if all(row[field] == srcs[key][field] for field in ("slug", "mode", "realm")):
+                row["mode_source"] = srcs[key]["mode_source"]
+            if int(row["records"]) < int(srcs[key]["records"]):
+                raise RuntimeError("Reprocessing reduced source records; original store retained")
+        else:
+            row["id"] = str(next_id); next_id += 1
         srcs[key] = row
         if not recs:
             continue
@@ -296,6 +335,8 @@ def main():
             r["first_captured"] = min(r["first_captured"], row["captured"])
             r["last_captured"] = max(r["last_captured"], row["captured"])
     for pk in packs.values():
+        pk.flush()
+        os.fsync(pk.fileno())
         pk.close()
 
     repaired = capture_dates.repair_dates(srcs, index)
@@ -303,16 +344,22 @@ def main():
         print(f"Corrected upload-time capture dates on {repaired} browser sources")
 
     # ---- persist -----------------------------------------------------------------
-    write_tsv(SOURCES, SRC_COLS,
-              sorted(srcs.values(), key=lambda r: int(r["id"])))
+    sources_by_id = {s["id"]: s for s in srcs.values()}
+    tables = []
     for cache, idx in index.items():
         rows = [{"entry": e, "sha1": s, "size": r["size"], "offset": r["offset"],
                  "modes": ",".join(sorted(r["modes"])),
                  "srcs": ",".join(sorted(r["srcs"], key=int)),
                  "first_captured": r["first_captured"],
-                 "last_captured": r["last_captured"]}
+                 "last_captured": r["last_captured"],
+                 "locales": ",".join(sorted({sources_by_id[sid].get("locale") or "unknown"
+                                           for sid in r["srcs"]}))}
                 for (e, s), r in sorted(idx.items())]
-        write_tsv(f"{STORE}/{cache}/index.tsv", IDX_COLS, rows)
+        for row in rows:
+            row["modes"] = ",".join(sorted({sources_by_id[sid]["slug"] for sid in row["srcs"].split(",")}))
+        tables.append((f"{STORE}/{cache}/index.tsv", IDX_COLS, rows))
+    tables.append((SOURCES, SRC_COLS, sorted(srcs.values(), key=lambda r: int(r["id"]))))
+    merge_checkpoint.commit(STORE, tables, write_tsv)
 
     print(f"\n{'cache':<18}{'records':>10}{'entries':>10}{'+new':>8}{'dup':>10}")
     for cache in sorted(index):
