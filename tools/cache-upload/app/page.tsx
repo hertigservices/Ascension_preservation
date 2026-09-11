@@ -961,7 +961,7 @@ export default function Home() {
               sent as metadata.
             </p>
           </details>
-          <a href="https://github.com/hertigservices/ascension-data">
+          <a href="https://ascension-db.ascension-archive.workers.dev/">
             Explore the preserved data ↗
           </a>
           <nav className="community" aria-labelledby="community-title">

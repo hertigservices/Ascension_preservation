@@ -55,3 +55,20 @@ For the intake/processing mechanism, see `../cache-consolidator/docs/PROCESSING-
 ## Verification notes
 
 The initial browser checks cover name and exact-ID search, collection browsing, record details/download links, coverage filtering, recovered pages, mobile overflow, and injected HTML remaining inert. The optional `document.modelContext` search adapter was exercised through a browser test harness (valid result and intentional invalid-input failure); native WebMCP availability depends on the browser and was not independently verified. Python regression tests cover provenance, variants, malformed TSV rejection, explicit synthetic row references and large string IDs. Full-data validation is a separate publication gate.
+
+
+## World Atlas and sortable indexes
+
+The World Atlas includes every published map inventory entry and captured WorldMapArea, enriched with exact-ID Exiles map/area relationships. Custom CoA/Ascension worlds remain navigable even without coordinate observations or artwork. Conflicting names remain attributed aliases; a map ID, WorldMapArea ID and external artwork area ID are distinct namespaces.
+
+Atlas layers retain example creature/object sightings, source-attributed Exiles NPC claims with explicit vendor/quest roles, and LootCollector worldforged/mystic/other loot pins. Vendor and quest filters use same-record headings and stock tables, or explicit catalogue Questgiver types; overlapping roles share one marker. Loot pins mark the player when loot opened, not a confirmed drop source or rate. Catalogue entries are incomplete example sightings. Game modes are never inferred. Source records, coordinate values and map links remain inspectable.
+
+Normalized loot positions are converted to percentages explicitly. Valid zone percentages use reviewed coordinate spaces. Ambiguous instance coordinates and out-of-range raw values use separate schematic views; raw values remain intact and plotted extents are derived per area. Nonfinite/missing coordinates are reported as unmapped. Conflicting captured bounds stop the build. No instance floor is guessed. Internal names such as Aszhara are not silently treated as Azshara.
+
+A small explicit crosswalk permits reference outdoor maps hosted by Wowhead. These images remain external, have no role in record identity, and degrade to a working coordinate grid on failure. No client artwork, terrain binaries or extracted assets are committed or deployed by this feature. Custom zones without an established image association use coordinate views and preserved map metadata.
+
+The atlas supports world/zone search, source/mode/origin/layer filters, marker clustering, mouse/touch/keyboard navigation, observation lists, source-record links and filtered JSON export. Atlas build artifacts are content-addressed per map space, with a reverse record-to-zone index. Publication validation checks coordinates, raw projections, all inventory map identities, facets, counts, hashes and every record link.
+
+Search columns now filter and sort the entire candidate set before pagination: name, exact ID, collection, source and game mode. Integer IDs retain full precision. URL parameters preserve filters, sort direction and page. Search uses bounded worker caches and streams candidates with cancellation and progress; broad initial sorts must read all candidate parts. Nearby pages reuse the ordered result window. Sources & coverage has full pagination, column sorting, source/status/text filters and numeric record-count ranges.
+
+Run the regression checks with `python -m unittest test_catalog test_atlas test_atlas_metadata -v` and `node --test test_search_worker.cjs test_coverage_controls.cjs test_atlas_roles.cjs`. The existing workflow runs these checks plus full catalog/atlas validation before publishing. Parser cache revisions are explicit, so atlas/layout changes do not invalidate unaffected records; bump the relevant parser revision when changing parsing or record identity.

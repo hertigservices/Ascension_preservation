@@ -1,3 +1,6 @@
+import {renderCoverage} from "./coverage-controls.js";
+import {searchColumnState, searchTable, bindSearchColumns} from './search-controls.js';
+import {showAtlas, atlasRecordLinks, closeAtlas} from './atlas.js';
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
     String(s ?? "").replace(
@@ -94,9 +97,10 @@ function startSearch() {
     notice("Enter at least two letters, or an exact numeric ID.", true);
     return;
   }
-  const p = new URLSearchParams();
+  const p = location.hash.startsWith("#search?") ? params() : new URLSearchParams();
+  p.delete("page");
   for (const [k, v] of Object.entries({ q, kind, source, mode }))
-    if (v) p.set(k, v);
+    if (v) p.set(k, v); else p.delete(k);
   const next = "#search?" + p;
   if (location.hash === next) route();
   else location.hash = next;
@@ -107,7 +111,7 @@ function runSearch(p) {
   $("#source").value = p.get("source") || "";
   $("#mode").value = p.get("mode") || "";
   page = Number(p.get("page") || 0);
-  if (!Number.isSafeInteger(page) || page < 0) page = 0;
+  if (!Number.isSafeInteger(page) || page < 0 || page > Math.floor(Number.MAX_SAFE_INTEGER / 50)) page = 0;
   notice("Searching the preserved collection…");
   const id = ++request;
   worker.postMessage({
@@ -119,6 +123,7 @@ function runSearch(p) {
     source: $("#source").value,
     mode: $("#mode").value,
     page,
+    ...searchColumnState(p),
   });
 }
 worker.onmessage = ({ data: d }) => {
@@ -133,7 +138,8 @@ worker.onmessage = ({ data: d }) => {
   }
   notice("");
   $("#content").innerHTML =
-    `<div class="result-head"><h2>Search results</h2><p class="muted">${num(d.total)} source records · page ${page + 1} of ${Math.max(1, Math.ceil(d.total / 50))}</p></div><p class="muted">A shared ID may have several captures or sources. Open a record to inspect its exact fields.</p>${d.rows.length ? table(d.rows) : '<div class="banner">No matching records. Try fewer words, an exact ID, or remove a source or mode filter.</div>'}<div class="pagination"><button id="prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="next" ${(page + 1) * 50 >= d.total ? "disabled" : ""}>Next</button></div>`;
+    `<div class="result-head"><h2>Search results</h2><p class="muted">${num(d.total)} source records · page ${page + 1} of ${Math.max(1, Math.ceil(d.total / 50))}</p></div><p class="muted">A shared ID may have several captures or sources. Open a record to inspect its exact fields.</p>${searchTable(d.rows, params(), manifest)}<div class="pagination"><button id="prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="next" ${(page + 1) * 50 >= d.total ? "disabled" : ""}>Next</button></div>`;
+  bindSearchColumns($("#content"), params());
   for (const [s, delta] of [
     ["#prev", -1],
     ["#next", 1],
@@ -178,11 +184,19 @@ async function detail(key) {
     ...new Map(refs.map((x) => [x.type + ":" + x.key, x])).values(),
   ].slice(0, 100);
   $("#content").innerHTML =
-    `<p><a href="#" id="back">← Back</a></p><article class="detail"><p class="eyebrow">${esc(label(kind))} · ID ${esc(id)}</p><h1>${esc(title)}</h1><dl><dt>Source</dt><dd>${esc(source)}</dd><dt>Game mode</dt><dd>${esc(mode)}</dd><dt>Published snapshot</dt><dd><a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a></dd><dt>Original record file</dt><dd>${f.archive_url ? `<a href="${safeUrl(f.archive_url)}">Archived source page ↗</a>` : `<a href="${sourceUrl(f.path)}">${esc(f.path)}</a> · <a href="${rawUrl(f.path)}">Download source ↗</a>`}</dd></dl><div class="banner">${source === "Client captures" ? "This is a preserved capture or published view, not a claim about the latest live game. WDB item definitions do not establish drop locations." : source === "Addon observations" ? "These are published addon observations or reference data. Unspecified game modes are not inferred." : "This source preserves historical website or planner claims. It remains separate from client-captured evidence."}${kind === "raw-variant" ? " This entry describes an exact retained binary variant; use the corresponding raw pack for its payload." : ""}</div><p><a href="#search?q=${encodeURIComponent(id)}">Find this ID across sources and modes →</a> · <button id="download" type="button">Download this record</button></p>${data.description ? `<p class="record-text">${esc(data.description)}</p>` : ""}${refs.length ? heading("Referenced records") + '<div class="reference-list">' + refs.map((v) => `<a href="#search?q=${encodeURIComponent(v.key)}&kind=${encodeURIComponent(v.type === "creature" ? "npc" : v.type)}">${esc(v.label)}</a>`).join("") + "</div>" : ""}${heading("Preserved fields")}<div class="table-wrap"><table><tbody>${Object.entries(
+    `<p><a href="#" id="back">← Back</a></p><article class="detail"><p class="eyebrow">${esc(label(kind))} · ID ${esc(id)}</p><h1>${esc(title)}</h1><dl><dt>Source</dt><dd>${esc(source)}</dd><dt>Game mode</dt><dd>${esc(mode)}</dd><dt>Published snapshot</dt><dd><a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a></dd><dt>Original record file</dt><dd>${f.archive_url ? `<a href="${safeUrl(f.archive_url)}">Archived source page ↗</a>` : `<a href="${sourceUrl(f.path)}">${esc(f.path)}</a> · <a href="${rawUrl(f.path)}">Download source ↗</a>`}</dd></dl><div class="banner">${source === "Client captures" ? "This is a preserved capture or published view, not a claim about the latest live game. WDB item definitions do not establish drop locations." : source === "LootCollector" ? "This pin records the player’s position when the loot window opened, not a confirmed source or drop rate." : source === "Addon observations" ? "These are published addon observations or reference data. Unspecified game modes are not inferred." : "This source preserves historical website or planner claims. It remains separate from client-captured evidence."}${kind === "raw-variant" ? " This entry describes an exact retained binary variant; use the corresponding raw pack for its payload." : ""}</div><p><a href="#search?q=${encodeURIComponent(id)}">Find this ID across sources and modes →</a> · <button id="download" type="button">Download this record</button></p>${data.description ? `<p class="record-text">${esc(data.description)}</p>` : ""}${refs.length ? heading("Referenced records") + '<div class="reference-list">' + refs.map((v) => `<a href="#search?q=${encodeURIComponent(v.key)}&kind=${encodeURIComponent(v.type === "creature" ? "npc" : v.type)}">${esc(v.label)}</a>`).join("") + "</div>" : ""}${heading("Preserved fields")}<div class="table-wrap"><table><tbody>${Object.entries(
       data,
     )
       .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${val(v)}</td></tr>`)
       .join("")}</tbody></table></div></article>`;
+  const mapLinks = await atlasRecordLinks(key, manifest, gz);
+  if (routeId !== request) return;
+  if (mapLinks.length) {
+    const box = document.createElement("p");
+    box.className = "record-map-links";
+    box.innerHTML = mapLinks.map(z => `<a class="map-link" href="#atlas?zone=${encodeURIComponent(z.key)}&record=${encodeURIComponent(key)}">Show on map: ${esc(z.label)} →</a>`).join(" ");
+    $("#download").parentElement.after(box);
+  }
   $("#back").onclick = (e) => {
     e.preventDefault();
     history.length > 1 ? history.back() : (location.hash = "");
@@ -220,27 +234,8 @@ async function showCoverage() {
   if (routeId !== request) return;
   notice("");
   $("#content").innerHTML =
-    `${heading("Sources & coverage")}<p>Every tracked file in snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a> is listed here. ${num(manifest.indexed_files)} files supply searchable records; ${num(manifest.reference_files)} remain downloadable references. Counts are source records, not unique game entities.</p><div class="banner">Coverage means coverage of this published repository, not the entire game or every original upload. Unknown formats remain references; a new structured-file parsing error stops publication. Binary variants and addon source files are preserved without inventing decoded facts.</div><div class="coverage-tools"><input id="file-filter" aria-label="Filter source files" placeholder="Filter files, formats or sources…"><select id="file-status" aria-label="File availability"><option value="">All files</option><option value="indexed">Searchable records</option><option value="reference">Download / reference</option></select><a href="${esc(dataBase)}coverage.json.gz">Download full report ↗</a></div><div id="file-results"></div>`;
-  const render = () => {
-    const q = $("#file-filter").value.toLowerCase(),
-      s = $("#file-status").value,
-      items = coverage.filter(
-        (x) =>
-          (!s || x.status === s) &&
-          `${x.path} ${x.source} ${x.reason}`.toLowerCase().includes(q),
-      );
-    $("#file-results").innerHTML =
-      `<p class="muted">${num(items.length)} matching files${items.length > 150 ? " · showing the first 150; filter to narrow" : ""}</p><div class="table-wrap"><table><thead><tr><th>Published file</th><th>Availability</th><th>Records</th><th>Coverage note</th></tr></thead><tbody>${items
-        .slice(0, 150)
-        .map(
-          (x) =>
-            `<tr><td><a href="${sourceUrl(x.path)}">${esc(x.path)}</a><small>${esc(x.source)} · <a href="${rawUrl(x.path)}">Download</a></small></td><td>${x.status === "indexed" ? "Searchable" : "Reference"}</td><td>${x.status === "indexed" ? num(x.records) : "—"}</td><td>${esc(x.reason)}</td></tr>`,
-        )
-        .join("")}</tbody></table></div>`;
-  };
-  $("#file-filter").oninput = render;
-  $("#file-status").onchange = render;
-  render();
+    `${heading("Sources & coverage")}<p>Every tracked file in snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a> is listed here. ${num(manifest.indexed_files)} files supply searchable records; ${num(manifest.reference_files)} remain downloadable references. Counts are source records, not unique game entities.</p><div class="banner">Coverage means coverage of this published repository, not the entire game or every original upload. Unknown formats remain references; a new structured-file parsing error stops publication. Binary variants and addon source files are preserved without inventing decoded facts.</div><p><a href="${esc(dataBase)}coverage.json.gz">Download full report →</a></p><div id="file-results"></div>`;
+  renderCoverage({root:$("#file-results"),coverage,manifest,sourceUrl,rawUrl,esc,params:new URLSearchParams(location.hash.split("?")[1] || "")});
 }
 async function guides() {
   const routeId = request;
@@ -257,16 +252,19 @@ async function guides() {
 async function route() {
   if (!manifest) return;
   request++;
+  closeAtlas();
   worker.postMessage({ cancel: true });
   notice("");
   const h = location.hash;
+  $(".intro").hidden=h.startsWith("#atlas");
+  $("#search").hidden=h.startsWith("#atlas");
   document
     .querySelectorAll("[data-nav]")
     .forEach((a) =>
       a.classList.toggle(
         "active",
         a.dataset.nav ===
-          (h === "#coverage"
+          (h.startsWith("#atlas") ? "atlas" : h.startsWith("#coverage")
             ? "coverage"
             : h === "#guides"
               ? "guides"
@@ -275,7 +273,8 @@ async function route() {
     );
   try {
     if (h.startsWith("#record=")) await detail(decodeURIComponent(h.slice(8)));
-    else if (h === "#coverage") await showCoverage();
+    else if (h.startsWith("#atlas")) await showAtlas({root: $("#content"), manifest, gz, notice, esc, label, params: new URLSearchParams(h.split("?")[1] || "")});
+    else if (h.startsWith("#coverage")) await showCoverage();
     else if (h === "#guides") await guides();
     else if (h.startsWith("#search?"))
       runSearch(new URLSearchParams(h.slice(8)));
@@ -297,12 +296,15 @@ try {
   if (!r.ok)
     throw Error("The catalog is unavailable. Please try again shortly.");
   manifest = await r.json();
+  manifest.modes = [...new Set(manifest.modes.flatMap(m=>m.split(/[,|]/).map(s=>s.trim()).filter(Boolean)))].sort();
   for (const [k, v] of Object.entries(manifest.kinds).sort((a, b) =>
     a[1].label.localeCompare(b[1].label),
   )) {
     const o = new Option(v.label + " (" + num(v.records) + ")", k);
     $("#kind").add(o);
   }
+  $("#source").replaceChildren(new Option("All sources", ""));
+  for (const k of Object.keys(manifest.sources).sort()) $("#source").add(new Option(k,k));
   for (const k of manifest.modes) $("#mode").add(new Option(k, k));
   $("#snapshot").innerHTML =
     `Data snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 8)}</a><br>Built ${esc(new Date(manifest.built_at).toLocaleString())}<br><a href="https://github.com/hertigservices/Ascension_preservation/tree/main/tools/ascension-db">Inspect how this archive works ↗</a>`;

@@ -3,6 +3,7 @@ Only changed source blobs are parsed again. No private inbox or runtime input is
 """
 import argparse, collections, csv, gzip, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
 from pathlib import Path
+from atlas import build_atlas
 BASE=Path(__file__).resolve().parent
 SCHEMA='ascensiondb-1'
 KIND={'itemcache':'item','creaturecache':'npc','gameobjectcache':'gameobject','questcache':'quest','npccache':'gossip','pagetextcache':'page','itemnamecache':'item-name','creatures':'world-creature','gameobjects':'world-object','advancement':'advancement','vendors':'vendor','gossips':'gossip-observation','item_display_icons':'display-icon'}
@@ -17,6 +18,7 @@ def zipped(path,v):
     return len(data)
 def git(root,*args): return subprocess.check_output(['git','-C',str(root),*args])
 def source_type(name):
+    if '/lootcollector/' in name: return 'LootCollector'
     if '/exiles-db/' in name: return 'Exiles DB'
     if '/bisbeard/' in name: return 'BisBeard'
     if '/lua/' in name or '/catalogue/' in name: return 'Addon observations'
@@ -35,7 +37,7 @@ def rows(path,kind):
     with textopen(path) as f:
         if kind=='tsv':
             csv.field_size_limit(100000000)
-            for r in csv.DictReader(f,delimiter='\t'):
+            for r in csv.DictReader(f,delimiter='\t',quoting=csv.QUOTE_NONE if '/catalogue/' in path.as_posix() or '/lootcollector/' in path.as_posix() else csv.QUOTE_MINIMAL):
                 if None in r: raise ValueError('Malformed TSV row with extra columns')
                 yield r
         elif kind=='jsonl':
@@ -61,24 +63,27 @@ def identify(path,r,i):
     if not name:
         v=r.get('value');name=next((str(v[k]) for k in ('name','Name','title') if isinstance(v,dict) and v.get(k)),None)
     name=name or f'{LABELS.get(kind,kind.replace("-"," ").title())} #{identifier}'
+    if path.endswith('/lootcollector/pins.tsv'):
+        identifier=str(r.get('item',''));name=str(r.get('type','Loot'))+' item #'+identifier;kind='loot-pin'
     mode=path.split('/')[2] if path.startswith('cachedata/by-mode/') else str(r.get('_modes',r.get('modes','Unspecified')))
     return identifier,name[:500],kind,mode,source,r
 
 class Buckets:
     def __init__(self,root): self.root=root;self.handles=collections.OrderedDict();self.keys={}
-    def add(self,key,row):
-        filename=hashlib.sha256(key.encode()).hexdigest()[:16]; self.keys[key]=filename
+    def add(self,key,row,line=None):
+        filename=self.keys.get(key)
+        if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16];self.keys[key]=filename
         if key in self.handles: f=self.handles.pop(key)
         else:
             if len(self.handles)>=4096: self.handles.popitem(last=False)[1].close()
-            f=(self.root/filename).open('a',encoding='utf-8')
-        self.handles[key]=f;f.write(dump(row)+'\n')
+            f=(self.root/filename).open('a',encoding='utf-8',buffering=65536)
+        self.handles[key]=f;f.write(line if line is not None else dump(row)+'\n')
     def close(self):
         for f in self.handles.values(): f.close()
         self.handles.clear()
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--data',type=Path,required=True);ap.add_argument('--out',type=Path,default=BASE/'dist');ap.add_argument('--cache',type=Path,default=BASE/'.build-cache');ap.add_argument('--sample',type=int,default=0);a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--data',type=Path,required=True);ap.add_argument('--out',type=Path,default=BASE/'dist');ap.add_argument('--cache',type=Path,default=BASE/'.build-cache');ap.add_argument('--sample',type=int,default=0);ap.add_argument('--reuse-manifest',type=Path,help='Trusted previous catalog manifest for unchanged legacy parser cache reuse');a=ap.parse_args()
     a.data=a.data.resolve();a.out=a.out.resolve();a.cache=a.cache.resolve()
     if git(a.data,'status','--porcelain','--untracked-files=no').strip(): raise SystemExit('Use a clean published checkout, never a live publisher working tree.')
     revision=git(a.data,'rev-parse','HEAD').decode().strip()
@@ -87,14 +92,27 @@ def main():
         meta,path=l.split('\t',1);mode,typ,blob=meta.split()
         if typ=='blob': entries.append((path,blob))
     a.out.mkdir(parents=True,exist_ok=True);a.cache.mkdir(parents=True,exist_ok=True)
-    version=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:16]
+    # Stable parser revisions keep unrelated atlas/UI changes from reparsing millions of records.
+    # Bump the applicable revision whenever a parser or identity adapter changes.
+    version='2ac2e8a89519b336'
     manifest={'schema':SCHEMA,'revision':revision,'sample':a.sample or None,'sources':{},'kinds':{},'modes':[],'search':{},'browse':{},'files':{},'built_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'records':0,'indexed_files':0,'reference_files':0,'total_files':len(entries)}
     coverage=[];kinds=collections.Counter();modes=set();browsing=collections.defaultdict(list)
     stage=Path(tempfile.mkdtemp(prefix='catalog-search-',dir=a.cache));buckets=Buckets(stage)
+    legacy={}
+    if a.reuse_manifest:
+        previous=json.loads(a.reuse_manifest.read_text(encoding='utf-8'))
+        if previous.get('schema')!=SCHEMA or previous.get('sample'):raise ValueError('Cache reuse requires a complete compatible catalog')
+        legacy={(v['path'],v.get('blob')):(k,v['records']) for k,v in previous['files'].items() if '/catalogue/' not in v['path'] and '/lootcollector/' not in v['path']}
     parsed=0;reused=0
     try:
         for path,blob in entries:
-            src=a.data/path;ak,reason=adapter(path);fid=hashlib.sha256((path+'\0'+blob+version+str(a.sample)).encode()).hexdigest()[:20]
+            src=a.data/path;ak,reason=adapter(path)
+            parser_version='atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
+            fid=hashlib.sha256((path+'\0'+blob+parser_version+str(a.sample)).encode()).hexdigest()[:20]
+            prior=legacy.get((path,blob))
+            if prior and (a.cache/prior[0]/'meta.json').exists() and (a.cache/prior[0]/'index.jsonl.gz').exists():
+                if json.loads((a.cache/prior[0]/'meta.json').read_text(encoding='utf-8'))['records']!=prior[1]:raise ValueError('Legacy cache count mismatch')
+                fid=prior[0]
             info={'path':path,'blob':blob,'bytes':src.stat().st_size,'status':'indexed' if ak!='reference' else 'reference','reason':reason,'records':0,'source':source_type(path)}
             if ak=='reference':
                 manifest['reference_files']+=1;coverage.append(info);continue
@@ -130,7 +148,7 @@ def main():
                     # Exact IDs and word prefixes use separate namespaces. IDs stay strings.
                     prefixes={'id:'+eid[:2], 'browse:'+kind}
                     prefixes.update('name:'+t[:2] for t in tokens(title) if len(t)>=2)
-                    for prefix in prefixes: buckets.add(prefix,row)
+                    for prefix in prefixes: buckets.add(prefix,row,line)
             coverage.append(info)
             print(f'Indexed {path}: {fm["records"]:,}',flush=True)
         # Recovered historical pages are extracted as inert text, not executable archived HTML.
@@ -142,6 +160,7 @@ def main():
             zipped(a.out/'records'/fid/'0.json.gz',[packed]);manifest['files'][fid]={'path':'recovered/report.json','archive_url':r.get('archive_url'),'records':1}
             row=[f'{fid}/0/0',r['name'],kind,'Unspecified','Wayback recovery',str(i)]
             kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1;browsing[kind].append(row)
+            buckets.add('browse:'+kind,row);buckets.add('id:'+str(i)[:2],row)
             for t in {t[:2] for t in tokens(r['name']) if len(t)>=2}: buckets.add('name:'+t,row)
         buckets.close()
         # Fold exact-ID buckets into first-two-digit buckets to keep the asset count bounded.
@@ -167,6 +186,7 @@ def main():
         manifest['recovery']={'pages':len(recovery.get('records',[])),'attempted':len(recovery.get('results',[])),'inventory':len(recovery.get('inventory',[])),'complete_mirror':False}
         zipped(a.out/'coverage.json.gz',coverage);zipped(a.out/'recovery.json.gz',recovery)
         manifest['parsed_files']=parsed;manifest['reused_files']=reused
+        build_atlas(a.out,manifest,a.data)
         (a.out/'manifest.json').write_text(dump(manifest),encoding='utf-8')
         for f in (BASE/'web').iterdir():
             if f.is_file(): shutil.copyfile(f,a.out/f.name)

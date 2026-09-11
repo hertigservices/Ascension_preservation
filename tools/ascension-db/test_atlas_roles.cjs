@@ -1,0 +1,3 @@
+const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');
+const modulePromise=import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync(path.join(__dirname,'web/atlas.js'),'utf8')).toString('base64'));
+test('dual-role markers use the enabled role for labels and glyphs',async()=>{const {atlasVisibleRole}=await modulePromise;const p={layer:'vendors',roles:['vendors','quest-givers']};assert.equal(atlasVisibleRole(p,new Set(['quest-givers'])),'quest-givers');assert.equal(atlasVisibleRole(p,new Set(['vendors'])),'vendors');assert.equal(atlasVisibleRole(p,new Set(['vendors','quest-givers'])),'vendors');});
