@@ -30,5 +30,38 @@ Git subtree split of the old tools directory.
 [BisBeard supplemental catalog](docs/BISBEARD.md) has its own lossless importer and verifier; it does not replace captured WDB records.
 
 [Exiles database catalog](docs/EXILES-DB.md) preserves a reviewed offline mirror of the
-`db.exil.es` CoA site — spells, loot tables, talent trees and a change log — with the
+`db.exil.es` CoA site â€” spells, loot tables, talent trees and a change log â€” with the
 same rule: website values are attributed claims, and captured WDB records stay authoritative.
+
+## Inspect the processing pipeline
+
+Start with [How contributions become the public dataset](docs/PROCESSING-PIPELINE.md).
+It links each processing stage, explains variant retention and publication gates,
+and records the installed-source comparison.
+
+## Incremental generated outputs
+
+Decoded views and rebuilt WDBs reuse unchanged cache categories. Stock-client Lua
+reuses unchanged tables. The private `WORK/.build-cache/` directory records content
+hashes of merged records, referenced source metadata, modes, WDB header donors,
+selected stock views, icon lookup, generator code/configuration, and generated files.
+Every reused file is hashed again. Missing or damaged output/evidence and changed
+rules force regeneration; stale modes and chunks are still pruned. Summary documents
+and source listings are regenerated each run.
+
+This does not skip intake, merging, data-loss checks, privacy audits, or Git publication
+checks. The first run after installation or a rule change builds a fresh baseline;
+subsequent runs can reuse it. A changed item category still rebuilds that category,
+and full audits can still take time. The cache is disposable, never part of the
+published dataset, and does not establish contribution incorporation by itself.
+
+For a diagnostic full regeneration, run in PowerShell:
+
+```powershell
+$env:ASCENSION_FORCE_REBUILD = '1'
+python tools/update.py
+Remove-Item Env:ASCENSION_FORCE_REBUILD
+```
+
+Use the ordinary publisher/GUI for publication. Do not run this diagnostic beside
+an active publisher. Rebuild verification failures return a failing exit code.

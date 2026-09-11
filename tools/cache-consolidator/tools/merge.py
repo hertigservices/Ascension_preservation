@@ -27,7 +27,7 @@ ones append, so the store is safe to interrupt.
 import os, sys, json, struct, hashlib, collections, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import wdblib, modes, config, intake
+import wdblib, modes, config, intake, capture_dates
 
 STORE   = config.STORE
 SOURCES = config.SOURCES
@@ -210,7 +210,7 @@ def main():
         p = disk[(h, g)]
         info = wdblib.inspect(p)
         cls = modes.classify(g)
-        captured = time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(p)))
+        captured = capture_dates.source_date(p)
         row = {"id": "", "sha256": h, "cache": info.cache,
                "filename": os.path.basename(p), "group": g,
                "realm": cls["realm"], "mode": cls["mode"], "slug": cls["slug"],
@@ -297,6 +297,10 @@ def main():
             r["last_captured"] = max(r["last_captured"], row["captured"])
     for pk in packs.values():
         pk.close()
+
+    repaired = capture_dates.repair_dates(srcs, index)
+    if repaired:
+        print(f"Corrected upload-time capture dates on {repaired} browser sources")
 
     # ---- persist -----------------------------------------------------------------
     write_tsv(SOURCES, SRC_COLS,

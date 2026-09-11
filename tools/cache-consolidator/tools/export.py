@@ -16,8 +16,9 @@ Three views over the same merged records, because they answer different question
                                regenerating an unchanged store produces an identical
                                file and git sees no diff.
 
-Winner rule within a view: newest last_captured, ties broken on sha1 so output is
-stable.  Losing variants are never deleted -- they stay in raw/ and in the index.
+Dated observations keep their established newest-capture ordering. Browser
+upload times are not capture dates. Undated observations add missing entries and
+variants; later undated arrivals do not replace an earlier selected observation.  Losing variants are never deleted -- they stay in raw/ and in the index.
 
 EVERYTHING BULKY IS GZIPPED
 ---------------------------
@@ -31,10 +32,11 @@ straight into a client cache folder.
 mtime=0 on every write, because gzip otherwise stamps the clock into its header
 and an unchanged rebuild would then show up as a diff in every single file.
 """
+import capture_dates
 import os, io, sys, gzip, json, struct, time, contextlib, collections
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import wdblib, modes, merge, scrub, config
+import wdblib, modes, merge, scrub, config, build_cache
 import wdb_decode_items, wdb_decode_creature, wdb_decode_gameobject
 import wdb_decode_quest, wdb_decode_pagetext, wdb_decode_npctext_full
 
@@ -153,8 +155,11 @@ def load_cache(cache):
         return []
     with open(f"{STORE}/{cache}/pack.bin", "rb") as f:
         blob = f.read()
+    sources = {r["id"]: r for r in merge.read_tsv(merge.SOURCES, merge.SRC_COLS)}
     out = []
+    capture_context = {}
     for r in idx:
+        capture_dates.attach_context(r, sources, capture_context)
         off, size = int(r["offset"]), int(r["size"])
         payload = blob[off + 8: off + 8 + size]
         out.append((int(r["entry"]), r["sha1"], r, payload))
@@ -163,17 +168,17 @@ def load_cache(cache):
 
 
 def pick_winners(recs, mode=None):
-    """entry -> (sha1, row, payload); newest capture wins, sha1 breaks ties."""
+    """entry -> (sha1, row, payload); dated captures take precedence; undated observations remain stable."""
     by_entry = collections.defaultdict(list)
     for entry, sha1, r, payload in recs:
         if mode is not None and mode not in r["modes"].split(","):
             continue
         by_entry[entry].append((sha1, r, payload))
-    return {e: max(v, key=lambda t: (t[1]["last_captured"], t[0]))
+    return {e: max(v, key=lambda t: capture_dates.winner_rank(t[1], t[0], mode))
             for e, v in by_entry.items()}
 
 
-def write_view(path, cache, winners, note_cols=True):
+def write_view(path, cache, winners, note_cols=True, mode=None):
     """Write one decoded view. Every decoder returns (row, consumed_bytes); a correct
     field layout consumes EXACTLY the payload, so anything else is a decode failure
     and is counted, not silently written."""
@@ -195,7 +200,7 @@ def write_view(path, cache, winners, note_cols=True):
             if note_cols:
                 d = dict(d)
                 d["_modes"] = r["modes"]
-                d["_captured"] = r["last_captured"]
+                d["_captured"] = capture_dates.winner_date(r, mode)
                 d["_sources"] = len(r["srcs"].split(","))
             f.write("\t".join(str(d.get(c, "")).replace("\t", " ").replace("\n", " ")
                               for c in allcols) + "\n")
@@ -243,7 +248,20 @@ def main():
     mode_rows = collections.defaultdict(dict)  # slug -> cache -> rows
     written = []                               # every path this run produced
 
+    reuse = build_cache.BuildCache('export', OUT)
     for cache in caches:
+        inputs = build_cache.cache_inputs(cache, srcs, slugs)
+        hit = reuse.load(cache, inputs)
+        if hit:
+            meta, paths = hit
+            stats[cache] = meta['stats']
+            for slug, count in meta['mode_rows'].items():
+                mode_rows[slug][cache] = count
+            written.extend(paths)
+            print(f"  {cache:<18} reused verified decoded exports")
+            continue
+        start = len(written)
+        category_ok = True
         recs = load_cache(cache)
         if not recs:
             continue
@@ -256,7 +274,8 @@ def main():
             wm = pick_winners(recs, mode=slug)
             if not wm:
                 continue
-            write_view(f"{OUT}/by-mode/{slug}/{cache}.tsv", cache, wm)
+            result = write_view(f"{OUT}/by-mode/{slug}/{cache}.tsv", cache, wm, mode=slug)
+            category_ok = category_ok and not any(result[1:])
             written.append(f"{OUT}/by-mode/{slug}/{cache}.tsv{GZ}")
             mode_rows[slug][cache] = len(wm)
         # ---- raw, deterministic ---------------------------------------------
@@ -275,6 +294,12 @@ def main():
         written += [f"{OUT}/raw/{cache}.pack.gz", f"{OUT}/raw/{cache}.index.tsv{GZ}"]
         stats[cache]["records"] = len(recs)
         rows, bad, inexact = stats[cache]["union"]
+        if inputs != build_cache.cache_inputs(cache, srcs, slugs):
+            raise RuntimeError('merged inputs changed during export')
+        if category_ok and not (bad or inexact):
+            reuse.save(cache, inputs, written[start:],
+                       {'stats': stats[cache],
+                        'mode_rows': {slug: rows[cache] for slug, rows in mode_rows.items() if cache in rows}})
         flag = "" if not (bad or inexact) else f"  !! {bad} failed, {inexact} inexact"
         print(f"  {cache:<18} union {rows:>6}  distinct {len(recs):>6}{flag}")
 
@@ -507,7 +532,8 @@ def write_docs(out, caches, slugs, stats, mode_rows, srcs):
          "| `raw/<cache>.index.tsv.gz` | per record: sha1, size, modes, capture dates, corroboration count. |",
          "| `sources.tsv` | every submitted file: realm, mode, capture date, record count. |",
          "| `lua/` | merged addon SavedVariables, and the server-pushed UI code. |",
-         "| `lua/stock-client/` | the item, creature and quest records as Lua 5.1 tables an addon on a **stock** client can load; `dbc/item_display_icons.tsv.gz` is the icon lookup they use. |\n",
+         "| `lua/stock-client/` | the item, creature and quest records as Lua 5.1 tables an addon on a **stock** client can load; `dbc/item_display_icons.tsv.gz` is the icon lookup they use. |",
+         "| `mapdata/` | which **server** map ids exist as extracted terrain, and the DBC set submitted with them. An inventory, never the terrain itself — that is derived data a server operator regenerates from their own client. |\n",
          "**The data files are gzipped.** Uncompressed this dataset is ~756 MB and its",
          "largest file is a 254 MB itemcache; GitHub rejects anything over 100 MB. Each",
          "`.gz` holds one file — open it with 7-Zip, `gunzip`, or directly from code.",

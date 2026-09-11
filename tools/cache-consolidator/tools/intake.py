@@ -85,10 +85,31 @@ def already_holds(out, fn, digest):
     return True if name is None else name == fn
 
 
+def extraction_hashes():
+    """Completed, hash-marked extractions survive an archive filename change.
+
+    Reuse the original directory, preserving source IDs and corroboration counts.
+    A filename/hash suffix alone is never evidence of completed extraction.
+    """
+    result = {}
+    if not os.path.isdir(EXTRACT):
+        return result
+    for name in sorted(os.listdir(EXTRACT)):
+        out = os.path.join(EXTRACT, name)
+        if os.path.islink(out) or os.path.isjunction(out) or not os.path.isdir(out):
+            continue
+        digest = _marker(out, SRCHASH)
+        if (digest and re.fullmatch(r'[a-f0-9]{64}', digest)
+                and any(n not in (SRCMARK, SRCHASH) for n in os.listdir(out))):
+            result.setdefault(digest, out)
+    return result
+
+
 def extract_all():
     """Extract every archive under the scan roots into EXTRACT/<stem>/ (skip if already done)."""
     os.makedirs(EXTRACT, exist_ok=True)
     done = []
+    completed_hashes = extraction_hashes()
     # Pre-scan for stem collisions (WDB.zip vs WDB.tar.gz vs WDB.rar). Only
     # colliding stems get an ext-qualified dir; everything else keeps the
     # historical bare-stem dir so existing extractions are not re-done.
@@ -129,7 +150,10 @@ def extract_all():
                 # never extracted: no error, exit 0, a whole submission lost.
                 # Hashing is why this is gated on the dir already existing:
                 # a first extraction should not pay for a read of every byte.
-                digest = sha256(src) if occupied(out) else None
+                tagged = bool(re.search(r'__[a-f0-9]{8,64}$', base, re.I))
+                digest = sha256(src) if occupied(out) or tagged else None
+                if tagged and digest in completed_hashes:
+                    done.append((fn, "cached (same archive content)")); continue
                 if digest and not already_holds(out, fn, digest):
                     out = os.path.join(EXTRACT, "%s__%s" % (stem, digest[:8]))
                 if occupied(out):
@@ -152,6 +176,7 @@ def extract_all():
                     with open(os.path.join(out, SRCMARK), "w") as f: f.write(fn)
                     with open(os.path.join(out, SRCHASH), "w") as f:
                         f.write(digest or sha256(src))
+                    completed_hashes[digest or sha256(src)] = out
                     done.append((fn, "ok"))
                 else:
                     where = quarantine(out, fn, (r.stderr or r.stdout or "").strip())
@@ -219,6 +244,9 @@ def submission_segment(rel):
     changes depending on which path the walk happened to reach it by.
     """
     for seg in rel.split("/")[:-1]:
+        # Atomic collector batch wrappers are transport, not contributor identity.
+        if re.fullmatch(r"upload-batch-[a-f0-9]{32}", seg):
+            continue
         if not TIDY.match(seg):
             return seg
     return ""
@@ -272,7 +300,8 @@ def label_for(path):
             # so it gets no qualifier -- one per file would be fragmentation,
             # not provenance.
             if "/" not in rel: grp = "(root)"
-            return "loose:" + rel, qualify(grp, submission_segment(rel))
+            stable_rel = "/".join(seg for seg in rel.split("/") if not re.fullmatch(r"upload-batch-[a-f0-9]{32}", seg))
+            return "loose:" + stable_rel, qualify(grp, submission_segment(rel))
     return ap.replace("\\", "/"), grp
 
 def scan():

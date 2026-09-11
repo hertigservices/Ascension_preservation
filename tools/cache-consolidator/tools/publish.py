@@ -84,6 +84,25 @@ def stream(cmd, cwd=None, every=10):
     return p.wait(), tail
 
 
+def push_branch(branch):
+    """Retry an unresolved thin-pack base once without rerunning the pipeline.
+
+    Keep normal efficient pushes and ordinary rejection behavior. A self-contained
+    pack avoids requiring delta bases already on the receiver. No force, audit
+    bypass, index change, or history rewrite is involved.
+    """
+    command = ["git", "push", "--progress", "origin", branch]
+    rc, tail = stream(command, cwd=REPO)
+    unresolved = any(re.search(r"remote:.*fatal: pack has [0-9]+ unresolved deltas", line)
+                     for line in tail)
+    if rc and unresolved:
+        print("Remote could not resolve the transfer's delta bases; retrying once "
+              "with a self-contained pack (no consolidation rerun).", flush=True)
+        rc, tail = stream(["git", "push", "--progress", "--no-thin", "origin", branch],
+                          cwd=REPO)
+    return rc, tail
+
+
 def nul(*args):
     """A git path list, split on NUL instead of on whitespace.
 
@@ -443,10 +462,27 @@ def _publish(push):
         print("   unstage them first; refusing to publish unrelated staged work")
         return False
 
+    import batch_inputs, intake_jobs
+    manual = intake_jobs.manual_request(config.WORK, os.environ.get("ASCENSION_MANUAL_REQUEST"))
+    if manual and manual.get('tidy_only'):
+        print('Filed completed inputs:',len(intake_jobs.archive_completed(config.WORK)))
+        return True
+    if manual and manual.get('rename'):
+        import tray_app
+        from types import SimpleNamespace
+        tray_app.App.prepare_inbox(SimpleNamespace(state={'file':True},consumed=set(),log=print),set(manual.get('pristine',[])))
+    batch = batch_inputs.prepare(os.environ.get("ASCENSION_BATCH_PLAN"), config.INBOX)
+    inputs = intake_jobs.snapshot(config.INBOX)
+    if inputs:
+        time.sleep(5)
+        if intake_jobs.snapshot(config.INBOX)!=inputs:
+            print('Inbox is still being copied; retrying after it settles.')
+            return None
     if not consolidate():
         print("\n!! the pipeline did not finish; nothing published")
         return False
 
+    batch_inputs.record(batch, config.OUT, config.WORK)
     copied = sync_tools()
     changed = sync_data() + len(copied)
     if not audit():
@@ -508,12 +544,15 @@ def _publish(push):
     print(f"pushing {branch} to origin -- this is the slow part on a big "
           f"dataset, and it reports as it goes:", flush=True)
     t0 = time.time()
-    rc, tail = stream(["git", "push", "--progress", "origin", branch], cwd=REPO)
+    rc, tail = push_branch(branch)
     if rc != 0:
         print("\n".join(tail))
         print("!! push failed; the commit is still here, retry when resolved")
         return False
     print(f"pushed {branch} in {time.time() - t0:.0f}s")
+    intake_jobs.file_completed(config.WORK,intake_jobs.eligible_completed(config.WORK,config.OUT,inputs),git('rev-parse','HEAD').stdout.strip())
+    if not manual or manual.get('tidy'):
+        print('Filed completed inputs:',len(intake_jobs.archive_completed(config.WORK)))
     return True
 
 

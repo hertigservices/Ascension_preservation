@@ -1,0 +1,276 @@
+{
+  "captured": "2026-09-11",
+  "hash_normalization": "CRLF to LF",
+  "files": [
+    {
+      "path": "tools/cache-consolidator/tools/audit_columns.py",
+      "installed_sha256_lf": "abcc88525ec725a18ed3ecadf9c026b75fa9cce7a9d1f5ee15b2a6bbaf404d60",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/audit_publish.py",
+      "installed_sha256_lf": "41df910063a4a7ff3ab8c93f070e54d2396984e2b54120ff53754a3d36981701",
+      "matches_source": false
+    },
+    {
+      "path": "tools/cache-consolidator/tools/Cache Consolidator.cmd",
+      "installed_sha256_lf": "e42af77fc24f507032276860965faafd6398c92e6d12ef6288cb53761f11978b",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/column_expectations.json",
+      "installed_sha256_lf": "9e0457204357791a47d1f7780dad27cc8f2852820fba9459e3da95f0a1d61527",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/config.py",
+      "installed_sha256_lf": "9dd42ab4f0b1207aecdab959abdb8d1b5c9a48b10ffc19aaa3a915698558cda6",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/contribute.py",
+      "installed_sha256_lf": "723e23a5c2e1425c6b8ff7b709425538a256657a4fda1e0401fdeb2ca8d5aadc",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/export.py",
+      "installed_sha256_lf": "90d5744b9ce01b456e0144be66059e9c0054d6f65284b997dcf7166a4a26ca37",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/export_stock_client.py",
+      "installed_sha256_lf": "bd5486141fa8a12e1c16a1887061404178db19d858580512857930d2f368dc8f",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/gametest.py",
+      "installed_sha256_lf": "dd725d89f0704c06489baccfccb58c36a486a4e2b662874be27d7f19ff8a0cd2",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/harvestmerge.py",
+      "installed_sha256_lf": "410fc5a5ea52c497b1d04facf2cae7242d9eaef114e6ac42f9ae604a4d89c52f",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/import_world.py",
+      "installed_sha256_lf": "322537db5ca84878184f051a86907df9d1d28d7e1fccf3fd49e72297db92182e",
+      "matches_source": false
+    },
+    {
+      "path": "tools/cache-consolidator/tools/ingest_gameobjects.py",
+      "installed_sha256_lf": "4b08e80079a77aa199611a6aef7ef03425651a32660ae70cd2a8b5a80eed7205",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/Install Caches.cmd",
+      "installed_sha256_lf": "523697bda1dfa21f61d946eb188e39a0c3098021698ec8bd204d49ae95556952",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/install.py",
+      "installed_sha256_lf": "51edfd36744da32872bace264354c47ad57fb819ce54be66b3b75fbda4ef8c80",
+      "matches_source": false
+    },
+    {
+      "path": "tools/cache-consolidator/tools/intake.py",
+      "installed_sha256_lf": "c21461c08681a7f360e2ba943fa977f0eb038716cbddc04e83438ec3ecfaa404",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/luamerge.py",
+      "installed_sha256_lf": "4e6246a320f0169b59315f6c54cad145556ffbaa7c061132fd2b9884f32d85ae",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/luaser.py",
+      "installed_sha256_lf": "25d889e2b849cbca31ed40d622384c6b6c3f5ad14243cc17c7667ad8f524a029",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/merge.py",
+      "installed_sha256_lf": "85017ef98ccdb12c5703da331e13ea64e0ab6904ca2eec7c2ef7dcb4e5f2b035",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/modes.py",
+      "installed_sha256_lf": "750d14662da66d97cf059f27a9890befbd0834b04000573fdc77083fed2ec89a",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/publish.py",
+      "installed_sha256_lf": "a540f1e44f43c10b90aa0766ed0fe3a91eba09308f5b5e3b53ea16db6c550e30",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/rebuild.py",
+      "installed_sha256_lf": "4559b0b94b9007c7a10de194d93bd541ecb52c12eacb564755c8e1d10ee7a2e6",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/scrub.py",
+      "installed_sha256_lf": "122d737ff176fc6be290ec8dbe534a693200b4249154cdf0e58056eb1a969165",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/selftest.py",
+      "installed_sha256_lf": "7ea4316c7fab50f8e709fb24bfdc2ab7251ff672f7832b25b9c477992d8c500f",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/sweep_inbox.py",
+      "installed_sha256_lf": "94cbd2901ca4ac9f14fb12393e7ac13c19966a5b5cabc0d30ee3584b1593f0b3",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_audit.py",
+      "installed_sha256_lf": "a476a7fdf2f296ab26fe3d9b40e172b69bb3c2c58108ff755f957802f0424000",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_columns.py",
+      "installed_sha256_lf": "13bdaf21045e75e44c6df38858cd005bb42ed7c7808db16da4e3b720f5b34407",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_data_repository.py",
+      "installed_sha256_lf": "2a054d7883eda77cc7dc2a6d1fe0d0bc06c2609e90c0f76e57112ad364a194bc",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_lock.py",
+      "installed_sha256_lf": "db8a96ae27e455ae758ef025c2f1211b09bcb6c44199f9b4f2bc0c5a2152a2e2",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_publish.py",
+      "installed_sha256_lf": "359aab89d6ba1a4559dbdec0c9078132dd5d81ef3bf705726a5000a5cefce22f",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_sync.py",
+      "installed_sha256_lf": "70a879b3696d4a36e6c2b53abfc6bdff90112d92b244d968358af1b139016e1c",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/tray_app.py",
+      "installed_sha256_lf": "27139e98c4887a4f681bd985b5e30e0a795cc1cffbc60076edde2787a3f173f5",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/unpack.py",
+      "installed_sha256_lf": "eb463d6a38223ea18a1071315bc66c66f4b2f24344e98a77e9ecaf4f4471fa17",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/update.py",
+      "installed_sha256_lf": "101d45b5d774d59080187bc9663e7dbdfc167fbb60ad936c18b721ad4df7f1c9",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdblib.py",
+      "installed_sha256_lf": "2d792e5e0fbf1551120b84609f273b14a9463d3ed3a43cf4a2a69964b3aa229c",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_creature.py",
+      "installed_sha256_lf": "8ae6dfb49d38bb2ca92cc5f9d6f81d44a74aef9c7d245634034e4ec960d71059",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_gameobject.py",
+      "installed_sha256_lf": "053b70cfb0353ee89fc7c8d42f0689c012a771df28cdab8d8794821975b53edc",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_items.py",
+      "installed_sha256_lf": "3100d3ffca71cdb56032bb5c1ccc157eebc007cc695c41537393c55a4c51648a",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_npctext.py",
+      "installed_sha256_lf": "6cd85d4fb4b23ce34d06c0dea3ac0e98bf7b6177a87c9c797bb4af48783388ff",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_npctext_full.py",
+      "installed_sha256_lf": "c44ddd01d48ffd78c3cf9a880aaef6424938f51aa37a6f9fb692603bf2a9c699",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_pagetext.py",
+      "installed_sha256_lf": "8d9950347fe296db68e9d9b1878512d357989f8c022383c1c13b9ab2396e4265",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/wdb_decode_quest.py",
+      "installed_sha256_lf": "82026a6fcfe8c1234f46326498fe2006a5fc3cca84806b4eb240db7286642113",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/import_bisbeard.py",
+      "installed_sha256_lf": "e8ff11629f8aaa13daa69678f87f3f2ff6d490aa5754ddbd0269b47971bc94fb",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_bisbeard.py",
+      "installed_sha256_lf": "43ed3b5847eb310d4e1fe1f77fa5eb000159a3e6a4cd68ac7979b30632be757b",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/capture_dates.py",
+      "installed_sha256_lf": "000e2d685890b8b62ba7d8167f771b4f95a07857a898cc902c42262f349ce931",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/reference_merge.py",
+      "installed_sha256_lf": "8a1dacbd507f78883ea0db72e235896aee66b8dda8518c6ba415fe9e70d67313",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/batch_inputs.py",
+      "installed_sha256_lf": "984942629eb5233fc48a3bc5a37132af2bbbdfd4bbd516be097eb9f694e6f555",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/intake_jobs.py",
+      "installed_sha256_lf": "a5c8555a472a2435de3c389ed1978d7ff379c66a46deb6236143a555737da994",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/contribution_view.py",
+      "installed_sha256_lf": "cbed7605c04947065e42da3ab4da7a06d2354167ee990c9991cf24851e9ee16a",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/build_cache.py",
+      "installed_sha256_lf": "462e74ee7db98983511e29ecc79327b86ee225732d31d523e003107134017b44",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_build_cache.py",
+      "installed_sha256_lf": "4f310e5c8da582b03c8c71c848d43b04c970387fb50d5a4303e9d3354769ca04",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_archive_naming.py",
+      "installed_sha256_lf": "fa3e08ec55d544534503942046c1f30408a8a3439b15a5b9c47345818fd38890",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/stock_entries.txt",
+      "installed_sha256_lf": "eab0f8a574c0c5c2a4e7c5b998a33f566fd9519426b3cb9d5dfed27cbe610296",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/test_catalogue.py",
+      "installed_sha256_lf": "b2ec1f13bde710aa94cc8e4ec0694c9845ba4977efffb7831da044f72f5118fd",
+      "matches_source": true
+    },
+    {
+      "path": "tools/cache-consolidator/tools/mapdata.py",
+      "installed_sha256_lf": "03cedfc12a007659a8eee5a5c69412bf5b245af2bc9ff92841bec016b67c8798",
+      "matches_source": true
+    }
+  ]
+}

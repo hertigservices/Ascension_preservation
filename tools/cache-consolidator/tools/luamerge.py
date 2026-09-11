@@ -39,7 +39,7 @@ is the exception: it keys its own database by "<Realm> - <Mode>", so it splits.
 import os, sys, json, hashlib, time, re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import config, modes, luaser, harvestmerge
+import config, modes, luaser, harvestmerge, reference_merge, capture_dates
 
 STORE = os.path.join(config.STORE, "lua").replace("\\", "/")
 STATE = os.path.join(STORE, "state.json").replace("\\", "/")
@@ -59,6 +59,7 @@ def _rule_for(spec, field):
 # --------------------------------------------------------------- the registry
 
 SPECS = {
+    **{name: {"globals": (global_name,), "shape": "references", "fields": {}, "why": "filtered class, item, quest and spell reference snapshots"} for name, global_name in reference_merge.GLOBALS.items()},
     # MobSpells: an addon that records what mobs cast and how hard they hit.
     # Nothing here comes from the client's own files -- it is observation of
     # server behaviour, which is exactly what is otherwise unrecoverable.
@@ -441,7 +442,8 @@ def merge_coasniff(state, g, sid, meta, conflicts):
     return n
 
 
-MERGERS = {"mobspells.lua": merge_mobspells,
+MERGERS = {
+           **{name: (lambda state,g,sid,meta,conflicts,name=name: reference_merge.merge(name,state,g,sid,meta,conflicts)) for name in reference_merge.GLOBALS},"mobspells.lua": merge_mobspells,
            "aio_client.lua": merge_aio,
            "auctionator_price_database.lua": merge_auctionator,
            "gathermate2.lua": merge_gathermate,
@@ -498,8 +500,7 @@ def run_merge():
         cls = modes.classify(grp) if grp else {"realm": "", "mode": "unknown",
                                                "slug": "unknown",
                                                "source": "account-wide"}
-        meta = {"captured": time.strftime("%Y-%m-%d",
-                                          time.gmtime(os.path.getmtime(path)))}
+        meta = {"captured": capture_dates.source_date(path)}
         n = MERGERS[key](state, g, sid, meta, conflicts)
         state["sources"][sid] = {
             "filename": os.path.basename(path), "spec": key,
@@ -783,7 +784,7 @@ def write_coasniff(state):
     return path, f"{len(store)} distinct client events"
 
 
-WRITERS = [write_mobspells, write_aio, write_auctionator,
+WRITERS = [lambda state: reference_merge.write(state,OUT),write_mobspells, write_aio, write_auctionator,
            write_gathermate, write_coasniff,
            harvestmerge.write_wildcardharvest]
 

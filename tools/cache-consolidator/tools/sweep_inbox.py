@@ -111,6 +111,70 @@ def classify():
     return archives, luas, others
 
 
+# Which stage reads a given payload, checked against the file's own name. Order
+# matters only where two rules could both match; the first wins.
+#
+# This table is the whole point of part 3 and it has one obligation: to be
+# HONEST. Listing an extension here says a stage genuinely reads that file --
+# not that one exists somewhere that could. An aspirational row turns the report
+# from "nothing reads this" into silence, which is the exact failure the report
+# exists to end.
+READERS = [
+    (lambda n: n.endswith(".wdb"), "intake + merge"),
+    (lambda n: n.endswith((".lua", ".lua.bak")), "luamerge"),
+    (lambda n: n.startswith("dump_") and n.endswith((".txt", ".csv")),
+     "catalogue (ingest_gameobjects)"),
+    (lambda n: n.endswith((".map", ".vmtile", ".vmtree", ".mmtile", ".mmap",
+                           ".vmo", ".m2", ".dtree")), "mapdata"),
+    (lambda n: n.endswith(".dbc"), "mapdata (inventory)"),
+    (lambda n: n.endswith(".tsv") or n.endswith(".tsv.gz"), "harvestmerge"),
+    # Named exactly, because the Content/*.json set is a different thing
+    # entirely and must not be waved through by a blanket ".json" rule.
+    (lambda n: n in ("enums.json", "dungeons.json", "battlegrounds.json",
+                     "skillcards.json", "rolerequirements.json",
+                     "observed.json", "spells.json", "apisurfaces.json",
+                     "byrealm.json", "coa-client-events.json"), "harvestmerge"),
+    # Intake's own bookkeeping and the client's, neither of which is payload.
+    (lambda n: n in (".intake-source", ".intake-sha256", "version.bin",
+                     ".ds_store", "thumbs.db"), "(bookkeeping)"),
+    (lambda n: n.endswith((".md5", ".old", ".bak-ascension")), "(bookkeeping)"),
+]
+
+
+def reader_for(name):
+    low = name.lower()
+    for match, stage in READERS:
+        if match(low):
+            return stage
+    return None
+
+
+def unread(root=None):
+    """{extension: [(bytes, path)]} for everything no stage claims.
+
+    Walks the EXTRACTIONS, not the archives: an archive is read by definition,
+    and the question worth asking is what survived unpacking and then met no
+    reader. That is where a submission is lost without an error -- the archive
+    extracted `ok`, so every report upstream of here says success.
+    """
+    root = root or intake.EXTRACT
+    out = {}
+    if not os.path.isdir(root):
+        return out
+    for dp, dirs, files in os.walk(root):
+        for fn in files:
+            if reader_for(fn):
+                continue
+            p = os.path.join(dp, fn)
+            ext = os.path.splitext(fn)[1].lower() or "(no extension)"
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                size = 0
+            out.setdefault(ext, []).append((size, p))
+    return out
+
+
 def claimed_dirs(archives):
     """{stem: [paths]} using intake's own stem rules, contest included."""
     claims = {}
@@ -339,7 +403,34 @@ def main():
 
     # ---------------------------------------------------------------- part 3
     print("\n" + "=" * 74)
-    print("3. " + ("FIX" if a.fix else "VERDICT"))
+    print("3. EXTRACTED CONTENT NO STAGE READS")
+    print("=" * 74)
+    left = unread()
+    if not left:
+        print("   every extracted file is claimed by a stage.")
+    else:
+        by_bytes = sorted(left.items(),
+                          key=lambda kv: -sum(s for s, _p in kv[1]))
+        print("   %-16s %7s %11s   %s" % ("extension", "files", "MB", "example"))
+        for ext, items in by_bytes:
+            total = sum(s for s, _p in items)
+            items.sort(reverse=True)
+            # Relative to the extract dir, not to a scan root: rel() falls back
+            # to the absolute path for anything outside one, and printing this
+            # maintainer's drive letters helps nobody read the report.
+            example = os.path.relpath(items[0][1],
+                                      intake.EXTRACT).replace("\\", "/")
+            print("   %-16s %7d %11.1f   %s"
+                  % (ext, len(items), total / 1048576.0, example[:70]))
+        print("\n   These extracted cleanly and then met no reader. That is not"
+              "\n   necessarily wrong -- some of it is genuinely not worth"
+              "\n   preserving -- but nothing upstream of here will ever say so,"
+              "\n   because an unread file and an absent one look identical in"
+              "\n   every report the pipeline prints.")
+
+    # ---------------------------------------------------------------- part 4
+    print("\n" + "=" * 74)
+    print("4. " + ("FIX" if a.fix else "VERDICT"))
     print("=" * 74)
     if a.fix:
         done = fix_collisions(print, apply=True)
@@ -357,9 +448,16 @@ def main():
     if near_miss:
         print("!! %d lua file(s) are invisible to luamerge; rename them back to "
               "the exact addon filename." % len(near_miss))
-    if not (clash or near_miss):
-        print("Clean. Every archive has its own extract directory and no "
-              "allow-listed\nlua file is being dropped for its name.")
+    if left:
+        mb = sum(s for items in left.values() for s, _p in items) / 1048576.0
+        print("!! %d file(s) in %d extension group(s), %.0f MB, are extracted "
+              "and unread.\n   See part 3; each group is a decision, not "
+              "automatically a bug."
+              % (sum(len(v) for v in left.values()), len(left), mb))
+    if not (clash or near_miss or left):
+        print("Clean. Every archive has its own extract directory, no "
+              "allow-listed\nlua file is being dropped for its name, and every "
+              "extracted file has a reader.")
     return 0
 
 

@@ -1,0 +1,64 @@
+--- a/tools/cache-consolidator/tools/audit_publish.py
++++ b/tools/cache-consolidator/tools/audit_publish.py
+@@ -24,13 +24,7 @@
+                 # The commit trailer publish.py writes. A documented no-reply
+                 # mailbox belonging to no one, allowed as this exact string and
+                 # nothing wider -- any other address still fails.
+-                b"noreply@anthropic.com",
+-                # Game text, not a person. The GM "BAN Hammer" spell in the
+-                # Exiles database mirror tells a banned player to appeal to a
+-                # mailbox at a TLD that does not exist. Allowed as this exact
+-                # string and nothing wider -- another name at the same domain,
+-                # or this name at a real domain, still fails.
+-                b"techbot@gnome.mail"]
++                b"noreply@anthropic.com"]
+ 
+ # A placeholder is not a leak.  The tool has to be able to name the path it
+ # refuses -- "WTF/Account/<login email>/" IS the documentation of the rule --
+--- a/tools/cache-consolidator/tools/import_world.py
++++ b/tools/cache-consolidator/tools/import_world.py
+@@ -708,9 +708,7 @@
+     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                  formatter_class=argparse.RawDescriptionHelpFormatter,
+                                  epilog=__doc__[__doc__.index("WHAT IT MERGES"):])
+-    ap.add_argument("--data", default=DEFAULT_DATA,
+-                    help="the cachedata/ folder from the ascension-data "
+-                         "repository (default: %(default)s)")
++    ap.add_argument("--data", default=DEFAULT_DATA, help="cachedata/ folder (default: next to tools/)")
+     ap.add_argument("--source", default="union",
+                     help="'union' (default) or a game-mode name from cachedata/by-mode/")
+     ap.add_argument("--list-sources", action="store_true")
+@@ -735,17 +733,7 @@
+ 
+     data = os.path.abspath(a.data)
+     if a.list_sources:
+-        found = list_sources(data)
+-        if not found:
+-            # Printing nothing and exiting 0 says "this dataset has no
+-            # sources", which is a different and far more misleading thing
+-            # than "there is no dataset here" -- and the error below sends
+-            # people to this flag to find out which one it is.
+-            print("!! no dataset at %s" % data, file=sys.stderr)
+-            sys.exit("   pass --data <cachedata folder> from a checkout "
+-                     "of ascension-data, or run install.py --fetch to "
+-                     "download one")
+-        for s in found:
++        for s in list_sources(data):
+             print(s)
+         return 0
+     src_dir = os.path.join(data, "union") if a.source == "union" else os.path.join(data, "by-mode", a.source)
+--- a/tools/cache-consolidator/tools/install.py
++++ b/tools/cache-consolidator/tools/install.py
+@@ -701,10 +701,8 @@
+         epilog=__doc__.split("HOW THE CLIENT")[0])
+     ap.add_argument("--client", help="the WoW / Ascension install folder")
+     ap.add_argument("--data", default=None,
+-                    help="the cachedata/ folder from the ascension-data "
+-                         "repository (default: %s, or "
+-                         "<client>/cachedata-download when --fetch is used)"
+-                         % DEFAULT_DATA)
++                    help="the cachedata/ folder (default: beside tools/, or "
++                         "<client>/cachedata-download when --fetch is used)")
+     ap.add_argument("--fetch", action="store_true",
+                     help="download the dataset from GitHub into --data first")
+     ap.add_argument("--from-zip", metavar="ZIP",

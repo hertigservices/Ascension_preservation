@@ -25,7 +25,7 @@ proofs meet: what the reader unpacks is what we parsed.
 import os, sys, gzip, struct, collections, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import wdblib, merge, export
+import wdblib, merge, export, build_cache
 
 OUT = export.OUT + "/wdb"
 
@@ -87,7 +87,23 @@ def main():
     built = collections.defaultdict(dict)
     failures = []
     written = []
+    reuse = build_cache.BuildCache('rebuild', OUT)
     for cache in caches:
+        donors = {slug: header_for(cache, slug, srcs)[0] for slug in slugs}
+        def signature(headers):
+            return build_cache.digest([build_cache.cache_inputs(cache, srcs, slugs),
+                {slug: (h.hex() if h is not None else None)
+                 for slug, h in headers.items()}])
+        inputs = signature(donors)
+        hit = reuse.load(cache, inputs)
+        if hit:
+            meta, paths = hit
+            for slug, result in meta.items():
+                built[slug][cache] = result
+            written.extend(paths)
+            print(f"  {cache:<18} reused verified WDB files")
+            continue
+        start, failure_start = len(written), len(failures)
         recs = export.load_cache(cache)
         if not recs:
             continue
@@ -95,7 +111,7 @@ def main():
             w = export.pick_winners(recs, mode=slug)
             if not w:
                 continue
-            header, src = header_for(cache, slug, srcs)
+            header = donors[slug]
             if header is None:
                 failures.append(f"{slug}/{cache}: no header donor")
                 continue
@@ -114,6 +130,12 @@ def main():
             if not ok:
                 failures.append(f"{slug}/{cache}: {detail}")
             built[slug][cache] = (len(w), len(data), os.path.getsize(p), ok)
+
+        if inputs != signature({slug: header_for(cache, slug, srcs)[0] for slug in slugs}):
+            raise RuntimeError('merged inputs or header donors changed during rebuild')
+        if len(failures) == failure_start:
+            reuse.save(cache, inputs, written[start:],
+                       {slug: result[cache] for slug, result in built.items() if cache in result})
 
     print(f"{'mode':<22}{'cache':<18}{'entries':>9}{'cache bytes':>14}"
           f"{'.gz':>12}  verified")
@@ -136,6 +158,7 @@ def main():
     for gone in export.prune(OUT, written, protect=("README.md",)):
         print(f"  pruned stale wdb/{gone}")
     print(f"\nwdb -> {OUT}  ({time.time()-t0:.0f}s)")
+    return 1 if failures else 0
 
 
 def write_readme(built):
@@ -179,4 +202,4 @@ def write_readme(built):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

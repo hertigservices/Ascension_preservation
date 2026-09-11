@@ -55,11 +55,21 @@ Measured, not assumed:
 | `GameObjects-Bronzebeard` | 43 | 7,729 | 5,886 | — | — |
 | **all of it, deduplicated by id** | **159** | **31,836** | **7,651** | **3,655** | **548** |
 
-Across **48 zones**. Splitting at entry 200000 (stock 3.3.5a GameObjects live
-below it): **5,590 stock-shaped ids and 2,061 that are Ascension's own** — the
-worldforged objects the dump was made to find. Named examples of the custom
-ones: `200002 Portal to Auberdine`, `200032 Tark Podium`,
-`200576 Nether Portal`, `200297 Shandy's Clothesline`, `202080 Dart's Nest`.
+Across **48 zones**. Looked up in the stock template table (see the ingester
+below): **4,159 objects are Ascension's own and 3,492 are stock 3.3.5a**; of
+the 548 creatures, 149 are Ascension's own. Named examples of Ascension's
+objects: `90636 Forgotten Sack`, `101911 Drowned Adventurer`,
+`111000 The Law of Light`, `200002 Portal to Auberdine`, `200576 Nether Portal`.
+
+> **This file used to split the two at entry 200000, and that was wrong.**
+> It reported 5,590 stock and 2,061 custom by assuming stock GameObjects sit
+> below 200000 and Ascension's above it. 2,112 of Ascension's objects sit
+> below it — including most of the worldforged treasure the dump was made to
+> find — and 14 stock objects sit above it. Two of the "custom" examples this
+> paragraph used to give, `200297 Shandy's Clothesline` and `202080 Dart's
+> Nest`, are stock WotLK objects. What exposed it was Coin's own map site
+> (below), which shows worldforged treasure at ids like 90636: none of the
+> site's 882 ids under 200000 exists in stock AzerothCore's template table.
 
 > **An earlier draft of this file got those numbers wrong**, and it is worth
 > saying how. It reported 8,165 unique ids across 53 zones with 2,131 custom —
@@ -135,11 +145,70 @@ they look like real doors. The CSVs are not all in `GameObjects-Bronzebeard`:
 `dumps_part2` holds 8 of them alongside its 43 `.txt` files, which is where
 several of the rarer types come from.)
 
+**The cache fills most of the rest.** The same dataset holds the game's own
+description of most of these entries — the merged `gameobjectcache` records —
+so where no dump read a type or model, the catalogue takes it from there. When
+this was written that supplied the type and model of 5,562 more objects and
+left 311 of unknown type; `catalogue/README.md` carries the live figures. A
+dump's value is never replaced, and where both exist they agree: all 1,751
+types, and 1,749 of 1,751 models. As an outside check, for the 2,775
+stock objects filled this way, AzerothCore's own template agrees on the type
+of 2,752 and the model of 2,763; the rest look like Ascension's changes (the
+Wind Stones became `Goober`s, several water wells gained a model).
+
+## Coin's map site
+
+Coin also built **bronzebeardmaps.pages.dev** (source: GitHub
+`CoinThrow/BronzebeardMaps`, first published 2025-03-31). It has 40 zone files,
+Eastern Kingdoms and Kalimdor only, listing 1,795 objects — 1,747 of them
+`Chest`s by the cache's own type — with a name, display id, model path and a
+zone-map position to one decimal place, one row per object per zone.
+
+**Its positions come from `GameObjects-Bronzebeard.zip`.** Coin said so
+(2026-09-11): the world-map X/Y on the site were calculated from the real XYZ
+in that attachment. The files agree. Matched per object and zone, 1,893 of
+the site's 1,968 rows equal a dump's own `MapX`/`MapY` to one decimal place
+(1,645 of them from that zip), and 3 more are within 0.2.
+
+So it is not a second source, and the catalogue does not read it. 1,787 of its
+1,795 objects are already here, with the world coordinates its positions were
+derived from, and counting it as another upload would inflate the
+corroboration count with the same person's same sightings. Its display ids
+agree with the cache records on 1,677 of 1,678, and its model paths are a DBC
+lookup, so the cache fill above already supplies what they would.
+
+What it has beyond the dumps we received is small: **65 sightings**. That is
+eight objects absent from every dump file (checked by scanning the raw bytes,
+not only through the parser) — `90634 Brother's Cherry Pie`,
+`95781 Harvester's Aegis`, `95786 Harvest Scythe`, `387851 Hippogryph Egg`,
+`387853 Emerald Dream Supplies`, `518264 Nether Portal`,
+`518925 Hunter's Cache`, `520063 Scorched Tome` — plus 57 objects placed in a
+zone none of our dumps saw them in, such as `68428 Pile of Bones` in Dun
+Morogh. They suggest the data behind the site is a little larger than the zip.
+Ask Coin for it before reading the site itself.
+
 ## The ingester
 
 `tools/ingest_gameobjects.py`, which runs as the `catalogue` stage of
 `tools/update.py`. It writes `catalogue/gameobjects.tsv`,
 `catalogue/creatures.tsv` and a plain-language `catalogue/README.md` into the
-published dataset. It keeps no state — the catalogue is a pure function of the
-dump files on disk, so re-running is a recompute and there is nothing to go
-stale.
+published dataset. It keeps no state: the catalogue is a pure function of the
+dump files on disk, the merged cache store, which the merge stage finishes
+before this one runs, and `tools/stock_entries.txt`, so re-running is a
+recompute and there is nothing to go stale.
+
+`stock_entries.txt` is the stock reference: the template entry ids
+AzerothCore's base world database ships, as ranges, and nothing else. It is
+written by `tools/make_stock_entries.py`; regenerate it from any AzerothCore
+checkout with
+
+    python -B tools/make_stock_entries.py --src <azerothcore-wotlk>/data/sql/base/db_world
+
+The ingester refuses to run without it rather than calling every entry
+Ascension's own. `tools/test_catalogue.py` pins the two named ways the old id
+range was wrong.
+
+**Read these TSVs with quoting turned off.** Some names begin with a double
+quote (`"Evidence"`, `"Borrowed" Dark Iron Signet`), and a CSV reader on its
+defaults strips it silently. That is how an earlier comparison concluded the
+ingester dropped those quotes. It does not.

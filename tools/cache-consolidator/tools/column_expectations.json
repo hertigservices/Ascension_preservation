@@ -1,4 +1,30 @@
 {
+  "reviewed_count_changes": {
+    "2026-09-11-gameobject-union": {
+      "entries": [
+        184811,
+        184812,
+        184813,
+        184815
+      ],
+      "columns": [
+        "questItem1",
+        "questItem2",
+        "questItem3"
+      ],
+      "previous_counts": [
+        6,
+        5,
+        5
+      ],
+      "reviewed_counts": [
+        2,
+        1,
+        1
+      ],
+      "reason": "Newest-capture union selection changed four Sealed Coffin records from Season 9 (2026-03-23) to Free-Pick (2026-08-06). Original submitted WDB bytes verify all three Free-Pick quest-item fields are zero. All four older nonzero records remain byte-identical in raw/gameobjectcache.pack.gz and their values remain in by-mode/season-9/gameobjectcache.tsv.gz. This is an explained cross-mode winner change, not lost payloads; only these three count baselines were corrected."
+    }
+  },
   "_readme": [
     "Baseline and explanations for tools/audit_columns.py.",
     "",
@@ -4980,9 +5006,9 @@
     "union/gameobjectcache.tsv.gz:displayId": 15487,
     "union/gameobjectcache.tsv.gz:entry": 15511,
     "union/gameobjectcache.tsv.gz:name": 15249,
-    "union/gameobjectcache.tsv.gz:questItem1": 6,
-    "union/gameobjectcache.tsv.gz:questItem2": 5,
-    "union/gameobjectcache.tsv.gz:questItem3": 5,
+    "union/gameobjectcache.tsv.gz:questItem1": 2,
+    "union/gameobjectcache.tsv.gz:questItem2": 1,
+    "union/gameobjectcache.tsv.gz:questItem3": 1,
     "union/gameobjectcache.tsv.gz:questItem4": 1,
     "union/gameobjectcache.tsv.gz:questItem5": 0,
     "union/gameobjectcache.tsv.gz:questItem6": 0,
@@ -5045,7 +5071,7 @@
     "union/itemcache.tsv.gz:dmg_min2": 1271,
     "union/itemcache.tsv.gz:dmg_type1": 4263,
     "union/itemcache.tsv.gz:dmg_type2": 278,
-    "union/itemcache.tsv.gz:duration": 8381,
+    "union/itemcache.tsv.gz:duration": 8110,
     "union/itemcache.tsv.gz:entry": 551995,
     "union/itemcache.tsv.gz:fire_res": 4232,
     "union/itemcache.tsv.gz:frost_res": 3872,

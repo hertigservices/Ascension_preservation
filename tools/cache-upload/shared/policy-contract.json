@@ -1,0 +1,53 @@
+{
+  "policy": 1,
+  "names": [
+    "itemcache.wdb",
+    "gameobjectcache.wdb",
+    "creaturecache.wdb",
+    "npccache.wdb",
+    "questcache.wdb",
+    "pagetextcache.wdb",
+    "itemnamecache.wdb",
+    "mobspells.lua",
+    "aio_client.lua",
+    "auctionator_price_database.lua",
+    "gathermate2.lua",
+    "coasniff.lua",
+    "wildcardharvest.lua",
+    "ascension_coareader.lua",
+    "ascensionharvest.lua"
+  ],
+  "modes": [
+    "unknown",
+    "conquest-of-azeroth",
+    "coa-alpha",
+    "coa-beta",
+    "coa-ptr",
+    "free-pick",
+    "season-10-freepick",
+    "season-10-wildcard",
+    "season-9",
+    "warcraft-reborn",
+    "live-qa",
+    "stress-test"
+  ],
+  "folders": {
+    "unknown": "unknown",
+    "conquest-of-azeroth": "Unknown realm - Conquest of Azeroth",
+    "coa-alpha": "Unknown realm - CoA Alpha - Development",
+    "coa-beta": "Unknown realm - CoA Beta",
+    "coa-ptr": "Unknown realm - CoA PTR",
+    "free-pick": "Unknown realm - Free-Pick",
+    "season-10-freepick": "Unknown realm - Season 10 Freepick",
+    "season-10-wildcard": "Unknown realm - Season 10 Wildcard",
+    "season-9": "Unknown realm - Season 9",
+    "warcraft-reborn": "Unknown realm - Warcraft Reborn",
+    "live-qa": "Unknown realm - Live QA",
+    "stress-test": "Unknown realm - Stress Test"
+  },
+  "review": [
+    "aio_client.lua",
+    "coasniff.lua",
+    "wildcardharvest.lua"
+  ]
+}

@@ -50,7 +50,7 @@ import os, sys, csv, gzip, struct, argparse, collections, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import config
+import config, build_cache
 
 NAMESPACE = "AscensionStockData"
 DEFAULT_MODE = "conquest-of-azeroth"
@@ -394,7 +394,23 @@ def main(argv=None):
     files, counts, captured = {}, {}, ""
     placeholders = []
     written = set()
+    reuse = build_cache.BuildCache('stock', outdir)
     for table, (cache, _fields) in TABLES.items():
+        input_paths = [os.path.join(data, view, cache + '.tsv.gz')
+                       for view in (os.path.join('by-mode', a.mode), 'union')]
+        input_paths.append(os.path.join(data, ICON_TSV))
+        incoming = captured
+        inputs = build_cache.fingerprint(input_paths, [a.mode, incoming])
+        hit = reuse.load(table, inputs)
+        if hit:
+            meta, paths = hit
+            files[table], counts[table] = meta['files'], meta['counts']
+            captured = meta['captured']
+            if table == 'items':
+                placeholders = meta['placeholders']
+            written.update(os.path.basename(p) for p in paths)
+            print(f"  {table:<10} reused verified stock-client tables")
+            continue
         view, n_primary, n_union, newest = merged_view(data, a.mode, cache)
         captured = max(captured, newest)
         stats = collections.Counter()
@@ -405,6 +421,11 @@ def main(argv=None):
         written.update(files[table])
         if table == "items":
             placeholders = placeholder_names(view)
+        if inputs != build_cache.fingerprint(input_paths, [a.mode, incoming]):
+            raise RuntimeError('decoded inputs changed during stock export')
+        reuse.save(table, inputs, [os.path.join(outdir, f) for f in files[table]],
+                   {'files': files[table], 'counts': counts[table], 'captured': captured,
+                    'placeholders': placeholders if table == 'items' else []})
         print(f"  {table:<10} {len(view):>7,} rows  ({n_primary:,} from {a.mode}, "
               f"{n_union:,} from union)  -> {len(files[table])} files")
     write_init(outdir, a.mode, captured, files, counts)

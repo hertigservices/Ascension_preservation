@@ -246,7 +246,7 @@ def _q(s):
         elif ch == "\r":
             out.append("\\r")
         elif ord(ch) < 32:
-            out.append("\\%d" % ord(ch))
+            out.append("\\%03d" % ord(ch))
         else:
             out.append(ch)
     out.append('"')

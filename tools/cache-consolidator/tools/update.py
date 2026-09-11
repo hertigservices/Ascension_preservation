@@ -7,9 +7,11 @@
               keep genuine variants, identify unlabelled submissions by fingerprint
   3. catalogue  turn the submitted world dumps into a list of objects and
                 creatures that exist -- a catalogue, never a spawn table
-  4. export   write the decoded per-mode / union / raw views
-  5. rebuild  write merged, client-loadable .wdb files per game mode
-  6. audit    scan everything about to be published for player data
+  4. mapdata  inventory submitted server terrain: which map ids exist, how many
+              tiles each has, and what DBC set came with them
+  5. export   write the decoded per-mode / union / raw views
+  6. rebuild  write merged, client-loadable .wdb files per game mode
+  7. audit    scan everything about to be published for player data
 
 Every stage is idempotent, so re-running after a bad drop is safe and cheap.
 The audit is the gate: a non-zero exit means DO NOT PUBLISH until it is explained.
@@ -29,6 +31,14 @@ STAGES = [("intake",  "intake.py"),
           # need no merge store, only a recompute from the files on disk, so they
           # sit here: after the caches, before the guide that describes them.
           ("catalogue", "ingest_gameobjects.py"),
+          # Server map data -- maps/vmaps/mmaps/dbc. Also not a cache: no
+          # player's client wrote it, a core's extractors did. It is a stage
+          # because for a while it was not one, and the cost of that was
+          # invisible rather than loud: a 2 GB submission unpacked, reported
+          # `ok`, and contributed nothing, because intake ledgers *.wdb and no
+          # other stage could read a .map. Runs beside the catalogue, before the
+          # guide that has to describe its output.
+          ("mapdata", "mapdata.py"),
           ("export",  "export.py"),
           # The same records once more, as Lua tables an addon on a STOCK 3.3.5a
           # client can load. It reads export's views, so it runs after them, and

@@ -25,13 +25,31 @@ format and were not mentioned in the description at all. Creature entry 1622
 and GameObject entry 1622 are unrelated things, so they are catalogued
 separately and never merged.
 
-This stage keeps no state. The dumps are files on disk and the catalogue is a
-pure function of them, so re-running is a recompute, not a re-merge, and there
-is no cache to go stale.
-"""
-import os, sys, io, csv, glob, gzip, json, collections
+Stock or Ascension's own
+------------------------
+Answered by looking the id up in `stock_entries.txt` -- the template ids
+AzerothCore's base world database ships, written by make_stock_entries.py --
+and never by an id range. This stage used to assume stock GameObjects sit below
+200000 and Ascension's above it. Both halves were false: worldforged treasure
+like `90636 Forgotten Sack` sits far below it, stock WotLK props like `200296
+Washing Tub` above it, and the rule undercounted Ascension's objects by half.
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+Type and model from the cache
+-----------------------------
+The dumps read a type and a model for under a quarter of the objects. The
+game's own answer for most of the rest is already in this dataset: the merged
+gameobjectcache records, which are what the server told a client about each
+entry. They fill a blank; they never replace what a dump read.
+
+This stage keeps no state. The catalogue is a pure function of the dump files
+on disk, the shipped stock reference, and the merged cache store, which the
+merge stage has finished writing before this one runs. Re-running is a
+recompute, not a re-merge, and there is no cache of our own to go stale.
+"""
+import os, sys, io, csv, glob, gzip, json, bisect, collections
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import config
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -39,10 +57,27 @@ if hasattr(sys.stdout, "reconfigure"):
 
 OUT_DIR = os.path.join(config.OUT, "catalogue").replace("\\", "/")
 
-# Stock 3.3.5a GameObject entries live below this; Ascension's worldforged ones
-# were given a fresh range above it. It is a rule of thumb for reporting, not a
-# guarantee, so it is never used to include or exclude a row.
-CUSTOM_FROM = 200000
+STOCK_FILE = os.path.join(HERE, "stock_entries.txt")
+# Which stock template table each id space is looked up in.
+STOCK_TABLE = {"gameobject": "gameobject_template",
+               "creature": "creature_template"}
+
+# The cache carries a GameObject's type as a number and the dumps wrote a
+# name. These are spelled the way the dumps spell them -- `Questgiver`,
+# `MOTransport`, `AuraGen`, `Difficulty` -- because 1,751 objects carry both,
+# and each of the 20 numbers seen there pairs with exactly one name. The
+# numbers the dumps never used follow the 3.3.5a enum.
+GO_TYPES = {0: "Door", 1: "Button", 2: "Questgiver", 3: "Chest", 4: "Binder",
+            5: "Generic", 6: "Trap", 7: "Chair", 8: "SpellFocus", 9: "Text",
+            10: "Goober", 11: "Transport", 12: "AreaDamage", 13: "Camera",
+            14: "MapObject", 15: "MOTransport", 16: "DuelArbiter",
+            17: "FishingNode", 18: "Ritual", 19: "Mailbox",
+            20: "AuctionHouse", 21: "GuardPost", 22: "SpellCaster",
+            23: "MeetingStone", 24: "FlagStand", 25: "FishingHole",
+            26: "FlagDrop", 27: "MiniGame", 28: "LotteryKiosk",
+            29: "CapturePoint", 30: "AuraGen", 31: "Difficulty",
+            32: "BarberChair", 33: "DestructibleBuilding", 34: "GuildBank",
+            35: "TrapDoor"}
 
 # Field names as the dump files write them, mapped to ours.
 FIELDS = {
@@ -305,6 +340,92 @@ def has_position(r):
     return None not in (x, y, z) and (x, y, z) != (0.0, 0.0, 0.0)
 
 
+def load_stock(path=STOCK_FILE):
+    """{table: sorted [(lo, hi)]} from stock_entries.txt.
+
+    A missing or empty table stops the run. With no reference every object
+    would come out as Ascension's own, and that reads exactly like a result.
+    """
+    tables, cur = {}, None
+    with io.open(path, encoding="utf-8") as f:
+        for n, ln in enumerate(f, 1):
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            if ln.startswith("[") and ln.endswith("]"):
+                cur = tables.setdefault(ln[1:-1], [])
+                continue
+            if cur is None:
+                raise SystemExit(f"{path}:{n}: an id before any [table] line")
+            lo, _, hi = ln.partition("-")
+            cur.append((int(lo), int(hi or lo)))
+    for t in STOCK_TABLE.values():
+        if not tables.get(t):
+            raise SystemExit(f"{path}: no [{t}] ids; refusing to guess which "
+                             "entries are stock")
+    return {t: sorted(r) for t, r in tables.items()}
+
+
+def is_stock(ranges, gid):
+    i = bisect.bisect_right(ranges, (gid, float("inf"))) - 1
+    return i >= 0 and ranges[i][0] <= gid <= ranges[i][1]
+
+
+def cache_attributes():
+    """entry -> (type number, display id) from the merged gameobjectcache.
+
+    The same records, and the same winner per entry, that the published
+    union/gameobjectcache view shows -- read through export's own functions
+    rather than a second copy of its winner rule, and from the store rather
+    than the union file because this stage runs before export writes it.
+    """
+    import export
+    decode = export.DECODERS["gameobjectcache"][0]
+    out = {}
+    for entry, (_sha1, _row, payload) in export.pick_winners(
+            export.load_cache("gameobjectcache")).items():
+        try:
+            d = decode(entry, payload)[0]
+        except Exception:
+            continue                    # export counts these as bad and skips them too
+        out[entry] = (d.get("type"), d.get("displayId"))
+    return out
+
+
+def apply_cache(folded, attrs):
+    """Fill type and display id from the cache where no dump read them.
+
+    A dump's value always stands. Where both exist they are compared and the
+    agreement is counted, so the README states it from this run rather than
+    from a number somebody measured once.
+    """
+    st = collections.Counter()
+    for gid, e in folded.items():
+        a = attrs.get(gid)
+        if a is None:
+            continue
+        num, disp = a
+        name = GO_TYPES.get(num)
+        if e["types"]:
+            if name:
+                st["type_compared"] += 1
+                st["type_agree"] += e["types"].most_common(1)[0][0] == name
+        elif name:
+            e["cache_type"] = name
+            st["type_filled"] += 1
+        else:
+            st["type_unknown_number"] += 1
+        if disp is None:
+            continue
+        if e["displays"]:
+            st["display_compared"] += 1
+            st["display_agree"] += e["displays"].most_common(1)[0][0] == str(disp)
+        else:
+            e["cache_display"] = str(disp)
+            st["display_filled"] += 1
+    return st
+
+
 # ------------------------------------------------------------------ gathering
 def sightings():
     """Read every dump file into a flat list of sightings, per id space."""
@@ -367,6 +488,7 @@ def fold(rows):
                 "zones": set(), "submissions": set(), "files": set(),
                 "sightings": 0, "best": None,
                 "lock_id": None, "lock_type": "",
+                "cache_type": "", "cache_display": "", "origin": "",
             }
         e["sightings"] += 1
         if r["name"]:
@@ -389,10 +511,12 @@ def fold(rows):
 
 
 # ------------------------------------------------------------------- writing
+# `origin` is last so that anything already reading these files by position
+# keeps working.
 COLS = ["id", "name", "type", "display_id", "sightings", "submissions",
         "zones", "example_zone", "example_map_id",
         "example_x", "example_y", "example_z", "example_map_x", "example_map_y",
-        "lock_id", "lock_type", "other_names", "seen_in", "zone_list"]
+        "lock_id", "lock_type", "other_names", "seen_in", "zone_list", "origin"]
 
 
 def _cell(v):
@@ -420,8 +544,9 @@ def write_tsv(path, folded):
             f.write("\t".join(_cell(v) for v in [
                 gid,
                 names[0] if names else "",
-                e["types"].most_common(1)[0][0] if e["types"] else "",
-                e["displays"].most_common(1)[0][0] if e["displays"] else "",
+                final_type(e),
+                (e["displays"].most_common(1)[0][0] if e["displays"]
+                 else e["cache_display"]),
                 e["sightings"], len(e["submissions"]), len(e["zones"]),
                 best.get("zone", ""), best.get("map_id"),
                 _coord(best.get("x")), _coord(best.get("y")),
@@ -431,29 +556,73 @@ def write_tsv(path, folded):
                 " | ".join(names[1:]),
                 " | ".join(sorted(e["submissions"])),
                 " | ".join(sorted(e["zones"])),
+                e["origin"],
             ]) + "\n")
             n += 1
     return n
 
 
+def final_type(e):
+    """What a dump read, else what the cache said, else unknown."""
+    return e["types"].most_common(1)[0][0] if e["types"] else e["cache_type"]
+
+
+def set_origins(folded, ranges):
+    for gid, e in folded.items():
+        e["origin"] = "stock" if is_stock(ranges, gid) else "ascension"
+
+
 def summarise(folded):
     s = {"ids": len(folded)}
-    s["custom"] = sum(1 for g in folded if g >= CUSTOM_FROM)
-    s["stock"] = s["ids"] - s["custom"]
+    s["ascension"] = sum(1 for e in folded.values() if e["origin"] == "ascension")
+    s["stock"] = s["ids"] - s["ascension"]
+    # The two ways the old id-range rule was wrong, as named rows, so the
+    # README shows its evidence instead of asserting it.
+    low = sorted(g for g, e in folded.items()
+                 if e["origin"] == "ascension" and g < 200000)
+    high = sorted(g for g, e in folded.items()
+                  if e["origin"] == "stock" and g >= 200000)
+    s["low_ascension"], s["high_stock"] = len(low), len(high)
+    s["by_range"] = sum(1 for g in folded if g >= 200000)
+    # Worldforged chests make the point best -- they are what the dumps were
+    # collected to find -- so prefer them when there are enough.
+    chests = [g for g in low if final_type(folded[g]) == "Chest"]
+    pick = chests if len(chests) >= 4 else low
+    s["low_examples"] = [(g, _first_name(folded[g]))
+                         for g in pick[::max(1, len(pick) // 4)][:4]]
+    s["high_examples"] = [(g, _first_name(folded[g])) for g in high[:4]]
     s["typed"] = sum(1 for e in folded.values() if e["types"])
+    s["typed_cache"] = sum(1 for e in folded.values()
+                           if not e["types"] and e["cache_type"])
+    s["untyped"] = sum(1 for e in folded.values() if not final_type(e))
+    s["displayed"] = sum(1 for e in folded.values() if e["displays"])
+    s["displayed_cache"] = sum(1 for e in folded.values()
+                               if not e["displays"] and e["cache_display"])
     s["no_position"] = sum(1 for e in folded.values() if not e["best"])
     s["unnamed"] = sum(1 for e in folded.values() if not e["names"])
     s["name_conflicts"] = sum(1 for e in folded.values() if len(e["names"]) > 1)
     s["corroborated"] = sum(1 for e in folded.values() if len(e["submissions"]) > 1)
     s["zones"] = len({z for e in folded.values() for z in e["zones"]})
-    s["types"] = collections.Counter()
-    for e in folded.values():
-        if e["types"]:
-            s["types"][e["types"].most_common(1)[0][0]] += 1
+    s["types"] = collections.Counter(final_type(e) for e in folded.values()
+                                     if final_type(e))
     return s
 
 
-def readme(go, cr, files):
+def _first_name(e):
+    return e["names"].most_common(1)[0][0] if e["names"] else "(unnamed)"
+
+
+def stock_revision(path=STOCK_FILE):
+    """The AzerothCore revision the stock reference was written from."""
+    with io.open(path, encoding="utf-8") as f:
+        for ln in f:
+            if ln.startswith("# Source revision:"):
+                rev = ln.split(":", 1)[1].split()
+                return " ".join([rev[0][:10]] + rev[1:]) if rev else "unknown revision"
+    return "unknown revision"
+
+
+def readme(go, cr, files, st, stock_rev):
     """Say what this is, and what it is not, before anybody builds on it."""
     L = ["# The world catalogue (`catalogue/`)\n",
          "Two lists of things that exist in the world: **objects** and",
@@ -495,38 +664,69 @@ def readme(go, cr, files):
          "|---|---|",
          "| `id` | the entry id the server uses |",
          "| `name` | the name most dumps agreed on |",
-         "| `type` | object type, **blank where it could not be read** (see below) |",
-         "| `display_id` | the model the client drew; blank if not recorded |",
+         "| `type` | object type: what a dump read, else what the game's own "
+         "cache says; **blank where neither knows** (see below) |",
+         "| `display_id` | the model id, from a dump, else from the cache; "
+         "blank if neither has it |",
          "| `sightings` | how many rows across all files mention this id |",
-         "| `submissions` | how many separate uploads saw it -- 2 or more means "
-         "two people independently found the same thing |",
+         "| `submissions` | how many separate uploads saw it -- uploads, not "
+         "people (see below) |",
          "| `zones` | how many distinct zones it was seen in |",
          "| `example_*` | **one** position it was seen at, not its only one |",
          "| `lock_id`, `lock_type` | for locked objects, where recorded |",
          "| `other_names` | every other name any dump gave this id |",
          "| `seen_in` | which uploads it came from |",
-         "| `zone_list` | every zone it was seen in |\n",
-         "## `type` is blank more often than you would expect\n",
-         "That is on purpose. The dumper wrote `Door` when it could not read an",
-         "object's type, and it could not read it most of the time: of the",
-         "6,395 rows marked `Door`, 6,393 have no model id either, while every",
-         "row of every other type has one. `Grave Moss` -- a herb -- is filed as",
-         "a `Door`. Reporting that as a real breakdown would tell you the world",
-         "is four-fifths doors.\n",
-         "So an untyped `Door` is published as **blank, meaning unknown**. The",
-         "types that remain are the ones the dump actually read:\n"]
+         "| `zone_list` | every zone it was seen in |",
+         "| `origin` | `stock` if stock 3.3.5a has this entry, `ascension` if "
+         "it does not (see below) |\n",
+         "## Reading these files\n",
+         "They are tab-separated with no quoting at all, and some names begin",
+         "with a double quote: `\"Evidence\"`, `\"Borrowed\" Dark Iron Signet`.",
+         "A CSV reader left on its defaults takes that quote for field quoting",
+         "and strips it without a word. Turn quoting off -- in Python,",
+         "`csv.reader(f, delimiter=\"\\t\", quoting=csv.QUOTE_NONE)`.\n",
+         "## Which of these are Ascension's own?\n",
+         "The `origin` column. An entry is `stock` if stock 3.3.5a's template",
+         "table has it -- looked up in the ids AzerothCore's base world",
+         "database ships, `stock_entries.txt` beside the tool -- and",
+         "`ascension` if it does not. That is everything Ascension added,",
+         "whether they made it or brought it back from a later expansion.\n",
+         "| file | ascension | stock |",
+         "|---|---:|---:|",
+         f"| `gameobjects.tsv` | {go['ascension']:,} | {go['stock']:,} |",
+         f"| `creatures.tsv` | {cr['ascension']:,} | {cr['stock']:,} |\n",
+         "**This used to be answered by an id range, and the range was",
+         "wrong.** Earlier versions of this file said stock objects sit below",
+         f"200000 and Ascension's above it. {go['low_ascension']:,} of",
+         "Ascension's objects sit below it -- "
+         + ", ".join(f"`{g} {n}`" for g, n in go["low_examples"]) + " --",
+         f"and {go['high_stock']:,} stock objects sit above it -- "
+         + ", ".join(f"`{g} {n}`" for g, n in go["high_examples"]) + ".",
+         f"The range called {go['by_range']:,} objects Ascension's; the stock",
+         f"table says {go['ascension']:,}.\n",
+         "An id being stock says the entry exists in 3.3.5a, not that",
+         "Ascension left it alone: a few stock entries carry a different name",
+         "here. `origin` answers only the first question.\n",
+         "## Where `type` and `display_id` come from\n",
+         "First from the dumps, and there is a catch. The dumper wrote `Door`",
+         "when it could not read an object's type, and it could not read it",
+         "most of the time: of the 6,395 rows marked `Door`, 6,393 have no",
+         "model id either, while every row of every other type has one.",
+         "`Grave Moss` -- a herb -- is filed as a `Door`. So an untyped `Door`",
+         "counts as **unknown**, not as a door.\n",
+         "Where no dump read a value, it comes from the game itself: the",
+         "gameobjectcache records elsewhere in this dataset, which are the",
+         "server's own description of each entry. That supplied the type of",
+         f"{go['typed_cache']:,} objects and the model of "
+         f"{go['displayed_cache']:,}. A dump's value is never replaced. Where",
+         "both exist they were compared on this run: the types agree for",
+         f"{st['type_agree']:,} of {st['type_compared']:,} objects and the",
+         f"models for {st['display_agree']:,} of {st['display_compared']:,}.\n",
+         f"**{go['untyped']:,} objects are still of unknown type**: no dump",
+         "read it and no cache record covers them. The types as published:\n"]
     for t, n in go["types"].most_common():
         L.append(f"* `{t}` — {n:,}")
     L += ["",
-          "Types and model ids exist only in the `.csv` dumps, so zones that",
-          "were only ever dumped to `.txt` have neither.\n",
-          "## Which of these are Ascension's own?\n",
-          "Stock 3.3.5a GameObjects have ids below 200000 and Ascension's",
-          f"worldforged ones were given a range above it, so **{go['custom']:,}",
-          f"of the {go['ids']:,} objects look custom** and",
-          f"{go['stock']:,} look like stock 3.3.5a. That is a rule of thumb for",
-          "reading the list, not a guarantee, and nothing was included or left",
-          "out on the strength of it.\n",
           "## Honest gaps\n",
           f"* **{go['no_position']:,} objects have no usable position.** Their",
           "  coordinates were recorded as exactly 0,0,0. The object is real and",
@@ -535,12 +735,15 @@ def readme(go, cr, files):
           f"* **{go['name_conflicts']:,} objects were given more than one name.**",
           "  All of them are kept, in `other_names`, rather than one being",
           "  quietly chosen and the rest dropped.",
-          f"* **Only {go['corroborated']:,} objects were seen by more than one",
-          "  upload.** The rest rest on a single contributor's dump.",
+          f"* **{go['corroborated']:,} objects were seen in more than one",
+          "  upload.** Uploads are not people. One contributor can send several",
+          "  -- `docs/GAMEOBJECT-DUMPS.md` says who sent what -- so a second",
+          "  upload is a second sighting, not a second witness.",
           f"* Zone names are printed exactly as the dumps wrote them. `Aszhara`",
           "  and `Azshara` are **two different zones** here, not a typo -- they",
           "  have different internal map names and not one id in common.\n",
-          f"Built from {files} dump files across {go['zones']} zones.\n"]
+          f"Built from {files} dump files across {go['zones']} zones. Stock",
+          f"reference: AzerothCore base world database, {stock_rev}.\n"]
     return "\n".join(L) + "\n"
 
 
@@ -549,25 +752,41 @@ def main():
     if not files:
         print("no dump_*.txt / dump_*.csv files found; nothing to catalogue")
         return 0
+    stock = load_stock()
     os.makedirs(OUT_DIR, exist_ok=True)
     go = fold(per["gameobject"])
     cr = fold(per["creature"])
+    set_origins(go, stock[STOCK_TABLE["gameobject"]])
+    set_origins(cr, stock[STOCK_TABLE["creature"]])
+    # Creatures stay as the dumps left them: the shared `type` column means a
+    # GameObject type, and a creature's type is a different thing entirely.
+    st = apply_cache(go, cache_attributes())
     n_go = write_tsv(os.path.join(OUT_DIR, "gameobjects.tsv"), go)
     n_cr = write_tsv(os.path.join(OUT_DIR, "creatures.tsv"), cr)
     sgo, scr = summarise(go), summarise(cr)
 
     with io.open(os.path.join(OUT_DIR, "README.md"), "w",
                  encoding="utf-8", newline="\n") as f:
-        f.write(readme(sgo, scr, files))
+        f.write(readme(sgo, scr, files, st, stock_revision()))
 
     print(f"  read {files} dump file(s): "
           f"{len(per['gameobject']):,} object sightings, "
           f"{len(per['creature']):,} creature sightings")
     print(f"  gameobjects.tsv  {n_go:,} objects   "
-          f"({sgo['custom']:,} custom-range, {sgo['typed']:,} with a readable "
-          f"type, {sgo['no_position']:,} with no position)")
-    print(f"  creatures.tsv    {n_cr:,} creatures ({scr['no_position']:,} with "
-          f"no position)")
+          f"({sgo['ascension']:,} Ascension's own, {sgo['stock']:,} stock; "
+          f"{sgo['no_position']:,} with no position)")
+    print(f"    type: {sgo['typed']:,} from dumps + {sgo['typed_cache']:,} from "
+          f"cache, {sgo['untyped']:,} unknown; agree {st['type_agree']:,}/"
+          f"{st['type_compared']:,}")
+    print(f"    model: {sgo['displayed']:,} from dumps + "
+          f"{sgo['displayed_cache']:,} from cache; agree "
+          f"{st['display_agree']:,}/{st['display_compared']:,}")
+    if st["type_unknown_number"]:
+        print(f"  !! {st['type_unknown_number']:,} cache records carry a type "
+              "number GO_TYPES does not name; left blank")
+    print(f"  creatures.tsv    {n_cr:,} creatures ({scr['ascension']:,} "
+          f"Ascension's own, {scr['stock']:,} stock; {scr['no_position']:,} "
+          f"with no position)")
     print(f"  across {sgo['zones']} zones; {sgo['corroborated']:,} objects "
           f"seen by more than one upload -> catalogue/README.md")
     for p, why in bad:

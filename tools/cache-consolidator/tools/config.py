@@ -51,6 +51,14 @@ SOURCES  = STORE + "/sources.tsv"
 WORK     = WORK.replace("\\", "/")
 OUT      = OUT.replace("\\", "/")
 
+# Map.dbc copies consulted ONLY to put a name against a map id found in a
+# submitted map-data tree. A submission carries its own Map.dbc, but that copy
+# is usually the stock one, which defines none of the custom ids whose terrain
+# is the interesting part -- so the inventory comes out complete and anonymous.
+# Read-only, never published, and never a source of rows: an id no reference
+# names is still reported, just without a name.
+MAP_DBC_REFS = [p.replace("\\", "/") for p in _cfg.get("map_dbc_refs", [])]
+
 # Collections kept outside _inbox. Scanned read-only; nothing is ever written there.
 EXTRA_SCAN_ROOTS = [p.replace("\\", "/") for p in _cfg.get("extra_scan_roots", [])]
 if os.environ.get("ASCENSION_CACHE_EXTRA_ROOTS"):

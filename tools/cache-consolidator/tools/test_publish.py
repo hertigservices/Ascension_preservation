@@ -19,6 +19,10 @@ class PublishOwnershipTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='publish-test-')
         self.addCleanup(self.tmp.cleanup)
         self.repo = Path(self.tmp.name)
+        for name, value in [('WORK', str(self.repo / 'work')), ('INBOX', str(self.repo / 'inbox'))]:
+            context = patch.object(publish.config, name, value)
+            context.start()
+            self.addCleanup(context.stop)
         (self.repo / 'cachedata').mkdir()
         (self.repo / 'tools').mkdir()
         (self.repo / 'docs').mkdir()
@@ -102,6 +106,37 @@ class PublishOwnershipTests(unittest.TestCase):
         self.push.assert_not_called()
 
 
+
+class PushRecoveryTests(unittest.TestCase):
+    def test_normal_success_uses_one_efficient_push(self):
+        with patch.object(publish, 'stream', return_value=(0, ['ok'])) as transfer:
+            self.assertEqual(publish.push_branch('main'), (0, ['ok']))
+        self.assertEqual(transfer.call_count, 1)
+        self.assertNotIn('--no-thin', transfer.call_args.args[0])
+
+    def test_unresolved_bases_retry_without_pipeline_or_history_changes(self):
+        error = ['remote: fatal: pack has 92 unresolved deltas', 'error: failed to push']
+        with patch.object(publish, 'stream', side_effect=[(1, error), (0, ['ok'])]) as transfer, \
+             patch.object(publish, 'consolidate') as consolidate, patch.object(publish, 'git') as git:
+            self.assertEqual(publish.push_branch('main'), (0, ['ok']))
+        self.assertEqual(transfer.call_count, 2)
+        self.assertEqual(transfer.call_args.args[0],
+                         ['git', 'push', '--progress', '--no-thin', 'origin', 'main'])
+        consolidate.assert_not_called()
+        git.assert_not_called()
+
+    def test_fallback_failure_remains_failure_and_is_bounded(self):
+        error = ['remote: fatal: pack has 2 unresolved deltas']
+        with patch.object(publish, 'stream', return_value=(1, error)) as transfer:
+            self.assertEqual(publish.push_branch('main'), (1, error))
+        self.assertEqual(transfer.call_count, 2)
+
+    def test_other_rejections_are_not_retried(self):
+        for error in ['non-fast-forward', 'Permission denied', 'remote unpack failed: index-pack failed']:
+            with self.subTest(error=error), patch.object(publish, 'stream', return_value=(1, [error])) as transfer:
+                self.assertEqual(publish.push_branch('main'), (1, [error]))
+                self.assertEqual(transfer.call_count, 1)
+
 class BusyTests(unittest.TestCase):
     def test_contended_publish_never_runs_pipeline(self):
         with patch.object(publish, 'Lock') as lock, patch.object(publish, '_publish') as run:
@@ -121,7 +156,9 @@ class BusyTests(unittest.TestCase):
         log = Mock()
         runner = tray_app.Runner(log, Mock())
         proc = SimpleNamespace(stdout=io.StringIO('lock held\n'), wait=lambda: publish.BUSY_EXIT)
-        with patch.object(tray_app.subprocess, 'Popen', return_value=proc):
+        with tempfile.TemporaryDirectory(prefix='runner-test-') as work, \
+             patch.object(tray_app.config, 'WORK', work), \
+             patch.object(tray_app.subprocess, 'Popen', return_value=proc):
             self.assertEqual(runner.run(False, 'test'), publish.BUSY_EXIT)
         self.assertIsNone(runner.last_ok)
         self.assertIn('waiting', runner.last_result)
@@ -176,7 +213,8 @@ class ArrivalTests(unittest.TestCase):
                 self.assertTrue((inbox / 'new.zip').exists())
                 self.assertTrue((inbox / 'folder' / 'old.lua').exists())
                 self.assertTrue((inbox / 'folder' / 'new.lua').exists())
-                self.assertFalse((inbox / 'old.zip').exists())
+                # GUI no longer files inputs: only the locked publisher has completion evidence.
+                self.assertTrue((inbox / 'old.zip').exists())
                 self.assertNotIn('new.zip', watcher.handled)
                 self.assertNotIn(os.path.join('folder', 'new.lua'), watcher.handled)
                 self.assertNotIn(os.path.join('archive', 'late.zip'), watcher.handled)

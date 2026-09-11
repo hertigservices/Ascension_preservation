@@ -1,0 +1,11 @@
+{
+ "url":"https://REPLACE-WITH-DEPLOYED-UPLOAD-ORIGIN",
+ "state":"C:/AscensionArchive/upload-private",
+ "work":"C:/AscensionArchive/intake",
+ "inbox":"C:/AscensionArchive/intake/_inbox",
+ "out":"C:/AscensionArchive/cachedata",
+ "publish_repo":"C:/AscensionArchive/ascension-data",
+ "publisher":"C:/AscensionArchive/intake/tools/publish.py",
+ "node":"C:/Program Files/nodejs/node.exe",
+ "python":"C:/Users/Ammo/AppData/Local/Programs/Python/Python314/python.exe"
+}

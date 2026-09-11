@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "component": "private-upload-collector",
+  "files": [
+    {
+      "source": "tools/cache-upload/collector/collector.py",
+      "destination": "collector/collector.py"
+    },
+    {
+      "source": "tools/cache-upload/collector/validate.mjs",
+      "destination": "collector/validate.mjs"
+    },
+    {
+      "source": "tools/cache-upload/collector/install-startup.ps1",
+      "destination": "collector/install-startup.ps1"
+    },
+    {
+      "source": "tools/cache-upload/shared/policy.mjs",
+      "destination": "shared/policy.mjs"
+    },
+    {
+      "source": "tools/cache-upload/node_modules/luaparse/package.json",
+      "destination": "node_modules/luaparse/package.json"
+    },
+    {
+      "source": "tools/cache-upload/node_modules/luaparse/luaparse.js",
+      "destination": "node_modules/luaparse/luaparse.js"
+    },
+    {
+      "source": "tools/cache-upload/node_modules/luaparse/LICENSE",
+      "destination": "node_modules/luaparse/LICENSE"
+    },
+    {
+      "source": "tools/cache-upload/shared/policy-contract.json",
+      "destination": "shared/policy-contract.json"
+    }
+  ]
+}

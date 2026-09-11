@@ -1,5 +1,8 @@
 # Ascension Preservation
 
+
+**Community data processing:** [Inspect how uploads are validated, merged, audited and published](tools/cache-consolidator/docs/PROCESSING-PIPELINE.md).
+
 Tools and protocol research for reconstructing Ascension locally with a user-supplied
 3.3.5a client and AzerothCore installation.
 

@@ -41,10 +41,10 @@ WHY IT RENAMES ARRIVING ARCHIVES BUT NEVER LOOSE FILES
     filename against a five-name allow-list, so AIO_Client (1).lua is not a slightly
     wrong name -- it is an unrecognised file, dropped without comment.
 
-    Files already in the inbox when the app starts are never renamed either.
-    Renaming an archive that has already been extracted would give it a second
-    extract directory holding identical bytes, and the corroboration counts that
-    say "three people sent this record" would start counting one person twice.
+    Archives already present at startup are normalized too. Intake reuses a
+    completed extraction by its full archive hash, retaining the original source
+    identity instead of counting a renamed archive as another contribution.
+    Legacy extractions without hash evidence keep their original archive names.
 
 WHY IT REFUSES TO RUN ELEVATED
 
@@ -74,6 +74,7 @@ import webbrowser
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import config
+import intake_jobs
 from publish import BUSY_EXIT
 
 PUBLISH = os.path.join(HERE, "publish.py")
@@ -244,6 +245,7 @@ def inbox_fingerprint():
     """
     out = {}
     for dp, _dirs, files in os.walk(config.INBOX):
+        if os.path.abspath(dp)==os.path.abspath(config.INBOX):_dirs[:]=[d for d in _dirs if d != "archive"]
         for fn in files:
             p = os.path.join(dp, fn)
             try:
@@ -340,14 +342,23 @@ def file_arrival(name, log):
     if TAG.search(base):
         return None            # already filed by a previous run
     try:
-        tag = content_tag(src)
+        full_hash = content_tag(src, 64)
+        import intake
+        if full_hash not in intake.extraction_hashes():
+            stem = re.sub(r"[^A-Za-z0-9._()+-]", "_", base)
+            for candidate in (stem, stem + "__" + ext.replace(".", "")):
+                old = os.path.join(intake.EXTRACT, candidate)
+                if intake.occupied(old) and not re.fullmatch(r'[a-f0-9]{64}', intake._marker(old, intake.SRCHASH) or ''):
+                    log("   kept %s: legacy extraction has no content-hash evidence" % name)
+                    return None
+        tag = full_hash[:8]
         dst = os.path.join(config.INBOX, "%s__%s%s" % (base, tag, ext))
         if os.path.exists(dst):
             # Same original name and same content hash: this is the same file
             # arriving twice. Collapse it rather than growing a second copy --
-            # but only after the sizes agree, so a truncated 8-hex collision
+            # but only after the FULL hashes agree, so an 8-hex collision
             # cannot quietly overwrite a different submission.
-            if os.path.getsize(dst) == os.path.getsize(src):
+            if content_tag(dst, 64) == full_hash:
                 os.replace(src, dst)
                 log("   %s is a duplicate of %s already filed"
                     % (name, os.path.basename(dst)))
@@ -468,7 +479,7 @@ class Runner(object):
         self.last_result = "not run yet"
         self.last_ok = None
 
-    def run(self, push, label):
+    def run(self, push, label, options=None):
         if not self.lock.acquire(blocking=False):
             self.log("~~ %s: a run is already in progress, ignoring" % label)
             return None
@@ -477,6 +488,21 @@ class Runner(object):
         self.started = time.time()
         self.on_change()
         try:
+            if intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('enabled'):
+                request=intake_jobs.enqueue(config.WORK,push=push,**(options or {}))
+                self.log('Queued for the background collector; online contributions finish first.')
+                while True:
+                    result=intake_jobs.read(request,{})
+                    self.label=label+' - '+result.get('status','queued')
+                    if result.get('status') in ('done','failed'):
+                        self.last_ok=result['status']=='done';self.last_result=label+': '+result['status']
+                        self.log(self.last_result+'; log: '+str(request.with_suffix('.log')))
+                        return result.get('exit_code',1)
+                    heartbeat=intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('heartbeat',0)
+                    if time.time()-heartbeat>90:
+                        self.last_ok=None;self.last_result='Request queued; collector unavailable'
+                        self.log(self.last_result+' — it will resume automatically.');return 0
+                    time.sleep(1)
             cmd = [console_python(), "-u", PUBLISH] + (["--push"] if push else [])
             self.log("")
             self.log("=" * 70)
@@ -486,6 +512,9 @@ class Runner(object):
             env = dict(os.environ)
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUNBUFFERED"] = "1"
+            request=intake_jobs.enqueue(config.WORK,push=push,**(options or {}))
+            item=intake_jobs.read(request);item['status']='processing';intake_jobs.write(request,item)
+            env['ASCENSION_MANUAL_REQUEST']=str(request)
             try:
                 self.proc = subprocess.Popen(
                     cmd, cwd=config.WORK, env=env, stdin=subprocess.DEVNULL,
@@ -500,6 +529,7 @@ class Runner(object):
             for line in self.proc.stdout:
                 self.log(line.rstrip("\r\n"))
             rc = self.proc.wait()
+            item.update(status='done' if rc==0 else 'failed',exit_code=rc);intake_jobs.write(request,item)
             self.proc = None
             took = time.time() - self.started
             self.last_ok = None if rc == BUSY_EXIT else (rc == 0)
@@ -595,14 +625,13 @@ class Watcher(threading.Thread):
         if inbox_fingerprint() != now:
             self.app.log("still being written; will look again shortly")
             return
-        self.app.prepare_inbox(self.pristine)
         self.consolidate_and_settle_up(gone, inbox_fingerprint())
 
     def consolidate_and_settle_up(self, gone, processed, push=None,
                                   label="auto-consolidate"):
         if push is None:
             push = self.app.state["push"]
-        rc = self.app.runner.run(push, label)
+        rc = self.app.runner.run(push, label, {'tidy':self.app.state['tidy'],'rename':self.app.state.get('file',True),'pristine':self.pristine})
         if rc is None:
             return                      # a manual run holds the lock; try later
         if rc == BUSY_EXIT:
@@ -623,7 +652,7 @@ class Watcher(threading.Thread):
             return
         self.failures = 0
         self.next_attempt = 0.0
-        moved = tidy_inbox(self.app.log, processed) if self.app.state["tidy"] else []
+        moved = [] # Publisher files only proven completed inputs while holding its lock.
         after = inbox_fingerprint()
         # Map only this sweep's original input to its archived location. Never
         # mark every file seen after the run as done: late arrivals were not
@@ -726,7 +755,9 @@ class App(object):
         has been sitting here all along whose extract directory was claimed by a
         different archive before it.
         """
-        names = [n for n in root_files() if n not in pristine]
+        # A startup filename is not a permanent exemption: it can be reused
+        # later for a different archive. Full-hash extraction reuse keeps this safe.
+        names = root_files()
         if names:
             if self.state["file"]:
                 for name in names:
@@ -780,16 +811,17 @@ class App(object):
 
     def start_run(self, push, label):
         def go():
-            self.prepare_inbox(self.watcher.pristine)
             self.watcher.consolidate_and_settle_up(
                 [], inbox_fingerprint(), push=push, label=label)
         threading.Thread(target=go, daemon=True).start()
 
     def tidy_now(self):
-        threading.Thread(
-            target=lambda: (tidy_inbox(self.log),
-                            self.watcher.handled.update(inbox_fingerprint())),
-            daemon=True).start()
+        if intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('enabled'):
+            intake_jobs.enqueue(config.WORK,tidy_only=True)
+            heartbeat=intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('heartbeat',0)
+            self.log('Collector unavailable; filing request retained for when it resumes.' if time.time()-heartbeat>90 else 'Queued filing of completed inputs; unprocessed files stay in the inbox.')
+        else:
+            self.log('Background collector is not configured; no inputs moved.')
 
     # ---- tray --------------------------------------------------------
 
@@ -865,7 +897,7 @@ class App(object):
 
     def build_window(self):
         import tkinter as tk
-        from tkinter import scrolledtext
+        from tkinter import scrolledtext, ttk
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -921,8 +953,14 @@ class App(object):
         tk.Checkbutton(opts, text="Start when I log in", variable=self.v_boot,
                        command=self.set_autostart_from_ui).pack(side="left")
 
+        tabs=ttk.Notebook(win)
+        tabs.pack(fill="both",expand=True,padx=12,pady=(0,12))
+        manual_tab=ttk.Frame(tabs);tabs.add(manual_tab,text="Manual inbox")
+        from contribution_view import ContributionsView
+        live_tab=ContributionsView(tabs,config.WORK,self.open_path);tabs.add(live_tab,text="Live contributions")
+        tabs.select(live_tab)
         self.text = scrolledtext.ScrolledText(
-            win, wrap="none", font=("Consolas", 9), bg="#101418", fg="#d8dee4",
+            manual_tab, wrap="none", font=("Consolas", 9), bg="#101418", fg="#d8dee4",
             insertbackground="#d8dee4", state="disabled", padx=8, pady=6)
         self.text.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.text.tag_configure("bad", foreground="#ff8a80")
@@ -1014,7 +1052,7 @@ class App(object):
         running = (st == "running")
         for b in (self.b_run, self.b_dry, self.b_tidy):
             b.configure(state="disabled" if running else "normal")
-        self.b_stop.configure(state="normal" if running else "disabled")
+        self.b_stop.configure(state="normal" if running and self.runner.proc is not None else "disabled")
         for key, v in self.vars.items():
             v.set(self.state[key])
         self.update_tray()
@@ -1025,16 +1063,9 @@ class App(object):
             return self._inbox_seen
         self._inbox_at = time.time()
         try:
-            n = b = 0
-            for dp, _dirs, files in os.walk(config.INBOX):
-                for fn in files:
-                    try:
-                        b += os.path.getsize(os.path.join(dp, fn))
-                        n += 1
-                    except OSError:
-                        pass
-            self._inbox_seen = ("%d file(s), %.0f MB, %d waiting at the top level"
-                                % (n, b / 1048576.0, len(root_files())))
+            files=inbox_fingerprint()
+            n=len(files);b=sum(value[0] for value in files.values())
+            self._inbox_seen = "%d pending file(s), %.0f MB (archive excluded)" % (n,b/1048576.0)
         except OSError:
             self._inbox_seen = "unreadable"
         return self._inbox_seen

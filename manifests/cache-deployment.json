@@ -173,6 +173,50 @@
     {
       "source": "tools/cache-consolidator/tools/test_bisbeard.py",
       "destination": "tools/test_bisbeard.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/capture_dates.py",
+      "destination": "tools/capture_dates.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/reference_merge.py",
+      "destination": "tools/reference_merge.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/batch_inputs.py",
+      "destination": "tools/batch_inputs.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/intake_jobs.py",
+      "destination": "tools/intake_jobs.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/contribution_view.py",
+      "destination": "tools/contribution_view.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/build_cache.py",
+      "destination": "tools/build_cache.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_build_cache.py",
+      "destination": "tools/test_build_cache.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_archive_naming.py",
+      "destination": "tools/test_archive_naming.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/stock_entries.txt",
+      "destination": "tools/stock_entries.txt"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_catalogue.py",
+      "destination": "tools/test_catalogue.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/mapdata.py",
+      "destination": "tools/mapdata.py"
     }
   ]
 }
