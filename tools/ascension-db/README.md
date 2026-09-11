@@ -51,3 +51,7 @@ Source changes require updating the pinned caller revision and deploying the fro
 The browser treats all dataset fields as text, escapes them before display, permits only HTTP(S) source links, and runs searches in a separate worker. No uploaded Lua or archived JavaScript executes. It has no write endpoints, account login, API secrets or private intake access. Static hosting headers restrict scripts to this origin. Existing visitors may need to refresh after a new snapshot if an old content-addressed chunk is no longer present; the interface reports that condition.
 
 For the intake/processing mechanism, see `../cache-consolidator/docs/PROCESSING-PIPELINE.md`.
+
+## Verification notes
+
+The initial browser checks cover name and exact-ID search, collection browsing, record details/download links, coverage filtering, recovered pages, mobile overflow, and injected HTML remaining inert. The optional `document.modelContext` search adapter was exercised through a browser test harness (valid result and intentional invalid-input failure); native WebMCP availability depends on the browser and was not independently verified. Python regression tests cover provenance, variants, malformed TSV rejection, explicit synthetic row references and large string IDs. Full-data validation is a separate publication gate.

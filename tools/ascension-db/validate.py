@@ -10,10 +10,12 @@ def validate(root,allow_sample=False):
     if sum(x['records'] for x in coverage)+m['recovery']['pages']!=m['records']: raise ValueError('Coverage record count mismatch')
     if sum(x['records'] for x in m['kinds'].values())!=m['records']: raise ValueError('Collection count mismatch')
     total=0
+    part_counts={}
     for fid,info in m['files'].items():
         count=0
         for p in sorted((root/'records'/fid).glob('*.json.gz')):
             rows=json.load(gzip.open(p,'rt',encoding='utf-8'))
+            part_counts[(fid,p.name.split('.')[0])]=len(rows)
             for r in rows:
                 if len(r)!=6 or not all(isinstance(x,str) for x in r[:5]) or not isinstance(r[5],dict): raise ValueError(f'Invalid record in {p}')
             count+=len(rows)
@@ -25,7 +27,7 @@ def validate(root,allow_sample=False):
         for path in v['parts']:
             for r in json.load(gzip.open(root/path,'rt',encoding='utf-8')):
                 fid,part,offset=r[0].split('/')
-                if fid not in m['files'] or not (root/'records'/fid/(part+'.json.gz')).is_file():raise ValueError('Search result points at a missing record')
+                if fid not in m['files'] or (fid,part) not in part_counts or not 0 <= int(offset) < part_counts[(fid,part)]:raise ValueError('Search result points at a missing record')
                 count+=1
         if count!=v['count']: raise ValueError('Search partition count mismatch')
     print(f'VALID: {total:,} source records; {len(coverage):,} published files; all detail and search partitions readable.',flush=True)

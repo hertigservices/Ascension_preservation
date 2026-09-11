@@ -38,7 +38,9 @@ jobs:
         with:
           path: source/tools/ascension-db/.build-cache
           key: ascension-db-${{ inputs.source_ref }}-${{ github.sha }}
-          restore-keys: ascension-db-${{ inputs.source_ref }}-
+          restore-keys: |
+            ascension-db-${{ inputs.source_ref }}-
+            ascension-db-
       - name: Test catalog rules
         working-directory: source/tools/ascension-db
         run: python -m unittest test_catalog -v
