@@ -1,0 +1,6 @@
+dist/
+.build-cache/
+__pycache__/
+.sites-runtime/
+.wrangler/
+frontend-dist/

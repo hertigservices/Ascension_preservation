@@ -1,0 +1,67 @@
+name: Publish Ascension database catalog
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: ascension-database-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'hertigservices/ascension-data'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: data
+      - uses: actions/checkout@v4
+        with:
+          repository: hertigservices/Ascension_preservation
+          ref: ${{ inputs.source_ref }}
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: source/tools/ascension-db/.build-cache
+          key: ascension-db-${{ inputs.source_ref }}-${{ github.sha }}
+          restore-keys: ascension-db-${{ inputs.source_ref }}-
+      - name: Test catalog rules
+        working-directory: source/tools/ascension-db
+        run: python -m unittest test_catalog -v
+      - name: Build all published data
+        run: python -u source/tools/ascension-db/build.py --data data --out public
+      - name: Validate complete snapshot
+        run: python -u source/tools/ascension-db/validate.py public
+      - name: Keep the hosting root explicit
+        run: touch public/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-build-report
+          path: public/build-report.json
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish validated catalog atomically
+        id: deployment
+        uses: actions/deploy-pages@v4
