@@ -242,6 +242,33 @@ class RecoveryTests(unittest.TestCase):
                 counts,issues=selftest.check_cache('creaturecache',[],False)
                 self.assertTrue(issues);self.assertEqual(counts['unexpected_file'],1)
 
+    def test_intake_revision_refresh_preserves_known_group(self):
+        import intake
+        for oldgroup,expected in [('Established Realm','Established Realm'),('(root)','New Realm')]:
+            with self.subTest(group=oldgroup), tempfile.TemporaryDirectory() as d:
+                root=Path(d);p=root/'sample.wdb'
+                p.write_bytes(struct.pack('<4sI4sIII',b'BOMW',12340,b'SUne',0,0,0)+struct.pack('<II',7,2)+b'ok'+b'\0'*8)
+                sid=hashlib.sha256(p.read_bytes()).hexdigest();ledger=root/'ledger.json'
+                ledger.write_text(json.dumps({sid:{'group':oldgroup,'sources':['old-label'],'parser_revision':'old','first_seen':'original-time'}}))
+                with patch.multiple(intake,LEDGER=str(ledger),SCAN_ROOTS=[d],EXTRACT=str(root/'unused')),patch.object(intake,'label_for',return_value=('new-label','New Realm')):
+                    rows,_=intake.scan()
+                self.assertEqual(rows[sid]['group'],expected)
+                self.assertEqual(rows[sid]['sources'],['old-label','new-label'])
+                self.assertEqual(rows[sid]['first_seen'],'original-time')
+                self.assertEqual(rows[sid]['parser_revision'],'2026-09-11.2')
+
+    def test_intake_same_hash_group_is_stable_in_both_scan_orders(self):
+        import intake
+        for order in [('a.wdb','b.wdb'),('b.wdb','a.wdb')]:
+            with self.subTest(order=order),tempfile.TemporaryDirectory() as d:
+                root=Path(d);data=struct.pack('<4sI4sIII',b'BOMW',12340,b'SUne',0,0,0)+struct.pack('<II',7,2)+b'ok'+b'\0'*8
+                for fn in order:(root/fn).write_bytes(data)
+                sid=hashlib.sha256(data).hexdigest();ledger=root/'ledger.json';ledger.write_text(json.dumps({sid:{'group':'Established Realm','sources':['old'],'parser_revision':'old'}}))
+                with patch.multiple(intake,LEDGER=str(ledger),SCAN_ROOTS=[d],EXTRACT=str(root/'missing')),patch.object(intake.os,'walk',return_value=[(d,[],order)]),patch.object(intake,'label_for',side_effect=lambda p:(Path(p).name,'Realm '+Path(p).stem)):
+                    rows,_=intake.scan()
+                self.assertEqual(rows[sid]['group'],'Established Realm')
+                self.assertEqual(set(rows[sid]['sources']),{'old','a.wdb','b.wdb'})
+
     def test_missing_output_column_fails_gate(self):
         fails=[]
         audit_columns.compare_counts({'counts':{'union/a.tsv.gz:name':1}}, {},fails,[])

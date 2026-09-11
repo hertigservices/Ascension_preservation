@@ -338,7 +338,7 @@ def scan():
                     "cache": info.cache, "label": info.label, "build": info.build,
                     "locale": info.locale, "records": info.records,
                     "standard": info.standard, "clean_end": info.clean_end,
-                    "note": info.note or "", "group": grp, "sources": previous.get("sources", [lbl]),
+                    "note": info.note or "", "group": previous.get("group", grp), "sources": previous.get("sources", [lbl]),
                     "parser_revision": "2026-09-11.2",
                     "first_seen": previous.get("first_seen", time.strftime("%Y-%m-%d %H:%M:%S")),
                 }
