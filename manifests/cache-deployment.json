@@ -217,6 +217,26 @@
     {
       "source": "tools/cache-consolidator/tools/mapdata.py",
       "destination": "tools/mapdata.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/ingest_lootcollector.py",
+      "destination": "tools/ingest_lootcollector.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/worldmaparea_bounds.tsv",
+      "destination": "tools/worldmaparea_bounds.tsv"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_lootcollector.py",
+      "destination": "tools/test_lootcollector.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/import_worldforged.py",
+      "destination": "tools/import_worldforged.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/test_worldforged.py",
+      "destination": "tools/test_worldforged.py"
     }
   ]
 }

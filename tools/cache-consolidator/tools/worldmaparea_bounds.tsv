@@ -1,0 +1,315 @@
+# WorldMapArea bounds with each area's zone name, used to turn LootCollector
+# map positions into server coordinates.
+# Written by make_worldmaparea_bounds.py; do not edit by hand, regenerate.
+# WorldMapArea.dbc md5 385136e35c9b279ff195a3414d59b9f8 (310 rows); AreaTable.dbc md5 84bc3244773e840e954f9b0cfbad5e65 (2849 rows)
+wma_id	map	area_id	zone	wma_name	left	right	top	bottom
+4	1	14	Durotar	Durotar	-1962	-7250	1808	-1716
+9	1	215	Mulgore	Mulgore	2047	-3089	-272	-3697
+11	1	17	The Barrens	Barrens	2622	-7510	1612	-5143
+13	1	0		Kalimdor	17066	-19733	12799	-11733
+14	0	0		Azeroth	18171	-22569	11176	-15973
+15	0	36	Alterac Mountains	Alterac	783	-2016	1500	-366
+16	0	45	Arathi Highlands	Arathi	-866	-4466	-133	-2533
+17	0	3	Badlands	Badlands	-2079	-4566	-5889	-7547
+19	0	4	Blasted Lands	BlastedLands	-1241	-4591	-10566	-12800
+20	0	85	Tirisfal Glades	Tirisfal	3033	-1485	3837	824
+21	0	130	Silverpine Forest	Silverpine	3450	-750	1666	-1133
+22	0	28	Western Plaguelands	WesternPlaguelands	416	-3883	3366	500
+23	0	139	Eastern Plaguelands	EasternPlaguelands	-2287	-6318	3704	1016
+24	0	267	Hillsbrad Foothills	Hilsbrad	1066	-2133	400	-1733
+26	0	47	The Hinterlands	Hinterlands	-1575	-5425	1466	-1100
+27	0	1	Dun Morogh	DunMorogh	1802	-3122	-3877	-7160
+28	0	51	Searing Gorge	SearingGorge	-322	-2554	-6100	-7587
+29	0	46	Burning Steppes	BurningSteppes	-266	-3195	-7031	-8983
+30	0	12	Elwynn Forest	Elwynn	1535	-1935	-7939	-10254
+32	0	41	Deadwind Pass	DeadwindPass	-833	-3333	-9866	-11533
+34	0	10	Duskwood	Duskwood	833	-1866	-9716	-11516
+35	0	38	Loch Modan	LochModan	-1993	-4752	-4487	-6327
+36	0	44	Redridge Mountains	Redridge	-1570	-3741	-8575	-10022
+37	0	33	Stranglethorn Vale	Stranglethorn	2220	-4160	-11168	-15422
+38	0	8	Swamp of Sorrows	SwampOfSorrows	-2222	-4516	-9620	-11150
+39	0	40	Westfall	Westfall	3016	-483	-9400	-11733
+40	0	11	Wetlands	Wetlands	-389	-4525	-2147	-4904
+41	1	141	Teldrassil	Teldrassil	3814	-1277	11831	8437
+42	1	148	Darkshore	Darkshore	2941	-3608	8333	3966
+43	1	331	Ashenvale	Ashenvale	1700	-4066	4672	829
+61	1	400	Thousand Needles	ThousandNeedles	-433	-4833	-3966	-6900
+81	1	406	Stonetalon Mountains	StonetalonMountains	3245	-1637	2916	-339
+101	1	405	Desolace	Desolace	4233	-262	452	-2545
+121	1	357	Feralas	Feralas	5441	-1508	-2366	-7000
+141	1	15	Dustwallow Marsh	Dustwallow	-974	-6225	-2033	-5533
+161	1	440	Tanaris	Tanaris	-218	-7118	-5875	-10475
+181	1	16	Azshara	Aszhara	-3277	-8347	5341	1960
+182	1	361	Felwood	Felwood	1641	-4108	7133	3300
+201	1	490	Un'Goro Crater	UngoroCrater	533	-3166	-5966	-8433
+241	1	493	Moonglade	Moonglade	-1381	-3689	8491	6952
+261	1	1377	Silithus	Silithus	2537	-945	-5958	-8281
+281	1	618	Winterspring	Winterspring	-316	-7416	8533	3800
+301	0	1519	Stormwind City	Stormwind	1722	-14	-7995	-9154
+321	1	1637	Orgrimmar	Ogrimmar	-3680	-5083	2273	1338
+341	0	1537	Ironforge	Ironforge	-713	-1504	-4569	-5096
+362	1	1638	Thunder Bluff	ThunderBluff	516	-527	-849	-1545
+381	1	1657	Darnassus	Darnassis	2938	1880	10238	9532
+382	0	1497	Undercity	Undercity	873	-86	1877	1237
+401	30	2597	Alterac Valley	AlteracValley	1781	-2456	1085	-1739
+443	489	3277	Warsong Gulch	WarsongGulch	2041	895	1627	862
+461	529	3358	Arathi Basin	ArathiBasin	1858	102	1508	337
+462	530	3430	Eversong Woods	EversongWoods	-4487	-9412	11041	7758
+463	530	3433	Ghostlands	Ghostlands	-5283	-8583	8266	6066
+464	530	3524	Azuremyst Isle	AzuremystIsle	-10500	-14570	-2793	-5508
+465	530	3483	Hellfire Peninsula	Hellfire	5539	375	1481	-1962
+466	530	0		Expansion01	12996	-4468	5821	-5821
+467	530	3521	Zangarmarsh	Zangarmarsh	9475	4447	1935	-1416
+471	530	3557	The Exodar	TheExodar	-11066	-12123	-3609	-4314
+473	530	3520	Shadowmoon Valley	ShadowmoonValley	4225	-1275	-1947	-5614
+475	530	3522	Blade's Edge Mountains	BladesEdgeMountains	8845	3420	4408	791
+476	530	3525	Bloodmyst Isle	BloodmystIsle	-10075	-13337	-758	-2933
+477	530	3518	Nagrand	Nagrand	10295	4770	41	-3641
+478	530	3519	Terokkar Forest	TerokkarForest	7083	1683	-999	-4600
+479	530	3523	Netherstorm	Netherstorm	5483	-91	5456	1739
+480	530	3487	Silvermoon City	SilvermoonCity	-6400	-7612	10153	9346
+481	530	3703	Shattrath City	ShattrathCity	6135.2598	4829.0098	-1473.95	-2344.79
+482	566	3820	Eye of the Storm	NetherstormArena	2660	389	2918	1404
+485	571	0		Northrend	9762.5	-9077.0801	11106.2002	-1454.17
+486	571	3537	Borean Tundra	BoreanTundra	8570	2806	4897	1054
+488	571	65	Dragonblight	Dragonblight	3627	-1981	5575	1835
+490	571	394	Grizzly Hills	GrizzlyHills	-1110	-6360	5516	2016
+491	571	495	Howling Fjord	HowlingFjord	-1397	-7443	3116	-914
+492	571	210	Icecrown	IcecrownGlacier	5443	-827	9427	5245
+493	571	3711	Sholazar Basin	SholazarBasin	6929	2572	7287	4383
+495	571	67	The Storm Peaks	TheStormPeaks	1841	-5270	10197	5456
+496	571	66	Zul'Drak	ZulDrak	-600	-5593	7668	4339
+499	530	4080	Isle of Quel'Danas	Sunwell	-5302	-8629	13568	11350
+500	400	14000	Silithus	Silithus	2537	-945	-5958	-8281
+501	571	4197	Wintergrasp	LakeWintergrasp	4329	1354	5716	3733
+502	609	4298	Plaguelands: The Scarlet Enclave	ScarletEnclave	-4047	-7210	3087	979
+504	571	4395	Dalaran	Dalaran	0	0	0	0
+510	571	2817	Crystalsong Forest	CrystalsongForest	1443	-1279	6502	4687
+512	607	4384	Strand of the Ancients	StrandoftheAncients	787	-956	1883	720
+520	576	4265	The Nexus	TheNexus	0	0	0	0
+521	595	4100	The Culling of Stratholme	CoTStratholme	2152	327	2297	1081
+522	619	4494	Ahn'kahet: The Old Kingdom	Ahnkahet	-233	-1206	849	202
+523	574	206	Utgarde Keep	UtgardeKeep	0	0	0	0
+524	575	1196	Utgarde Pinnacle	UtgardePinnacle	3275	-3275	2166	-2200
+525	602	4272	Halls of Lightning	HallsofLightning	2500	-899	2200	-66
+526	599	4264	Halls of Stone	Ulduar77	2766	-633	2200	-66
+527	616	4500	The Eye of Eternity	TheEyeofEternity	2766	-633	2200	-66
+528	578	4228	The Oculus	Nexus80	2337	-262	1956	222
+529	603	4273	Ulduar	Ulduar	1583	-1704	1168	-1022
+530	604	4416	Gundrak	Gundrak	1168	255	2054	1473
+531	615	4493	The Obsidian Sanctum	TheObsidianSanctum	1133	-29	3616	2841
+532	624	4603	Vault of Archavon	VaultofArchavon	1033	-1566	600	-1133
+533	601	4277	Azjol-Nerub	AzjolNerub	1020	-52	872	158
+534	600	4196	Drak'Tharon Keep	DrakTharonKeep	-377	-1004	-168	-587
+535	533	3456	Naxxramas	Naxxramas	-2520	-4377	3597	2360
+536	608	4415	The Violet Hold	VioletHold	983	600	2006	1750
+537	535	3458	Naxxramas	Naxxramas	-2520	-4377	3597	2360
+540	628	4710	Isle of Conquest	IsleofConquest	525	-2125	1708	-58
+541	571	4742	Hrothgar's Landing	HrothgarsLanding	2797	-879	10781	8329
+542	650	4723	Trial of the Champion	TheArgentColiseum	2100	-500	2200	466
+543	649	4722	Trial of the Crusader	TheArgentColiseum	2100	-500	2200	466
+601	632	4809	The Forge of Souls	TheForgeofSouls	7033	-4366	6466	-1133
+602	658	4813	Pit of Saron	PitofSaron	839	-693	1256	233
+603	668	4820	Halls of Reflection	HallsofReflection	7033	-5966	6466	-2200
+604	631	4812	Icecrown Citadel	IcecrownCitadel	6366	-5833	5933	-2200
+609	724	4987	The Ruby Sanctum	TheRubySanctum	902	150	3429	2927
+625	806	4999	Twisting Nether	TwistingNetherMap	1064	-1014	857	-527
+626	726	5031	Twin Peaks	TwinPeaks	931	-283	2266	1456
+666	666	209	Shadowfang Keep	ShadowfangKeep	4500	300	1133	-1666
+680	389	2437	Ragefire Chasm	Ragefire	453	-286	40	-453
+686	209	1176	Zul'Farrak	ZulFarrak	1625	241	2052	1129
+688	48	719	Blackfathom Deeps	BlackfathomDeeps	503	-581	-88	-927
+690	34	717	The Stockade	TheStockade	189	-186	220	-31
+691	90	721	Gnomeregan	Gnomeregan	943	-278	-181	-967
+692	70	1337	Uldaman	Uldaman	645	-249	271	-391
+696	409	2717	Molten Core	MoltenCore	-131	-1396	1303	460
+697	309	1977	Zul'Gurub	ZulGurub	-611	-2732	-11227	-12631
+699	429	2557	Dire Maul	DireMaul	1075	-900	1050	-282
+704	230	1584	Blackrock Depths	BlackrockDepths	572	-935	1500	259
+710	540	3714	The Shattered Halls	TheShatteredHalls	631	-433	617	-92
+717	509	3429	Ruins of Ahn'Qiraj	RuinsofAhnQiraj	3035	522	-8233	-9908
+718	249	2159	Onyxia's Lair	OnyxiasLair	336.574	-444.297	119.197	-401.38
+720	1383	5034		Uldum	2441.6699	-3752.0801	-8029.1699	-12158.2998
+721	229	1583	Blackrock Spire	BlackrockSpire	11	-876	304	-289
+722	558	3790	Auchenai Crypts	AuchenaiCrypts	328	-602	355	-210
+723	556	3791	Sethekk Halls	SethekkHalls	516	-188	174	-295
+724	555	3789	Shadow Labyrinth	ShadowLabyrinth	185	-656	63	-498
+725	542	3713	The Blood Furnace	TheBloodFurnace	499	-505	603	-66
+726	546	3716	The Underbog	TheUnderbog	241	-654	424	-173
+727	545	3715	The Steamvault	TheSteamvault	160	-717	159	-426
+728	547	3717	The Slave Pens	TheSlavePens	54	-836	202	-392
+729	553	3847	The Botanica	TheBotanica	650	-108	248	-257
+730	554	3849	The Mechanar	TheMechanar	334	-342	413	-101
+731	552	3848	The Arcatraz	TheArcatraz	301	-423	575	-75
+732	557	3792	Mana-Tombs	ManaTombs	277	-546	90	-459
+733	269	2366	The Black Morass	CoTTheBlackMorass	7650	6562	-1500	-2225
+734	560	2367	Old Hillsbrad Foothills	CoTHillsbradFoothills	1854	-477	3127	1572
+749	43	718	Wailing Caverns	WailingCaverns	561	-376	214	-410
+750	349	2100	Maraudon	Maraudon	479	-1159	1214	-208
+753	645	4926	Blackrock Caverns	BlackrockCaverns	2100	-499.99	1133.33	-600
+755	469	2677	Blackwing Lair	BlackwingLair	633	-2766	-6333	-8600
+756	36	1581	The Deadmines	TheDeadmines	-517.35	-1016.61	65.33	-267.5
+760	129	722	Razorfen Downs	RazorfenDowns	1280	571	2683	2210
+761	47	491	Razorfen Kraul	RazorfenKraul	2059	1322	2350	1859
+762	189	796	Scarlet Monastery	ScarletMonastery	1744	-562	2030	94
+763	289	2057	Scholomance	Scholomance	633	-1166	600	-600
+764	33	209	Shadowfang Keep	ShadowfangKeep	4500	300	1133	-1666
+765	329	2017	Stratholme	Stratholme	-1766	-5166	4333	2066
+766	531	3428	Ahn'Qiraj	AhnQiraj	2493	1554	-8051	-8704
+775	534	3606	Hyjal Summit	CoTMountHyjal	-1525	-4025	6145	4479
+776	565	3923	Gruul's Lair	GruulsLair	475	-50	338	-13
+779	544	3836	Magtheridon's Lair	MagtheridonsLair	386	-171	255	-115
+780	548	3607	Serpentshrine Cavern	CoilfangReservoir	213	-1363	650	-400
+781	568	3805	Zul'Aman	ZulAman	1852	583	568	-277
+782	550	3845	Tempest Keep	TempestKeep	788	-788	950	-100
+789	580	4075	Sunwell Plateau	SunwellPlateau	1206	300	2012	1408
+793	859	1977	Zul'Gurub	ZulGurub	-612	-2733	-11225	-12639
+796	564	3959	Black Temple	BlackTemple	1150	366	949	427
+797	543	3562	Hellfire Ramparts	HellfireRamparts	1989	1295	-1029	-1492
+798	585	4131	Magisters' Terrace	MagistersTerrace	226	-304	326	-28
+799	532	3457	Karazhan	Karazhan	-1434	-2270	-10773	-11460
+800	1178	11220		Stormwind	1722	-14	-7995	-9154
+801	1181	11221		Ogrimmar	-3680	-5083	2273	1338
+820	1280	7107	Hillsbrad Foothills	HillsbradFoothillsBG	1995	-172	2977	1531
+856	998	6051	The Temple of Kotmogu	TempleofKotmogu	1743.75	904.167	2083.3301	1522.92
+1000	1760	4294967295		RedridgeMountainsManastorm	-1570	-3741	-8575	-10022
+1001	1761	4294967295		AlteracMountainsManastorm	783	-2016	1500	-366
+1002	1762	4294967295		BlastedLandsManastorm	-1241	-4591	-10566	-12800
+1003	1763	4294967295		EasternPlaguelandsManastorm	-2287	-6318	3704	1016
+1004	1764	4294967295		FeralasManastorm	5441	-1508	-2366	-7000
+1005	1765	4294967295		HillsbradFoothillsManastorm	1066	-2133	400	-1733
+1006	1766	4294967295		SilverpineForestManastorm	3450	-750	1666	-1133
+1007	1767	4294967295		TanarisManastorm	-218	-7118	-5875	-10475
+1008	1768	4294967295		WesternPlaguelandsManastorm	416	-3883	3366	500
+1009	1769	4294967295		WestfallManastorm	3016	-483	-9400	-11733
+1010	1770	4294967295		WinterSpringManastorm	-316	-7416	8533	3800
+1139	1681	3358	Arathi Basin	ArathiBasinWinter	1858.33	102.084	1508.33	337.5
+1140	1682	3277	Warsong Gulch	WarsongGulchWinter	2041	895	1627	862
+1141	808	5004	Twisting Nether	TwistingNetherMap	1064	-1014	857	-527
+1142	808	5005	Demon's Tears	TwistingNetherMap	1064	-1014	857	-527
+1143	808	5006	Sty'La	TwistingNetherMap	1064	-1014	857	-527
+1144	1781	11430	Forgotten Mine	ForgottenMine	1733.34	1233.33	2000.1	1666.67
+1200	1	718	Wailing Caverns	wailingcavernsbarrens	-1902.5	-2472.5	-490	-870
+1201	0	796	Scarlet Monastery	scarletmonasteryentrance	-660	-864.99	2948.8301	2812.1599
+1202	1	10145	Caverns of Time	cavernsoftimein	-3707.5	-5013.5	-8036.6602	-8907.3301
+1203	1	10113	Caverns of Time	cavernsoftime	-4163.7402	-5271.25	-7955.8301	-8694.1602
+1204	0	25	Blackrock Mountain	blackrockmountain	-761.25	-1473.75	-7325	-7800
+1205	0	10114	Blackrock Mountain	upperblackrockmountain	-1145	-1400	-7480	-7650
+1206	0	10115	Blackrock Mountain	lowerblackrockmountain	-627.48	-1387.51	-7086.6499	-7593.3398
+1207	1	2100	Maraudon	maraudonorange	3085.5	2485.5	-1250	-1650
+1208	1	10116	Maraudon	maraudonpurple	3165.01	2604.98	-1092.3199	-1465.67
+1209	0	1337	Uldaman	Uldamanin	-2748.75	-3311.25	-5955	-6330
+1210	1	10117	Stillpine Hold	stillpinehold	-12247.5	-12722.5	-3009.1599	-3325.8301
+1211	1	3569	Tides' Hollow	tideshollow	-11369	-11744	-4640	-4890
+1212	0	10118	Night Web's Hollow	nightwebshollow	2020	1800	2123.3301	1976.66
+1213	0	10119	Gol'Bolar Quarry	golbolarquarry	-1542.99	-1917	-5486.8301	-5736.1699
+1214	0	10120	Coldridge Pass	coldridgepass	245	-85	-6020	-6240
+1215	0	10121	The Grizzled Den	thegrizzledden	32.75	-472.75	-5313	-5650
+1216	1	365	Burning Blade Coven	burningbladecoven	-4166.5	-4432.5	5.5	-171.83
+1217	1	371	Dustwind Cave	dustwindcave	-4622.5	-4880.5	971.25	799.25
+1218	1	10123	Skull Rock	skullrock	-4629	-4899	1580.5	1400.5
+1219	0	10124	Fargodeep Mine	Upperfargodeepmine	281.75	41.75	-9700	-9860
+1220	0	10125	Fargodeep Mine	Lowerfargodeepmine	289.25	34.25	-9710	-9880
+1221	0	10126	Jasperlode Mine	jasperlodemine	-445.875	-769.125	-8985	-9200.5
+1222	0	10127	Amani Catacombs	amanicatacombs	-7180	-7480	7710	7510
+1223	1	10128	Palemane Rock	palemanerock	580	229.99	-2263.3301	-2496.6599
+1224	1	10129	The Venture Co. Mine	theventurecomine	-818	-1559	-1436	-1930
+1225	0	10130	Echo Ridge Mine	echoridgemine	-27	-306	-8500	-8686
+1226	1	3446	Twilight's Run	twilightsrun	161.255	-91.2549	-6183.3301	-6351.6699
+1227	1	10131	The Noxious Lair	thenoxiouslair	-2190	-2940	-7640	-8140
+1228	1	10132	The Gaping Chasm	thegapingchasm	-3612.5	-4497.5	-8900	-9490
+1229	1	262	Ban'ethil Barrow Den	Upperbanethilbarrowden	1685	1454.99	9881.6699	9728.3301
+1230	1	10133	Ban'ethil Barrow Den	Lowerbanethilbarrowden	1735	1354.99	9931.6699	9678.3301
+1231	1	258	Fel Rock	felrock	1249.8	970.2	10211.7002	10025.2998
+1232	1	257	Shadowthread Cave	shadowthreadcave	1140	660	11035	10715
+1233	1	10134	The Slithering Scar	theslitheringscar	-983.75	-1366.25	-7930	-8185
+1234	0	10135	The Deadmines	deadmineswestfall	1792.5	1342.5	-11055	-11355
+1235	0	10136	Gold Coast Quarry	goldcoastquarry	2096.25	1833.75	-10430	-10605
+1236	0	10137	Jangolode Mine	jangolodemine	1570.5	1293.5	-9798.6699	-9983.3301
+1237	0	10138	Northshire Valley	northshire	187.5	-781.25	-8570.8301	-9216.6699
+1238	0	10139	Coldridge Valley	coldridgevalley	1200	-66.8	-5724.6602	-6566.6602
+1239	0	10140	Deathknell	deathknellstart	2147.9199	1058.33	2270.8301	1543.75
+1240	530	10141	Sunstrider Isle	sunstriderislestart	-5383.3301	-6983.3301	10833.2998	9766.6699
+1241	530	10142	Ammen Vale	ammenvalestart	-12814.5996	-14633.2998	-3604.1699	-4816.6699
+1242	1	10143	Shadowglen	shadowglenstart	1491.67	41.666	11033.2998	10066.7002
+1243	1	10144	Valley of Trials	valleyoftrialsstart	-3641.6699	-4991.6699	0	-900
+1244	1	10146	Red Cloud Mesa	campnarachestart	266.54	-1533.34	-2566.74	-3766.78
+2000	920	10007	Spell Dev Map	SpellDevMap	533.332	-3466.6699	11733.2998	9066.6299
+2001	908	10023	Frozen Reach	AlvaEncounter	2566	1666	2433	1833
+2002	987	3277	Warsong Gulch	warsonggulchupdate	2041	895	1627	862
+2003	988	10043	Arathi Basin	arathibasinupdate	1858	102	1508	337
+2004	903	4294967295		StormwindSewers	4846.1099	4199.98	-533.28	-966.67
+2005	729	4294967295		osrs4	15099.9004	8678.6797	17066.6992	12786.7998
+2007	820	10104	Frozen Tears Sanctum	TirisFortress	-5363.1899	-5826	-6504.3301	-6815.3999
+2008	821	4294967295		zamasucombat	2593.5	2408.5	-49.6247	-172.958
+2009	909	10078	Dawnrise Island	AzzarFaire	-10166.7002	-13864.7002	-466.682	-2935.6201
+2010	909	10081	Glorious Azzar Faire	AzzarFaire2	-11600	-12445	-1366.66	-1930.35
+2011	1787	4294967295		tolbarad	2010.42	-4.1667	-560.417	-1904.17
+2012	1807	4294967295		KarazhanCrypts	-1933.34	-1266.73	-11366.7002	-10927.5
+2013	1794	4294967295		TwistingNetherMap	1064	-1014	857	-527
+2014	1795	4294967295		BloodmystIsleManastorm	-10075	-13337	-758	-2933
+2015	1799	4294967295		GhostlandsManastorm	-5283	-8583	8266	6066
+2016	1800	4294967295		HellfirePeninsulaManastorm	5539	375	1481	-1962
+2017	1801	4294967295		NagrandManastorm	10295	4770	41	-3641
+2018	1804	4294967295		ShadowmoonValleyManastorm	4225	-1275	-1947	-5614
+2019	1806	4294967295		ZangarmarshManastorm	9475	4447	1935	-1416
+2020	904	10012	Orgrimmar Depths	OrgrimmarDepths	-4066.6699	-4966.6699	2300	1700
+2021	109	1477	The Temple of Atal'Hakkar	thetempleofatalhakkar	366.67	-133.34	-233.297	-566.646
+2022	900	0		Northrend2	9762.5	-9077.0801	11106.2002	-1454.17
+2023	369	2257	Deeprun Tram	deepruntram	2623.5	2311.5	95.5	-112.5
+2024	1912	4294967295		TorWatha	-8300	-9100	8800	8266.6602
+2025	972	10162	Orgrimmar Depths	OrgrimmarDepthsUnderroof	-4535.6699	-5333.6699	2032.67	1500.67
+2026	971	4294967295		StormwindSewersShade	4846.1099	4199.98	-533.28	-966.67
+2027	0	10305	Shadewell	ShadewellSpring	266.658	-1033.35	-7933.3301	-8800
+2028	0	10197	Secret Inquisitorial Dungeon	SecretInquisitorialDungeon	-66.6719	-566.668	-8500	-8833.3301
+2029	1	10205	Sinister Lair	SinisterLair	-4100	-4650.29	0.0078	-366.625
+2030	1	10207	Moonlit Ossuary	MoonlitOssuary	581.66	279.15	10745.9004	10545.9004
+2031	1	5366	Xorthal's Lair	Xorthal's Lair	4890	5013	-6813	-7008
+2032	936	10218	Vaults of the Inquisition	DeepInquisitorialVaults	-5333.3301	-6333.3301	-6333.3301	-7000
+2033	937	10219	Road to De Other Side	VoodooRoadToDeOtherSide	466.66	-733.33	666.66	-133.33
+2034	880	10235	The Scarab Wall	Silithusboss	2537	-945	-5958	-8281
+2035	881	10236	Azuregos (PvE)	Aszharaboss	-3277	-8347	5341	1960
+2036	882	10237	Throne of the Doom Lord	kazzakbossmap	-2011.29	-2613.6799	-12413.5	-12815.0996
+2037	883	10238	Master’s Gastric Pit	soggothbossmap	480.041	20.8691	4683.6602	4377.54
+2038	884	10240	Depthbreaker's Hollow	DepthbreakerHollow	2795.24	2051.95	-4408.8901	-4904.4199
+2039	1	10239	Depthbreaker's Hollow	DepthbreakerHollow	2795.24	2051.95	-4408.8901	-4904.4199
+2040	885	10271	Bough Shadow	Emerissbossmap	1700	-4066	4672	829
+2041	886	10272	Dream Bough	Taerarbossmap	5441	-1508	-2366	-7000
+2042	887	10273	Seradane	Ysondrebossmap	-1575	-5425	1466	-1100
+2043	888	10274	Twilight Grove	Lethonbossmap	833	-1866	-9716	-11516
+2044	960	0		Minigamesmap	-4388.3999	-5397.0298	-1092.48	-1764.89
+2045	960	10072	Rainbow Race	Rainbowrace	-4388.3999	-5397.0298	-1092.48	-1764.89
+2046	960	10112	Wonka Wonka!	MinigamesWonka	-5339.5898	-6303.73	5921.71	5278.9502
+2047	960	10070	Shadow Eye	Minigamesvoid	-5107.21	-5575.04	6116.6201	5804.7202
+2048	960	10071	Duck Hunt	MinigamesDuckHunt	-4773.0698	-5240.9102	6116.6201	5804.7202
+2049	960	10069	Bullet Romper	MinigamesBulletRomper	-4941.0498	-5408.8901	5752.5801	5440.6899
+2050	960	10073	Vertical Ascend	MinigamesVerticalAscend	-4572.79	-5038.2798	5897.6899	5587.3599
+2051	960	10074	Kul Tiran Ascent	MinigamesKulTiranAscent	-4572.79	-5038.2798	5604.5601	5294.23
+2052	960	10075	Mechagnomic Ascent	MinigamesMechagnomicAscent	-4572.79	-5038.2798	5366.6602	5056.3398
+2053	960	10077	Volcanic Ascent	MinigamesVolcanicAscent	-4254.9902	-4720.4702	5373.0098	5062.6899
+2054	960	10099	Naga Ascent	MinigamesNagaAscent	-4023.4099	-4488.8901	5372.9502	5062.6299
+2055	960	10102	Zandalari Ascent	MinigamesZandalariAscent	-3726.52	-4192	5372.9502	5062.6299
+2056	960	10103	Legion Ascent	MinigamesLegionAscent	-3726.52	-4192	5077.1499	4766.8301
+2057	960	10101	Dark Iron Ascent	MinigamesDarkIronAscent	-4023.52	-4489	5077.1499	4766.8301
+2058	960	10098	Emerald Ascent	MinigamesEmeraldAscent	-4254.3701	-4719.8501	5077.1499	4766.8301
+2059	960	10076	Titanic Ascent	MinigamesTitanicAscent	-4572.6699	-5038.1499	5074.6499	4764.3301
+2060	889	10280	Snowgrave's Cavern	Frostgiantnbossmap	-4595.5601	-5113.9702	4909.71	4564.1099
+2061	890	10281	Zul'Mashar	EasternPlaguelandsboss	-2287	-6318	3704	1016
+2062	0	10302	Pale Reach	Scadeald	2214.23	-1417.64	-6003.8799	-8425.1299
+2063	0	10292	Druk'Thar	Palehorn	4010.9099	-1086.22	-3244.71	-6642.79
+2064	929	10156	ADT Dev Map	AdtDevMap	533.332	-3466.6699	11733.2998	9066.6299
+2065	907	10163	Fading Island	FadingIsland	165.621	-7142.3101	4183.8101	-688.143
+2066	0	10306	Dun Kazad	DunKazad	154.441	-647.531	-6307.52	-6842.1602
+2067	940	10328	Shadowbone Depths	ShadowboneDepths	348.33	-976.279	763.763	-119.311
+2068	930	0		Underworld	-6200	-8033.3301	9800	8600
+2069	930	10000	Underworld	Underworld	-6200	-8033.3301	9800	8600
+2070	930	10001	Underworld	Underworld2	-6000	-7833.3301	10800	9600
+2071	967	10022	Inevitable Future	dreamlikedream	-1892.13	-4115.9902	-10840.5996	-12323.2002
+2072	933	10060	Pools of the Eidola	dreamlikedungeon	-2465.04	-3726.8101	-11209.2998	-12050.5
+2073	941	10331	Temple of Embers	Templeofembers	4559.3301	1398.78	2515.1201	408.086
+2074	959	10292	Druk'Thar	Drukthar	4010.9099	-1086.22	-3244.71	-6642.79
+3039	891	10239	Depthbreaker's Hollow	DepthbreakerHollow	2795.24	2051.95	-4408.8901	-4904.4199
+3040	1010	15010	Spell Dev Map	CoaSpellVisuals	533.332	-3466.6699	11733.2998	9066.6299
+3041	1908	15011	Zanza's Isle	Zanzasisle	1793.1899	874.822	2999.99	2387.75
+3042	1911	15015	Akhen City Ruins	Akhen City Ruins	4473.1201	2187.1799	3911.7	1344.24
+3043	891	10240	Depthbreaker's Hollow	DepthbreakerHollow	2795.24	2051.95	-4408.8901	-4904.4199

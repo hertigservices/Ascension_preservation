@@ -7,6 +7,8 @@
               keep genuine variants, identify unlabelled submissions by fingerprint
   3. catalogue  turn the submitted world dumps into a list of objects and
                 creatures that exist -- a catalogue, never a spawn table
+     lootcollector  where Worldforged items and Mystic Scrolls were picked up,
+                read for its numbers only from the LootCollector addon's logs
   4. mapdata  inventory submitted server terrain: which map ids exist, how many
               tiles each has, and what DBC set came with them
   5. export   write the decoded per-mode / union / raw views
@@ -31,6 +33,12 @@ STAGES = [("intake",  "intake.py"),
           # need no merge store, only a recompute from the files on disk, so they
           # sit here: after the caches, before the guide that describes them.
           ("catalogue", "ingest_gameobjects.py"),
+          # LootCollector's SavedVariables: where players looted Worldforged
+          # items and Mystic Scrolls. It is not a cache and not one of luamerge's
+          # files. Every record in it names people, so it is read for its numbers
+          # only, and it is a recompute from the files on disk like the catalogue
+          # beside it. For months nothing read it -- 34 files sat in extracted/.
+          ("lootcollector", "ingest_lootcollector.py"),
           # Server map data -- maps/vmaps/mmaps/dbc. Also not a cache: no
           # player's client wrote it, a core's extractors did. It is a stage
           # because for a while it was not one, and the cost of that was

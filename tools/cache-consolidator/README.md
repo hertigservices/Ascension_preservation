@@ -29,6 +29,11 @@ Git subtree split of the old tools directory.
 
 [BisBeard supplemental catalog](docs/BISBEARD.md) has its own lossless importer and verifier; it does not replace captured WDB records.
 
+[Worldforged](docs/WORLDFORGED.md) covers two things:
+- the `lootcollector` stage, which reads only the numbers from submitted LootCollector addon logs, since every
+  record in them names people;
+- the republished Tareksoh/Worldforged-data snapshot, with its importer and verifier.
+
 [Exiles database catalog](docs/EXILES-DB.md) preserves a reviewed offline mirror of the
 `db.exil.es` CoA site â€” spells, loot tables, talent trees and a change log â€” with the
 same rule: website values are attributed claims, and captured WDB records stay authoritative.

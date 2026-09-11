@@ -121,6 +121,10 @@ def classify():
 # exists to end.
 READERS = [
     (lambda n: n.endswith(".wdb"), "intake + merge"),
+    # Before the blanket .lua row: luamerge reads five addon files by exact
+    # name and this is not one of them, so that row claimed it falsely.
+    (lambda n: n in ("lootcollector.lua", "lootcollector.lua.bak"),
+     "lootcollector (ingest_lootcollector)"),
     (lambda n: n.endswith((".lua", ".lua.bak")), "luamerge"),
     (lambda n: n.startswith("dump_") and n.endswith((".txt", ".csv")),
      "catalogue (ingest_gameobjects)"),
