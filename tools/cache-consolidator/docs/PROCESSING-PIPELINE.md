@@ -61,7 +61,11 @@ contains its published outputs. A dataset push does not update this source repos
    before reporting published. Exact repeats can reuse an existing published commit
    only with valid evidence; a matching filename alone is insufficient. Inbox filing
    requires successful incorporation and unchanged content hashes. It moves eligible
-   roots to the archive, preserving originals. Unsupported or incompletely accounted
+   roots to the archive, preserving originals. Mixed bundles may include inspected WDBs
+   that were not fully decoded: each must have matching ledger and exported-source
+   evidence, and is recorded in the private completion journal and
+   `archive/RETAINED-FILES.md`. Such a file is retained for parser work, not counted
+   as successfully decoded. Unsupported-only, unaccounted or failed-extraction
    inputs remain pending. Successfully merged zero-record Lua data can qualify when
    the merger's completion metadata is present; malformed or unrecognized data cannot.
 

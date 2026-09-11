@@ -550,7 +550,12 @@ def _publish(push):
         print("!! push failed; the commit is still here, retry when resolved")
         return False
     print(f"pushed {branch} in {time.time() - t0:.0f}s")
-    intake_jobs.file_completed(config.WORK,intake_jobs.eligible_completed(config.WORK,config.OUT,inputs),git('rev-parse','HEAD').stdout.strip())
+    retained = {}
+    completed = intake_jobs.eligible_completed(config.WORK,config.OUT,inputs,retained=retained)
+    intake_jobs.file_completed(config.WORK,completed,git('rev-parse','HEAD').stdout.strip(),retained=retained)
+    if retained:
+        print('Preserved undecoded files in processed bundles:',sum(map(len,retained.values())),
+              '-- see _inbox/archive/RETAINED-FILES.md after filing')
     if not manual or manual.get('tidy'):
         print('Filed completed inputs:',len(intake_jobs.archive_completed(config.WORK)))
     return True

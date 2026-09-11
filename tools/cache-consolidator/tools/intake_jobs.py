@@ -43,17 +43,35 @@ def snapshot(inbox):
         except (OSError,ValueError):continue
     return result
 
-def file_completed(work,snapshot,commit):
+def file_completed(work,snapshot,commit,retained=None):
     # A successful remote push is required before automatically filing inputs.
     path=Path(work)/'completed-inputs.json';data=read(path,{'schema':1,'roots':{}})
     if not isinstance(data,dict) or data.get('schema')!=1 or not isinstance(data.get('roots'),dict):data={'schema':1,'roots':{}}
-    for name,files in snapshot.items():data['roots'][name]={'files':files,'commit':commit,'completed':time.time()}
+    for name,files in snapshot.items():data['roots'][name]={'files':files,'commit':commit,'completed':time.time(),'retained_unparsed':(retained or {}).get(name,[])}
     write(path,data)
 
 def archive_completed(work):
     work=Path(work);inbox=(work/'_inbox').resolve();path=work/'completed-inputs.json';data=read(path,{'schema':1,'roots':{}})
     if not isinstance(data,dict) or data.get('schema')!=1 or not isinstance(data.get('roots'),dict):data={'schema':1,'roots':{}}
     moved=[]
+    # Human-readable index of unresolved bytes retained inside archived originals.
+    def report():
+        lines=['# Retained files needing parser attention', '',
+               'Supported data from these bundles was published. These listed files',
+               'were inspected but not fully decoded. Their originals remain intact',
+               'inside the archived bundles, which remain available to intake.', '']
+        for name,entry in sorted(data['roots'].items()):
+            if not entry.get('archived') or not entry.get('retained_unparsed'):continue
+            lines += ['## '+name.replace('\n',' '), '', 'Archive: '+entry['archived'],
+                      'Published commit: '+entry['commit'], '']
+            for item in entry['retained_unparsed']:
+                lines += ['- '+item['file'].replace('\n',' ')+' â€” '+item['reason'],
+                          '  SHA-256: '+item['sha256']]
+            lines.append('')
+        target=inbox/'archive'/'RETAINED-FILES.md'
+        if target.parent.exists() and target.parent.resolve()==target.parent:
+            temp=target.with_name('.retained-'+uuid.uuid4().hex+'.tmp')
+            temp.write_text('\n'.join(lines)+'\n',encoding='utf-8');os.replace(temp,target)
     for name,entry in list(data['roots'].items()):
         if Path(name).name!=name or name=='archive':continue
         src=inbox/name;dst=inbox/'archive'/time.strftime('%Y-%m')/name
@@ -69,6 +87,7 @@ def archive_completed(work):
             entry['archived']=dst.relative_to(inbox).as_posix();moved.append(name)
             write(path,data)
         except (OSError,ValueError):continue
+    report()
     return moved
 
 def process_manual(config):
@@ -96,9 +115,12 @@ def manual_request(work,path):
     return item
 
 
-def eligible_completed(work,out,inputs):
+def eligible_completed(work,out,inputs,retained=None):
     """File only roots whose supported contents reached the merger/export ledger.
     Unknown-only roots and failed archives remain pending. Raw evidence is kept.
+    With an explicit retained report, mixed bundles can be filed after every WDB
+    is ledgered and exported, while undecoded bytes are identified for later work.
+    The default remains strict for callers that cannot preserve that distinction.
     """
     import csv,intake,luamerge
     work=Path(work);out=Path(out);ledger=read(work/'ledger.json',{})
@@ -117,7 +139,20 @@ def eligible_completed(work,out,inputs):
         if p.suffix.lower()=='.wdb':
             entry=ledger.get(sha,{})
             matches=[r for r in merged if r.get('sha256')==sha and r.get('group')==intake.group_of(str(p))]
-            return bool(entry.get('standard') and entry.get('clean_end') and matches and all(exported.get(r['id'],{}).get('sha256')==sha and exported.get(r['id'],{}).get('records')==str(entry.get('records')) for r in matches))
+            accounted = bool(entry.get('sha256')==sha and type(entry.get('records')) is int
+                             and entry['records']>=0 and matches and all(
+                exported.get(r['id'],{}).get('sha256')==sha
+                and exported.get(r['id'],{}).get('records')==str(entry['records'])
+                for r in matches))
+            if entry.get('standard') and entry.get('clean_end'):
+                # Older ledgers/tests may omit the redundant embedded SHA.
+                return bool(matches and all(exported.get(r['id'],{}).get('sha256')==sha and exported.get(r['id'],{}).get('records')==str(entry.get('records')) for r in matches))
+            if retained is not None and accounted and entry.get('note') and (
+                    entry.get('standard') is False or entry.get('clean_end') is False):
+                pending.append({'file':str(p.relative_to(work)).replace('\\','/'),
+                                'sha256':sha,'reason':'Unsupported cache format' if entry.get('standard') is False else 'Incomplete cache record stream'})
+                return None  # Retained evidence, never proof of successful decoding.
+            return False
         key,spec=luamerge.spec_for(p.name)
         if spec:
             source=lua.get(sha,{})
@@ -138,10 +173,12 @@ def eligible_completed(work,out,inputs):
         return None
     good={}
     for name,files in inputs.items():
-        root=work/'_inbox'/name
+        root=work/'_inbox'/name;pending=[]
         try:
             if tree(root)!=files:continue
             checks=[check(root if rel=='.' else root/rel,sha) for rel,sha in files.items()]
-            if any(v is True for v in checks) and all(v is not False for v in checks):good[name]=files
+            if any(v is True for v in checks) and all(v is not False for v in checks):
+                good[name]=files
+                if retained is not None and pending:retained[name]=pending
         except (OSError,ValueError,KeyError):continue
     return good

@@ -79,6 +79,57 @@ class SharedQueueTests(unittest.TestCase):
                 self.assertEqual(jobs.archive_completed(work),[key])
                 self.assertEqual(jobs.tree(inbox/'archive'/jobs.time.strftime('%Y-%m')/key),before[key])
 
+    def test_mixed_bundle_files_only_with_explicit_retained_evidence(self):
+        import hashlib,intake,zipfile
+        for standard in (False,True):
+            with self.subTest(standard=standard), tempfile.TemporaryDirectory() as d:
+                work=Path(d);inbox=work/'_inbox';inbox.mkdir();out=work/'out';out.mkdir()
+                extracted=work/'extracted'/'mixed';extracted.mkdir(parents=True)
+                archive=inbox/'mixed.zip'
+                with zipfile.ZipFile(archive,'w') as z:
+                    z.writestr('itemcache.wdb',b'valid');z.writestr('other.wdb',b'undecoded')
+                (extracted/'itemcache.wdb').write_bytes(b'valid');(extracted/'other.wdb').write_bytes(b'undecoded')
+                sha=hashlib.sha256(archive.read_bytes()).hexdigest();(extracted/'.intake-sha256').write_text(sha)
+                ledger={};source=['id\tsha256\tgroup\trecords']
+                for i,name in enumerate(('itemcache.wdb','other.wdb')):
+                    p=extracted/name;h=hashlib.sha256(p.read_bytes()).hexdigest()
+                    ledger[h]={'sha256':h,'standard':True if i==0 else standard,'clean_end':i==0,'records':1 if i==0 else 0,'note':'' if i==0 else 'unread'}
+                    source.append(f'{i}\t{h}\t{intake.group_of(str(p))}\t{1 if i==0 else 0}')
+                jobs.write(work/'ledger.json',ledger);(work/'merged').mkdir()
+                for p in (work/'merged/sources.tsv',out/'sources.tsv'):p.write_text('\n'.join(source)+'\n',encoding='utf-8')
+                before=jobs.snapshot(inbox);retained={}
+                self.assertEqual(jobs.eligible_completed(work,out,before),{})
+                self.assertEqual(jobs.eligible_completed(work,out,before,retained),before)
+                self.assertEqual(len(retained['mixed.zip']),1)
+                self.assertIn('other.wdb',retained['mixed.zip'][0]['file'])
+                original=archive.read_bytes();jobs.file_completed(work,before,'a'*40,retained)
+                self.assertEqual(jobs.archive_completed(work),['mixed.zip'])
+                receipt=jobs.read(work/'completed-inputs.json')['roots']['mixed.zip']
+                self.assertEqual((inbox/receipt['archived']).read_bytes(),original)
+                self.assertEqual(receipt['retained_unparsed'],retained['mixed.zip'])
+                self.assertIn('other.wdb',(inbox/'archive/RETAINED-FILES.md').read_text(encoding='utf-8'))
+                jobs.archive_completed(work)
+                self.assertIn('other.wdb',(inbox/'archive/RETAINED-FILES.md').read_text(encoding='utf-8'))
+
+    def test_unread_only_or_unaccounted_inputs_still_stay_pending(self):
+        import hashlib,intake
+        with tempfile.TemporaryDirectory() as d:
+            work=Path(d);inbox=work/'_inbox';inbox.mkdir();out=work/'out';out.mkdir();(work/'merged').mkdir()
+            bad=inbox/'other.wdb';bad.write_bytes(b'undecoded');sha=hashlib.sha256(bad.read_bytes()).hexdigest()
+            jobs.write(work/'ledger.json',{sha:{'sha256':sha,'standard':False,'clean_end':False,'records':0,'note':'unread'}})
+            text=f'id\tsha256\tgroup\trecords\n1\t{sha}\t{intake.group_of(str(bad))}\t0\n'
+            for p in (work/'merged/sources.tsv',out/'sources.tsv'):p.write_text(text,encoding='utf-8')
+            retained={};self.assertEqual(jobs.eligible_completed(work,out,jobs.snapshot(inbox),retained),{})
+            self.assertEqual(retained,{})
+            # A good peer must not make an unledgered or unexported file eligible.
+            root=inbox/'mixed';root.mkdir();bad.rename(root/'other.wdb')
+            good=root/'itemcache.wdb';good.write_bytes(b'good');h=hashlib.sha256(good.read_bytes()).hexdigest()
+            ledger=jobs.read(work/'ledger.json');ledger[h]={'sha256':h,'standard':True,'clean_end':True,'records':1};jobs.write(work/'ledger.json',ledger)
+            text+=f'2\t{h}\t{intake.group_of(str(good))}\t1\n'
+            for p in (work/'merged/sources.tsv',out/'sources.tsv'):p.write_text(text,encoding='utf-8')
+            # The moved unread file has no matching group provenance.
+            self.assertEqual(jobs.eligible_completed(work,out,jobs.snapshot(inbox),{}),{})
+
     def test_unstable_inbox_never_starts_consolidation(self):
         import publish
         with patch.object(publish,'status_paths',return_value=[]),patch.object(publish,'nul',return_value=[]),patch.object(publish.time,'sleep'),patch.object(jobs,'snapshot',side_effect=[{'x':{'f':'one'}},{'x':{'f':'two'}}]),patch.object(publish,'consolidate') as consolidate,patch.dict(publish.os.environ,{'ASCENSION_MANUAL_REQUEST':'','ASCENSION_BATCH_PLAN':''}):
