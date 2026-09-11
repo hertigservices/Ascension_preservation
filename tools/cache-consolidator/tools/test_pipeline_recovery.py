@@ -148,6 +148,15 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn("Secret",json.dumps(state))
         self.assertNotIn("Good",json.dumps(state))
 
+    def test_observed_horde_market_label_is_canonical(self):
+        self.assertIn("Warcraft Reborn_Horde",luamerge.modes.CANONICAL_MODE_LABELS)
+        cls=luamerge.modes.classify("Realm - Warcraft Reborn_Horde")
+        self.assertEqual(cls["slug"],"warcraft-reborn-horde")
+        g=luaser.loads('AUCTIONATOR_PRICE_DATABASE={["Realm - Warcraft Reborn_Horde"]={["Item"]={id="123:0",mr=10,cc=2,sc=1,lastScan=4}}}')
+        state={}
+        self.assertEqual(luamerge.merge_auctionator(state,g,"hash",{"captured":""},[]),1)
+        self.assertIn("warcraft-reborn-horde",state['auctionator_observations'])
+
     def test_missing_output_column_fails_gate(self):
         fails=[]
         audit_columns.compare_counts({'counts':{'union/a.tsv.gz:name':1}}, {},fails,[])

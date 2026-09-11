@@ -48,6 +48,7 @@ MODE_TABLE = {
     "Season 10 Wildcard":  ("season-10-wildcard",  "wildcard",            "10"),
     "Season 9":            ("season-9",            "season-9",            "9"),
     "Warcraft Reborn":     ("warcraft-reborn",     "warcraft-reborn",     ""),
+    "Warcraft Reborn_Horde": ("warcraft-reborn-horde", "warcraft-reborn", ""),
     "Stress Test":         ("stress-test",         "stress-test",         ""),
     "Development":         ("development",         "conquest-of-azeroth", ""),
     "Live QA":             ("live-qa",             "free-pick",           ""),
