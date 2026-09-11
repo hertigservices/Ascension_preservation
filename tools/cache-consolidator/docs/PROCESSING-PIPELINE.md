@@ -83,9 +83,12 @@ or data publication does not mean every new contribution is automatically safe t
 The accompanying [hash inventory](installed-source-hashes.json) records the installed
 consolidator source on 2026-09-11, hashing text after normalizing CRLF to LF. Most modules
 match this checkout. [INSTALLED-VARIANTS.patch](INSTALLED-VARIANTS.patch) records the
-three remaining differences: the installed privacy audit has a narrower exact-string
+remaining differences: the installed privacy audit has a narrower exact-string
 exception list, and the installer/importer's help and missing-dataset handling are older.
-Apply that patch to a separate checkout to inspect those exact installed variants.
+The public exporter also normalizes Windows short-path aliases before pruning reused
+outputs; this portability fix was discovered by CI and is not in the recorded deployment.
+Apply the patch to a separate LF checkout (`git -c core.autocrlf=false clone ...`)
+to inspect the exact installed variants.
 Configuration, optional lookup data, local inputs and credentials are intentionally excluded.
 This is a dated source comparison, not a promise that a future deployment remains identical.
 

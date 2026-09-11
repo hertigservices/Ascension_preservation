@@ -35,7 +35,7 @@
     {
       "path": "tools/cache-consolidator/tools/export.py",
       "installed_sha256_lf": "90d5744b9ce01b456e0144be66059e9c0054d6f65284b997dcf7166a4a26ca37",
-      "matches_source": true
+      "matches_source": false
     },
     {
       "path": "tools/cache-consolidator/tools/export_stock_client.py",
@@ -250,7 +250,7 @@
     {
       "path": "tools/cache-consolidator/tools/test_build_cache.py",
       "installed_sha256_lf": "4f310e5c8da582b03c8c71c848d43b04c970387fb50d5a4303e9d3354769ca04",
-      "matches_source": true
+      "matches_source": false
     },
     {
       "path": "tools/cache-consolidator/tools/test_archive_naming.py",

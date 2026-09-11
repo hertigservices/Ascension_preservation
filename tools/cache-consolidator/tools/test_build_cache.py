@@ -74,6 +74,19 @@ class IncrementalTests(unittest.TestCase):
         self.run_all(force=True)
         self.assertEqual(incremental, self.snapshot())
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows short-path alias regression')
+    def test_prune_retains_outputs_referenced_by_long_path(self):
+        import ctypes
+        folder=self.out/'long output directory name'
+        folder.mkdir();keep=folder/'keep.txt';keep.write_text('keep')
+        stale=folder/'stale.txt';stale.write_text('stale')
+        buffer=ctypes.create_unicode_buffer(32768)
+        size=ctypes.windll.kernel32.GetShortPathNameW(str(folder),buffer,len(buffer))
+        if not size or buffer.value == str(folder):self.skipTest('8.3 aliases unavailable')
+        self.assertEqual(export.prune(buffer.value,[str(keep.resolve())]),['stale.txt'])
+        self.assertEqual(keep.read_text(),'keep')
+        self.assertFalse(stale.exists())
+
     def test_second_run_reuses_and_preserves_every_file(self):
         self.run_all()
         expected = self.snapshot()

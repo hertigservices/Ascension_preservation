@@ -15,6 +15,27 @@
  
  # A placeholder is not a leak.  The tool has to be able to name the path it
  # refuses -- "WTF/Account/<login email>/" IS the documentation of the rule --
+--- a/tools/cache-consolidator/tools/export.py
++++ b/tools/cache-consolidator/tools/export.py
+@@ -220,16 +220,14 @@
+     if not os.path.isdir(root):
+         return []
+     removed = []
+-    # Cached paths are resolved; Windows temporary paths can use 8.3 aliases.
+-    # Compare the same filesystem identity before pruning a reused output.
+-    keep = {os.path.normcase(os.path.realpath(p)) for p in keep}
++    keep = {os.path.normcase(os.path.abspath(p)) for p in keep}
+     protect = {os.path.normcase(p) for p in protect}
+     for dp, _dirs, files in os.walk(root, topdown=False):
+         for fn in files:
+             if os.path.normcase(fn) in protect:
+                 continue
+             p = os.path.join(dp, fn)
+-            if os.path.normcase(os.path.realpath(p)) not in keep:
++            if os.path.normcase(os.path.abspath(p)) not in keep:
+                 os.remove(p)
+                 removed.append(os.path.relpath(p, root).replace("\\", "/"))
+         if dp != root and not os.listdir(dp):
 --- a/tools/cache-consolidator/tools/import_world.py
 +++ b/tools/cache-consolidator/tools/import_world.py
 @@ -708,9 +708,7 @@
@@ -62,3 +83,25 @@
      ap.add_argument("--fetch", action="store_true",
                      help="download the dataset from GitHub into --data first")
      ap.add_argument("--from-zip", metavar="ZIP",
+--- a/tools/cache-consolidator/tools/test_build_cache.py
++++ b/tools/cache-consolidator/tools/test_build_cache.py
+@@ -74,19 +74,6 @@
+         self.run_all(force=True)
+         self.assertEqual(incremental, self.snapshot())
+ 
+-    @unittest.skipUnless(os.name == 'nt', 'Windows short-path alias regression')
+-    def test_prune_retains_outputs_referenced_by_long_path(self):
+-        import ctypes
+-        folder=self.out/'long output directory name'
+-        folder.mkdir();keep=folder/'keep.txt';keep.write_text('keep')
+-        stale=folder/'stale.txt';stale.write_text('stale')
+-        buffer=ctypes.create_unicode_buffer(32768)
+-        size=ctypes.windll.kernel32.GetShortPathNameW(str(folder),buffer,len(buffer))
+-        if not size or buffer.value == str(folder):self.skipTest('8.3 aliases unavailable')
+-        self.assertEqual(export.prune(buffer.value,[str(keep.resolve())]),['stale.txt'])
+-        self.assertEqual(keep.read_text(),'keep')
+-        self.assertFalse(stale.exists())
+-
+     def test_second_run_reuses_and_preserves_every_file(self):
+         self.run_all()
+         expected = self.snapshot()

@@ -220,14 +220,16 @@ def prune(root, keep, protect=()):
     if not os.path.isdir(root):
         return []
     removed = []
-    keep = {os.path.normcase(os.path.abspath(p)) for p in keep}
+    # Cached paths are resolved; Windows temporary paths can use 8.3 aliases.
+    # Compare the same filesystem identity before pruning a reused output.
+    keep = {os.path.normcase(os.path.realpath(p)) for p in keep}
     protect = {os.path.normcase(p) for p in protect}
     for dp, _dirs, files in os.walk(root, topdown=False):
         for fn in files:
             if os.path.normcase(fn) in protect:
                 continue
             p = os.path.join(dp, fn)
-            if os.path.normcase(os.path.abspath(p)) not in keep:
+            if os.path.normcase(os.path.realpath(p)) not in keep:
                 os.remove(p)
                 removed.append(os.path.relpath(p, root).replace("\\", "/"))
         if dp != root and not os.listdir(dp):

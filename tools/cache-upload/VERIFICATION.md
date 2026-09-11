@@ -3,7 +3,7 @@
 The publication checkout passed all 15 consolidator test scripts, the Python
 collector/shared-queue suite, and 31 JavaScript tests. Tests used temporary work,
 output and repository directories, not the live inbox. The included pipeline guide
-records the installed-source comparison and its three remaining module variants.
+records the installed-source comparison and its remaining module variants.
 Source was screened for credential patterns, matches to installed project secrets,
 and private/runtime file inclusion. This is not a guarantee against every possible leak.
 
