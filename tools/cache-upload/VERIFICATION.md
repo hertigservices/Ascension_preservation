@@ -40,3 +40,11 @@ The selected installation root was correct. Its Account folder contained CoARead
 Read-only processing of the user's actual Account files found seven recognized files and prepared two useful captures: 95,043 bytes of CoAReader references and 762,198 bytes of AscensionHarvest references. Five notices concern older files without eligible reference branches and an oversized backup. No local capture bytes were copied into source or uploaded by this check. Build, TypeScript and 27 tests pass.
 
 The new policy was deployed and hash-verified in the running collector before deploying the public Worker. Worker version: `44c04c53-fbd8-49b6-9d61-9f6520d49580`. Collector receipt: `C:/AscensionArchive/upload-service/deployments/private-upload-collector-20260910T233408520215Z/receipt.json`.
+
+## Mixed-bundle filing regression — 2026-09-11
+
+The 42 collector/shared-queue tests and 21 publisher tests pass after the cleanup
+change. Mixed supported/undecoded WDB archives retain exact original bytes and
+record unresolved files explicitly. Strict eligibility remains the default for
+callers that cannot retain that distinction. Failed extractions, unread-only roots,
+and files lacking matching source evidence remain pending.

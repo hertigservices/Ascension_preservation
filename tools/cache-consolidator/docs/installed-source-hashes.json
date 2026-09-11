@@ -99,7 +99,7 @@
     },
     {
       "path": "tools/cache-consolidator/tools/publish.py",
-      "installed_sha256_lf": "a540f1e44f43c10b90aa0766ed0fe3a91eba09308f5b5e3b53ea16db6c550e30",
+      "installed_sha256_lf": "f182c6f7d001574bd319f5290163f3df0133fe5e5542d2dbc61ae5165bd4ad10",
       "matches_source": true
     },
     {
@@ -234,7 +234,7 @@
     },
     {
       "path": "tools/cache-consolidator/tools/intake_jobs.py",
-      "installed_sha256_lf": "a5c8555a472a2435de3c389ed1978d7ff379c66a46deb6236143a555737da994",
+      "installed_sha256_lf": "1e9dd3d6ced978581d15f95c1a1cec4ddac5c7c662b3510794ae49a8dfff6101",
       "matches_source": true
     },
     {
