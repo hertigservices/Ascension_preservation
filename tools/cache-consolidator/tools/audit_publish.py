@@ -30,7 +30,12 @@ ALLOW_SUBSTR = [b"World of Warcraft\\Cache", b"<redacted",
                 # mailbox at a TLD that does not exist. Allowed as this exact
                 # string and nothing wider -- another name at the same domain,
                 # or this name at a real domain, still fails.
-                b"techbot@gnome.mail"]
+                b"techbot@gnome.mail",
+                # Ascension's public support mailbox, not a person. It sits in the
+                # schema.org Organization block of every ascension.gg page, and
+                # the CoA-Databank snapshot republishes eight of those pages.
+                # Allowed as this exact address and nothing wider.
+                b"support@ascension.gg"]
 
 # A placeholder is not a leak.  The tool has to be able to name the path it
 # refuses -- "WTF/Account/<login email>/" IS the documentation of the rule --

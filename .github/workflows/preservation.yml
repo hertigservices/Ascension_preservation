@@ -24,7 +24,7 @@ jobs:
           # that matches nothing would make this step pass vacuously.
           $tests = Get-ChildItem 'tools/cache-consolidator/tools/test_*.py' | Sort-Object Name
           Write-Host "found $($tests.Count) cache tool test(s)"
-          if ($tests.Count -lt 17) { throw "expected at least 17, found $($tests.Count)" }
+          if ($tests.Count -lt 19) { throw "expected at least 19, found $($tests.Count)" }
           foreach ($test in $tests) {
             Write-Host "== $($test.Name)"
             python -B $test.FullName
