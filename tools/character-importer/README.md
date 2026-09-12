@@ -171,8 +171,25 @@ knownSpellEntries:  {"ID": 30249, "Name": "Clasp of Infinity", "Type": "Ability"
                      "Spells": [805847], "AECost": 1, "Tab": "Class", ...}
 ```
 
-`ID` is the catalogue's entry id, and one purchase can teach several spells —
-all of them are taken, not just the first.
+`ID` is the catalogue's entry id. A purchase listing several spells is **ranked,
+not a set**: the realm keeps exactly one of them, and charges the entry's cost
+once per rank. A checkpoint does not record the rank it held — every captured
+entry reports `Points` 0 — so taking every spell buys ranks the character never
+had and doubles the essence it spent.
+
+What the checkpoint *does* record is the totals, and they are enough to solve
+most of it. Every purchase starts at rank 1, and the difference against
+`learnedAbilityEssence` / `learnedTalentEssence` is exactly the missing ranks.
+Where one purchase is the only thing that could account for the difference it is
+raised; where several could, nothing is guessed:
+
+```
+- Advancement: Talent Luck is the only purchase that can account for the 1
+  unspent ability essence the capture recorded, so it was restored at rank 2.
+- Advancement: the capture spent 5 talent essence but the entries it lists
+  account for 4 at one rank each ... so none was raised -- the player keeps
+  1 talent essence to re-spend.
+```
 
 The server stores *having* one of these as *knowing its spells*, so restoring the
 spells is restoring the build. **This is the only thing that restores it**: the

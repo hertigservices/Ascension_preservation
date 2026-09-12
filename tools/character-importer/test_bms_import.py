@@ -857,17 +857,39 @@ class AdvancementTests(unittest.TestCase):
         plan = self.plan_with(self.capture(talents=[self.CLASP]))
         self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [805847])
 
-    def test_every_spell_of_a_multi_spell_purchase_is_taken(self):
-        """Warpstriker, Luck and Anomaly Spikes each teach two."""
+    def test_a_multi_spell_purchase_is_ranked_not_a_set(self):
+        """The realm keeps exactly one spell of an entry -- its rank.
+
+        Taking both silently buys a rank the character never had, and the
+        realm then charges its essence twice.
+        """
         plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER]))
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [707556])
+
+    def test_the_essence_total_can_raise_a_lone_candidate_to_its_real_rank(self):
+        """One entry able to absorb the shortfall is an answer, not a guess."""
+        char = self.capture(talents=[self.WARPSTRIKER])
+        char["advancement"]["learnedTalentEssence"] = 2   # rank 1 accounts for 1
+        plan = self.plan_with(char)
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [707830])
+        self.assertIn("only purchase that can account", " ".join(plan.notes))
+
+    def test_an_ambiguous_shortfall_is_reported_rather_than_guessed(self):
+        spikes = {"ID": 6156, "Name": "Anomaly Spikes", "Type": "Talent",
+                  "Spells": [503825, 504886], "TECost": 1}
+        char = self.capture(talents=[self.WARPSTRIKER, spikes])
+        char["advancement"]["learnedTalentEssence"] = 3   # rank 1 each accounts for 2
+        plan = self.plan_with(char)
         self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
-                         [707556, 707830])
+                         [503825, 707556])
+        note = " ".join(plan.notes)
+        self.assertIn("2 purchase(s) could explain", note)
+        self.assertIn("keeps 1 talent essence", note)
 
     def test_a_spell_already_planned_is_not_written_twice(self):
         """character_spell is keyed on (guid, spell); a duplicate would fail the insert."""
         plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER]), already=[707556])
-        self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
-                         [707556, 707830])
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [707556])
 
     def test_a_repeated_spell_inside_one_entry_is_written_once(self):
         entry = dict(self.WARPSTRIKER, Spells=[707556, 707556])
@@ -878,13 +900,13 @@ class AdvancementTests(unittest.TestCase):
         plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER],
                                            abilities=[self.CLASP]))
         self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
-                         [707556, 707830, 805847])
+                         [707556, 805847])
 
     def test_entries_and_spells_are_counted_separately(self):
         note = " ".join(self.plan_with(
             self.capture(talents=[self.WARPSTRIKER], abilities=[self.CLASP])).notes)
         self.assertIn("2 purchased entries restored", note)
-        self.assertIn("teaching 3 spell(s)", note)
+        self.assertIn("teaching 2 spell(s)", note)
 
     def test_the_realms_own_name_is_used_rather_than_a_spell_name(self):
         """'Anomaly Spikes' beats whichever of its two spells got looked up."""

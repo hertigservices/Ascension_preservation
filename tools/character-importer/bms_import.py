@@ -1086,6 +1086,66 @@ def _advancement_fields(row: dict) -> tuple[Any, list[int], str]:
     return entry_id, spells, str(row.get("Name") or "").strip()
 
 
+def _cost(row: dict, field: str) -> int:
+    try:
+        return max(0, int(row.get(field) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _advancement_ranks(kept: list, advancement: dict) -> tuple[list[int], list[str]]:
+    """How many ranks of each purchase the character had, and what stays unknown.
+
+    A multi-spell entry is ranked, not a set: the realm's own `.localtalent`
+    keeps exactly one of an entry's spells, and charges its cost once per rank.
+    The checkpoint does not record the rank it held -- every captured entry
+    reports Points 0 -- so taking every spell, as this used to, silently buys
+    ranks the character never had and inflates the essence spent.
+
+    What the checkpoint does record is the totals: learnedAbilityEssence and
+    learnedTalentEssence. Start every entry at rank 1 and the difference is
+    exactly the ranks that are missing. When only one entry could account for
+    it, that entry is raised; when several could, nothing is guessed and the
+    shortfall is reported so the player can re-spend it deliberately.
+    """
+    ranks = [1] * len(kept)
+    notes: list[str] = []
+    for field, index, label in (("learnedAbilityEssence", 2, "ability"),
+                                ("learnedTalentEssence", 3, "talent")):
+        try:
+            target = int(advancement.get(field) or 0)
+        except (TypeError, ValueError):
+            continue
+        if target <= 0:
+            continue
+        spent = sum(entry[index] * ranks[i] for i, entry in enumerate(kept))
+        short = target - spent
+        if short <= 0:
+            continue
+        # Only an entry that costs this essence and has a spell left can absorb it.
+        movable = [i for i, entry in enumerate(kept)
+                   if entry[index] > 0 and len(entry[1]) > ranks[i]]
+        exact = [i for i in movable
+                 if short % kept[i][2 if index == 2 else 3] == 0
+                 and ranks[i] + short // kept[i][index] <= len(kept[i][1])]
+        if len(exact) == 1:
+            i = exact[0]
+            ranks[i] += short // kept[i][index]
+            notes.append(
+                "Advancement: %s is the only purchase that can account for the "
+                "%d unspent %s essence the capture recorded, so it was restored "
+                "at rank %d." % (kept[i][0], short, label, ranks[i]))
+        else:
+            notes.append(
+                "Advancement: the capture spent %d %s essence but the entries it "
+                "lists account for %d at one rank each. A checkpoint does not "
+                "record per-purchase ranks, and %d purchase(s) could explain the "
+                "difference, so none was raised -- the player keeps %d %s essence "
+                "to re-spend."
+                % (target, label, spent, len(movable), short, label))
+    return ranks, notes
+
+
 def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
                       catalogue: Any = None) -> None:
     """Restore what a Conquest of Azeroth character bought.
@@ -1124,6 +1184,7 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
 
     planned = {row["spell"] for row in plan.rows.get("character_spell", [])}
     added = restored = taught = 0
+    keep: list[tuple[str, list[int], int]] = []   # (what, spells, rank)
     for key, label in (("knownTalentEntries", "talent"),
                        ("knownSpellEntries", "ability")):
         rows = advancement.get(key)
@@ -1150,15 +1211,21 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
                           "not in this server's Spell.dbc")
             if not usable:
                 continue
-            restored += 1
-            for spell_id in usable:
-                taught += 1
-                if spell_id in planned:
-                    continue
-                planned.add(spell_id)
-                added += 1
-                plan.add("character_spell",
-                         {"guid": plan.guid, "spell": spell_id, "specMask": 1})
+            keep.append((what, usable, _cost(row, "AECost"), _cost(row, "TECost")))
+
+    ranks, shortfalls = _advancement_ranks(keep, advancement)
+    for (what, usable, _ae, _te), rank in zip(keep, ranks):
+        restored += 1
+        taught += 1
+        spell_id = usable[min(rank, len(usable)) - 1]
+        if spell_id in planned:
+            continue
+        planned.add(spell_id)
+        added += 1
+        plan.add("character_spell",
+                 {"guid": plan.guid, "spell": spell_id, "specMask": 1})
+    for note in shortfalls:
+        plan.notes.append(note)
 
     if restored:
         note = ("Conquest of Azeroth advancement: %d purchased entries restored, "
