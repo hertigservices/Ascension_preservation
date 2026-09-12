@@ -588,7 +588,7 @@ def build_plan(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers)
 
     # -- spells, talents, skills -----------------------------------------
     _plan_spells(plan, char, resolvers)
-    _plan_talents(plan, char, klass, resolvers)
+    _plan_talents(plan, char, klass, resolvers, getattr(args, "talents", "auto"))
     _plan_skills(plan, char, resolvers)
     _plan_reputations(plan, char, race, klass, resolvers)
     _plan_action_bars(plan, char)
@@ -919,15 +919,28 @@ def _plan_spells(plan: Plan, char: dict, resolvers: Resolvers) -> None:
                   "Mystic Enchants are an Ascension system with no AzerothCore equivalent")
 
 
-def _plan_talents(plan: Plan, char: dict, class_id: int, resolvers: Resolvers) -> None:
+def _plan_talents(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
+                  mode: str = "auto") -> None:
     """Resolve talents by NAME, never by grid position.
 
     An Ascension capture reorders the tabs (Fire/Frost/Arcane rather than
     Arcane/Fire/Frost) and packs many talents into the same (tier, column)
     cell, so the client's coordinates mean nothing on a stock server. The
     rank-1 spell name is the only key that survives the trip.
+
+    Nothing is committed until every talent has been tried, because a talent
+    build is all-or-nothing in a way the rest of a character is not. Half a
+    build is not a weaker version of the build: it is a different one, silently
+    missing whichever talents this server renamed or rebalanced away, with the
+    leftover points still showing as spent to the player's eye. Under the
+    default policy a build that does not land completely is not imported at
+    all, leaving the points free so the player rebuilds it deliberately.
     """
+    resolved_rows: list[tuple[str, str, int, int]] = []
+    failures: list[tuple[str, str, int, str]] = []
     added: set[int] = set()
+    captured_points = 0
+
     for tab in char.get("talentTabs") or []:
         tab_name = str(tab.get("name") or "")
         tab_index = int(tab.get("tabIndex") or 0)
@@ -943,19 +956,78 @@ def _plan_talents(plan: Plan, char: dict, class_id: int, resolvers: Resolvers) -
             if rank < 1:
                 continue
             name = str(talent.get("name") or "")
+            captured_points += rank
             resolved = resolvers.talent_spell(class_id, tab_name, name, rank, tab_index)
             if not resolved.ok:
-                plan.skip("talents", "%s / %s rank %d" % (tab_name, name, rank), resolved.reason)
+                failures.append((tab_name, name, rank, resolved.reason))
                 continue
+            if resolved.note:
+                plan.notes.append("Talent %s: %s." % (tab_name, resolved.note))
             if resolved.value in added:
                 continue
             added.add(resolved.value)
-            plan.add("character_talent", {
-                "guid": plan.guid, "spell": resolved.value, "specMask": 1,
-            })
-            plan.add("character_spell", {
-                "guid": plan.guid, "spell": resolved.value, "specMask": 1,
-            })
+            resolved_rows.append((tab_name, name, rank, resolved.value))
+
+    landed_points = sum(rank for _, _, rank, _ in resolved_rows)
+    rebuilding = mode == "rebuild" or (mode == "auto" and failures)
+
+    if rebuilding and captured_points:
+        if mode == "rebuild":
+            plan.notes.append(
+                "Talents were not imported (--talents rebuild). The character keeps all "
+                "%d talent points to spend." % captured_points
+            )
+        else:
+            plan.notes.append(
+                "Talents were NOT imported: %d of the %d captured talents do not resolve on "
+                "this server, and a partly-applied tree would be a different build, not a "
+                "smaller one. All %d talent points are left unspent for the player to rebuild. "
+                "Use --talents import to take the %d that do resolve anyway."
+                % (len(failures), len(failures) + len(resolved_rows), captured_points,
+                   len(resolved_rows))
+            )
+
+    for tab_name, name, rank, reason in failures:
+        plan.skip("talents", "%s / %s rank %d" % (tab_name, name, rank), reason)
+
+    if rebuilding:
+        for tab_name, name, rank, _spell in resolved_rows:
+            plan.skip("talents", "%s / %s rank %d" % (tab_name, name, rank),
+                      "resolved, but held back so the whole build is rebuilt cleanly")
+        # A checkpoint's known-spell list can include a talent's own passive.
+        # Leaving those in character_spell would hand the player the effect of
+        # a talent they have not paid a point for, which would make the "all
+        # points left to spend" note above untrue.
+        rank_spells = resolvers.talent_rank_spells()
+        carried = plan.rows.get("character_spell") or []
+        withheld = [row for row in carried if row.get("spell") in rank_spells]
+        if withheld:
+            plan.rows["character_spell"] = [
+                row for row in carried if row.get("spell") not in rank_spells
+            ]
+            plan.notes.append(
+                "Held back %d known spell(s) that a talent grants, so the rebuilt tree "
+                "starts clean: %s."
+                % (len(withheld),
+                   ", ".join(str(row["spell"]) for row in withheld[:6]))
+            )
+        return
+
+    if failures and mode == "import":
+        plan.notes.append(
+            "Talent build is PARTIAL (--talents import): %d of %d talents landed, %d of %d "
+            "points. The player keeps the unlanded points."
+            % (len(resolved_rows), len(resolved_rows) + len(failures),
+               landed_points, captured_points)
+        )
+
+    for _tab_name, _name, _rank, spell in resolved_rows:
+        plan.add("character_talent", {
+            "guid": plan.guid, "spell": spell, "specMask": 1,
+        })
+        plan.add("character_spell", {
+            "guid": plan.guid, "spell": spell, "specMask": 1,
+        })
 
 
 def _plan_skills(plan: Plan, char: dict, resolvers: Resolvers) -> None:
@@ -1349,6 +1421,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dbc-dir", default=None,
                         help="the target server's Data/dbc directory")
     parser.add_argument("--name", default=None, help="override the character name")
+    parser.add_argument("--talents", choices=("auto", "import", "rebuild"), default="auto",
+                        help="auto (default): import the talent build only if every talent "
+                             "in it resolves on this server, otherwise import none and leave "
+                             "the points to respend; import: take whatever resolves, even a "
+                             "partial build; rebuild: never import talents")
 
     parser.add_argument("--apply", action="store_true", help="actually write (default: dry run)")
     parser.add_argument("--rehearse", action="store_true",

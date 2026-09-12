@@ -27,6 +27,7 @@ from bms_import import (  # noqa: E402
     _captured_durability,
     _durability,
     _equipment_cache,
+    _plan_talents,
     blocks_planning,
     blocks_writing,
     choose_config,
@@ -647,6 +648,119 @@ DataDir = "{data}"
         self.assertTrue(bms_config.serves_database(asc, "ASC_CHARACTERS"))
         self.assertFalse(bms_config.serves_database(asc, "acore_characters"))
         self.assertFalse(bms_config.serves_database(asc, ""))
+
+
+class StubResolvers:
+    """Resolves the talents it was told about and refuses the rest."""
+
+    def __init__(self, known, rank_spells=()):
+        self.known = known                  # {(tab, name, rank): spell}
+        self._rank_spells = set(rank_spells)
+
+    def resolve_talent_tab(self, class_id, tab_name, tab_index):
+        from bms_dbc import Resolution
+        return Resolution(True, 1), False
+
+    def talent_spell(self, class_id, tab_name, name, rank, tab_index=0):
+        from bms_dbc import Resolution
+        spell = self.known.get((tab_name, name, rank))
+        if spell is None:
+            return Resolution(False, reason="no talent named %r in this tab" % name)
+        return Resolution(True, spell)
+
+    def talent_rank_spells(self):
+        return self._rank_spells
+
+
+class TalentPolicyTests(unittest.TestCase):
+    """A talent build has to land whole or not at all.
+
+    Half a build is not a weaker build, it is a different one: the talents this
+    server renamed or rebalanced away go missing while their points still look
+    spent. Leaving the points free is recoverable in a way that is not.
+    """
+
+    CAPTURE = {
+        "talentTabs": [{
+            "name": "Fire", "tabIndex": 1,
+            "talents": [
+                {"name": "Ignite", "rank": 3},
+                {"name": "Incineration", "rank": 2},
+                {"name": "Burning Soul", "rank": 0},   # never spent
+            ],
+        }],
+    }
+
+    def plan_with(self, resolvers, mode):
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        _plan_talents(plan, self.CAPTURE, 8, resolvers, mode)
+        return plan
+
+    def all_resolve(self):
+        return StubResolvers({("Fire", "Ignite", 3): 1111119,
+                              ("Fire", "Incineration", 2): 1118460})
+
+    def one_missing(self):
+        return StubResolvers({("Fire", "Ignite", 3): 1111119})
+
+    def test_a_build_that_lands_whole_is_imported(self):
+        plan = self.plan_with(self.all_resolve(), "auto")
+        self.assertEqual(plan.count("character_talent"), 2)
+        self.assertEqual(
+            sorted(row["spell"] for row in plan.rows["character_talent"]),
+            [1111119, 1118460])
+
+    def test_a_rank_zero_talent_is_not_counted_as_spent(self):
+        plan = self.plan_with(self.all_resolve(), "auto")
+        self.assertEqual(plan.count("character_talent"), 2)
+
+    def test_one_unresolved_talent_withdraws_the_whole_build(self):
+        plan = self.plan_with(self.one_missing(), "auto")
+        self.assertEqual(plan.count("character_talent"), 0)
+        self.assertEqual(plan.count("character_spell"), 0)
+
+    def test_the_withdrawal_says_how_many_points_are_free(self):
+        plan = self.plan_with(self.one_missing(), "auto")
+        note = " ".join(plan.notes)
+        self.assertIn("NOT imported", note)
+        self.assertIn("5 talent points", note)   # rank 3 + rank 2
+
+    def test_every_talent_is_named_in_the_skips_when_withdrawn(self):
+        """A count alone cannot be checked; the player needs the names."""
+        plan = self.plan_with(self.one_missing(), "auto")
+        listed = " ".join(skip.what for skip in plan.skips)
+        self.assertIn("Ignite", listed)
+        self.assertIn("Incineration", listed)
+
+    def test_import_mode_keeps_a_partial_build_on_request(self):
+        plan = self.plan_with(self.one_missing(), "import")
+        self.assertEqual(plan.count("character_talent"), 1)
+        self.assertIn("PARTIAL", " ".join(plan.notes))
+
+    def test_rebuild_mode_withdraws_even_a_build_that_would_land(self):
+        plan = self.plan_with(self.all_resolve(), "rebuild")
+        self.assertEqual(plan.count("character_talent"), 0)
+        self.assertIn("rebuild", " ".join(plan.notes))
+
+    def test_a_withdrawn_build_does_not_leave_its_passives_learned(self):
+        """The known-spell list can carry a talent's own passive."""
+        resolvers = StubResolvers({("Fire", "Ignite", 3): 1111119},
+                                  rank_spells={1111119, 1118460})
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        plan.add("character_spell", {"guid": 7, "spell": 1118460, "specMask": 1})
+        plan.add("character_spell", {"guid": 7, "spell": 133, "specMask": 1})
+        _plan_talents(plan, self.CAPTURE, 8, resolvers, "auto")
+        left = [row["spell"] for row in plan.rows["character_spell"]]
+        self.assertEqual(left, [133])
+        self.assertIn("Held back", " ".join(plan.notes))
+
+    def test_an_ordinary_spell_is_not_held_back(self):
+        resolvers = StubResolvers({("Fire", "Ignite", 3): 1111119},
+                                  rank_spells={1111119})
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        plan.add("character_spell", {"guid": 7, "spell": 133, "specMask": 1})
+        _plan_talents(plan, self.CAPTURE, 8, resolvers, "auto")
+        self.assertEqual([row["spell"] for row in plan.rows["character_spell"]], [133])
 
 
 if __name__ == "__main__":

@@ -160,5 +160,141 @@ class RecordTests(DbcFixtureMixin, unittest.TestCase):
         self.assertTrue(dbc.widened)
 
 
+class RebalancedTreeTests(DbcFixtureMixin, unittest.TestCase):
+    """A fork that rebalanced a tree and kept the originals in the file.
+
+    Modelled on the CoA repack's Talent.dbc, where every stock Mage/Fire talent
+    is still present, collapsed onto tier 0 and sharing cells, beside a
+    replacement laid out one per cell across real tiers. Picking the lower id
+    there would import the launch-era talent the fork deliberately replaced.
+    """
+
+    CLASS_MAGE = 8
+    TAB = 41
+
+    def _talent(self, talent_id, row, col, rank1, tab=None):
+        fields = [0] * bms_dbc.TALENT_FIELDS
+        fields[bms_dbc.TALENT_ID] = talent_id
+        fields[bms_dbc.TALENT_TAB] = self.TAB if tab is None else tab
+        fields[bms_dbc.TALENT_ROW] = row
+        fields[bms_dbc.TALENT_COL] = col
+        fields[bms_dbc.TALENT_RANK] = rank1
+        return tuple(fields)
+
+    def _build(self, talents, names):
+        """names: {spell_id: label}. Lays out Spell.dbc and TalentTab.dbc too."""
+        blob = b"\x00"
+        offsets = {}
+        for spell_id, label in names.items():
+            offsets[spell_id] = len(blob)
+            blob += label.encode("utf-8") + b"\x00"
+
+        spell_rows = []
+        for spell_id, label in names.items():
+            fields = [0] * (bms_dbc.SPELL_NAME + 1)
+            fields[bms_dbc.SPELL_ID] = spell_id
+            fields[bms_dbc.SPELL_NAME] = offsets[spell_id]
+            spell_rows.append(tuple(fields))
+        self.build("Spell.dbc", spell_rows, blob, fields=bms_dbc.SPELL_NAME + 1)
+
+        tab_blob = b"\x00Fire\x00"
+        tab = [0] * bms_dbc.TALENTTAB_FIELDS
+        tab[bms_dbc.TALENTTAB_ID] = self.TAB
+        tab[bms_dbc.TALENTTAB_NAME] = 1
+        tab[bms_dbc.TALENTTAB_CLASS_MASK] = bms_dbc.class_mask(self.CLASS_MAGE)
+        tab[bms_dbc.TALENTTAB_PAGE] = 0
+        self.build("TalentTab.dbc", [tuple(tab)], tab_blob,
+                   fields=bms_dbc.TALENTTAB_FIELDS)
+
+        self.build("Talent.dbc", talents, b"\x00", fields=bms_dbc.TALENT_FIELDS)
+        return bms_dbc.Resolvers(self.dir)
+
+    def _rebalanced(self):
+        # Four stock talents piled into one tier-0 cell, beside their
+        # replacements laid out one per cell. Only 'Ignite' is contested.
+        talents = [
+            self._talent(25, 0, 0, 11095),      # stock, piled
+            self._talent(27, 0, 0, 11078),      # stock, piled
+            self._talent(34, 0, 0, 11119),      # stock, piled  (Ignite)
+            self._talent(28, 0, 0, 11100),      # stock, piled
+            self._talent(110034, 0, 0, 1111119),  # replacement Ignite, piled too
+            self._talent(110025, 3, 0, 1111095),  # anchors: sole in their cells
+            self._talent(110027, 1, 1, 1111078),
+            self._talent(110028, 2, 0, 1111100),
+        ]
+        names = {
+            11095: "Improved Scorch", 11078: "Improved Fire Blast",
+            11119: "Ignite", 11100: "Flame Throwing",
+            1111119: "Ignite", 1111095: "Improved Scorch",
+            1111078: "Improved Fire Blast", 1111100: "Flame Throwing",
+        }
+        return self._build(talents, names)
+
+    def test_the_replacement_wins_over_the_talent_it_replaced(self):
+        res = self._rebalanced()
+        got = res.talent_spell(self.CLASS_MAGE, "Fire", "Ignite", 1)
+        self.assertTrue(got.ok, got.reason)
+        self.assertEqual(got.value, 1111119)
+
+    def test_the_swap_is_reported_rather_than_made_silently(self):
+        res = self._rebalanced()
+        got = res.talent_spell(self.CLASS_MAGE, "Fire", "Ignite", 1)
+        self.assertIn("1111119", got.note)
+        self.assertIn("11119", got.note)
+
+    def test_a_tree_with_one_generation_still_refuses_to_guess(self):
+        """Two same-named talents that are genuinely both on the tree."""
+        talents = [
+            self._talent(40, 0, 0, 53483),
+            self._talent(41, 0, 0, 53554),
+            self._talent(42, 1, 0, 11100),
+            self._talent(43, 2, 0, 11095),
+        ]
+        names = {53483: "Mobility", 53554: "Mobility",
+                 11100: "Flame Throwing", 11095: "Improved Scorch"}
+        res = self._build(talents, names)
+        got = res.talent_spell(self.CLASS_MAGE, "Fire", "Mobility", 1)
+        self.assertFalse(got.ok)
+        self.assertIn("ambiguous", got.reason)
+
+    def test_a_lone_straggler_does_not_stretch_the_window(self):
+        """One surviving original as a sole cell occupant must not match all."""
+        talents = [
+            self._talent(140, 0, 3, 12299),       # straggler original, anchor
+            self._talent(141, 0, 0, 12301),       # stock, piled
+            self._talent(110141, 0, 0, 1112301),  # replacement, piled
+            self._talent(110144, 1, 1, 1150685),  # anchors
+            self._talent(110146, 3, 2, 1112308),
+            self._talent(110147, 2, 1, 1112797),
+        ]
+        names = {12299: "Firm Grip", 12301: "Improved Bloodrage",
+                 1112301: "Improved Bloodrage", 1150685: "Incite",
+                 1112308: "Puncture", 1112797: "Improved Revenge"}
+        res = self._build(talents, names)
+        got = res.talent_spell(self.CLASS_MAGE, "Fire", "Improved Bloodrage", 1)
+        self.assertTrue(got.ok, got.reason)
+        self.assertEqual(got.value, 1112301)
+
+    def test_talent_rank_spells_collects_every_rank(self):
+        res = self._rebalanced()
+        self.assertIn(1111119, res.talent_rank_spells())
+        self.assertIn(11119, res.talent_rank_spells())
+        self.assertNotIn(0, res.talent_rank_spells())
+
+
+class DominantSpanTests(unittest.TestCase):
+    def test_lumpy_ids_of_one_generation_are_kept_whole(self):
+        ids = [110023, 110024, 110036, 111639, 111852, 112212]
+        self.assertEqual(bms_dbc._dominant_span(ids), (110023, 112212))
+
+    def test_a_generation_boundary_is_cut_away(self):
+        ids = [140, 110138, 110140, 110702, 112247]
+        self.assertEqual(bms_dbc._dominant_span(ids), (110138, 112247))
+
+    def test_too_few_ids_to_judge_are_left_alone(self):
+        self.assertEqual(bms_dbc._dominant_span([5, 900000]), (5, 900000))
+        self.assertIsNone(bms_dbc._dominant_span([]))
+
+
 if __name__ == "__main__":
     unittest.main()

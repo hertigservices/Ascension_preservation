@@ -106,12 +106,55 @@ PyMySQL is pure Python, so no compiler and no MySQL client library are needed.
 | Character record | race, class, level, money, played time, position |
 | Equipment and bags | including per-item durability and enchantments |
 | Spells | filtered against the target's `Spell.dbc` |
-| Talents | resolved by name through `Talent.dbc` / `TalentTab.dbc` |
+| Talents | resolved by name through `Talent.dbc` / `TalentTab.dbc`, all-or-nothing — see [Talents on a rebalanced realm](#talents-on-a-rebalanced-realm) |
 | Skills | resolved by name through `SkillLine.dbc` |
 | Reputations | resolved by name through `Faction.dbc` |
 | Action bars | spells and macros |
 | Quests | active and completed |
 | Homebind | the recorded bind zone |
+
+## Talents on a rebalanced realm
+
+A checkpoint records talents by name. That is deliberate: it is the only key
+that survives the trip, because a capture reorders the tabs and packs several
+talents into one grid cell. But a realm that rebalanced its trees raises a
+second question — when two talents in a tab share a name, *which* one did the
+realm mean?
+
+Forks tend to rebalance by leaving the original talent in `Talent.dbc` and
+adding a replacement beside it, so both answer to the name. On the CoA repack
+every stock Mage/Fire talent is still in the file, collapsed onto tier 0 and
+sharing cells four-deep, next to a replacement laid out one per cell across
+tiers 0–10. Choosing the lower id there would import the launch-era talent the
+realm deliberately replaced.
+
+The importer picks the copy on the tree the client can actually draw. Talents
+that are the sole occupant of their grid cell are certainly on that tree, and a
+duplicate is resolved to whichever copy sits nearest them — but only when it
+wins by an order of magnitude. Where the copies are equally close, nothing is
+guessed and the talent is reported unresolved. Every swap is printed:
+
+```
+- Talent Frost: 'Frostbite' exists 2 times in this tab; took the copy on the
+  laid-out tree (spell 1112497) over 12497.
+```
+
+Because a partly-applied tree is a *different* build rather than a smaller one —
+missing whichever talents the realm renamed away, with the leftover points still
+looking spent — a build that does not land completely is not imported at all:
+
+| `--talents` | Behaviour |
+| --- | --- |
+| `auto` (default) | import the build only if every talent in it resolves; otherwise import none and leave all the points to respend |
+| `import` | take whatever resolves, even a partial build |
+| `rebuild` | never import talents |
+
+When the build is withheld, every talent is still listed by name so you can see
+what it contained, and any known spell that a talent grants is held back too —
+otherwise the player would keep the effect without paying the point. The
+character then logs in with its full allowance unspent, because AzerothCore
+recomputes free points from the talents it loads
+(`m_usedTalentCount = spentTalents; InitTalentForLevel();`).
 
 ## What it does not restore, and why
 

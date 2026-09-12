@@ -29,6 +29,7 @@ widened a DBC fails loudly instead of silently reading garbage.
 
 from __future__ import annotations
 
+import bisect
 import os
 import struct
 from dataclasses import dataclass
@@ -214,6 +215,7 @@ class Resolution:
     ok: bool
     value: int = 0
     reason: str = ""
+    note: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
@@ -221,6 +223,44 @@ class Resolution:
 
 def _norm(text: Any) -> str:
     return " ".join(str(text or "").split()).casefold()
+
+
+def _dominant_span(ids: list[int]) -> tuple[int, int] | None:
+    """The id range of the largest generation in a set of talent ids.
+
+    A rebalanced tab can leave one original talent as the sole occupant of a
+    cell -- CoA's Warrior/Protection keeps stock talent 140 because its
+    replacement was renamed and moved elsewhere. A plain min/max would let that
+    single straggler stretch the range across both id generations and match
+    everything, so split at the one gap that is decisive (wider than the spread
+    on either side of it) and keep the more populous side. A tab with a single
+    coherent generation has no such gap and is left whole, which is what keeps
+    a stock Talent.dbc resolving exactly as before.
+    """
+    if not ids:
+        return None
+    ordered = sorted(ids)
+    if len(ordered) < 3:
+        return ordered[0], ordered[-1]
+    gaps = sorted(
+        ((ordered[i + 1] - ordered[i], i) for i in range(len(ordered) - 1)),
+        reverse=True,
+    )
+    widest, at = gaps[0]
+    runner_up = gaps[1][0]
+    # One generation's ids are lumpy -- CoA's Mage/Fire anchors cluster at
+    # 110023-110036, 111639-111852 and 112212, so gaps of ~1600 are normal
+    # *within* a generation. The jump between generations is ~110000. Measured
+    # on this file the two are two orders of magnitude apart (4.5x the runner-up
+    # inside Mage/Fire, 116x across the boundary in Warrior/Protection), so
+    # requiring an order of magnitude splits real generations and leaves
+    # ordinary lumpiness alone.
+    if runner_up > 0 and widest >= 10 * runner_up:
+        left, right = ordered[: at + 1], ordered[at + 1:]
+        keep = left if len(left) >= len(right) else right
+        if len(keep) >= 2:
+            return keep[0], keep[-1]
+    return ordered[0], ordered[-1]
 
 
 class Resolvers:
@@ -241,6 +281,9 @@ class Resolvers:
         self._spell_names: dict[int, str] | None = None
         self._talent_index: dict[int, dict[str, list[int]]] | None = None
         self._talent_tabs: list[tuple[int, str, int, int]] | None = None
+        self._talent_cell_users: dict[int, dict[tuple[int, int], int]] | None = None
+        self._talent_anchor_span: dict[int, list[int]] | None = None
+        self._talent_rank_spells: set[int] | None = None
         self._glyph_by_spell: dict[int, int] | None = None
 
     # -- file access ------------------------------------------------------
@@ -435,8 +478,12 @@ class Resolvers:
         ]
         talent_dbc = self._open("Talent.dbc", TALENT_FIELDS)
         index: dict[int, dict[str, list[int]]] = {}
+        cells: dict[int, dict[tuple[int, int], int]] = {}
         for row in range(len(talent_dbc)):
             tab_id = talent_dbc.u(row, TALENT_TAB)
+            cell = (talent_dbc.u(row, TALENT_ROW), talent_dbc.u(row, TALENT_COL))
+            cells.setdefault(tab_id, {})
+            cells[tab_id][cell] = cells[tab_id].get(cell, 0) + 1
             first_rank = talent_dbc.u(row, TALENT_RANK)
             name = _norm(self._spell_names.get(first_rank, ""))
             if not name:
@@ -444,6 +491,119 @@ class Resolvers:
             index.setdefault(tab_id, {}).setdefault(name, []).append(row)
         self._talent_tabs = tabs
         self._talent_index = index
+        self._talent_cell_users = cells
+
+    def _tab_anchors(self, tab_id: int) -> list[int]:
+        """The talent ids of the tree this tab actually draws.
+
+        A talent tree is a grid: the client draws one talent per (tier, column)
+        cell. Rows that are the *sole* occupant of their cell are therefore
+        certainly on the drawn tree -- call them anchors. Rows piled several-deep
+        into one cell cannot all be drawn, so at most one of them is live.
+
+        A fork that rebalances a tree tends to leave the originals in the file
+        rather than delete them, collapsed onto a single tier, and add its
+        replacements as fresh rows laid out across real tiers. The replacements
+        become the anchors, so proximity to them identifies which copy of a
+        duplicated name belongs to the live tree -- without hard-coding any
+        fork's id offsets.
+
+        Measured on the CoA repack's Talent.dbc: Mage/Fire holds 29 stock-id
+        rows stacked into 4 cells all on tier 0, beside 28 replacement rows
+        spread one per cell across tiers 0-10. Every anchor is a replacement.
+
+        Anchors outside the tab's dominant id generation are dropped, because a
+        single original that happened to survive as a sole occupant would
+        otherwise vouch for the whole abandoned generation.
+        """
+        if self._talent_anchor_span is None:
+            self._talent_anchor_span = {}
+        cached = self._talent_anchor_span.get(tab_id)
+        if cached is not None:
+            return cached
+        assert self._talent_cell_users is not None
+        assert self._talent_index is not None
+        users = self._talent_cell_users.get(tab_id, {})
+        talent_dbc = self._open("Talent.dbc", TALENT_FIELDS)
+        anchors = [
+            talent_dbc.u(row, TALENT_ID)
+            for names in (self._talent_index.get(tab_id) or {}).values()
+            for row in names
+            if users.get(
+                (talent_dbc.u(row, TALENT_ROW), talent_dbc.u(row, TALENT_COL)), 0
+            ) == 1
+        ]
+        span = _dominant_span(anchors)
+        kept = sorted(
+            a for a in anchors if span is None or span[0] <= a <= span[1]
+        )
+        self._talent_anchor_span[tab_id] = kept
+        return kept
+
+    def _live_tree_rows(self, tab_id: int, rows: list[int]) -> list[int]:
+        """Narrow same-name talent rows to the ones on the tab's drawn tree.
+
+        A replacement that is itself piled -- it shares a cell with the original
+        it replaces -- is not an anchor, so it can sit outside the anchors' own
+        min/max: CoA's Frostbite is talent 110047 against a Frost anchor range
+        starting at 110061. What still separates it from the original is
+        distance: 14 from the nearest anchor, against 110014 for the stock copy.
+
+        So rank the candidates by how far they sit from the nearest anchor and
+        keep the closest, but only when it wins by an order of magnitude. A tab
+        whose same-named talents are all equally close is one where this cannot
+        tell them apart, and staying ambiguous there is the point -- guessing
+        would be how a launch-era talent gets imported over its replacement.
+        """
+        anchors = self._tab_anchors(tab_id)
+        if len(anchors) < 2 or len(rows) < 2:
+            return rows
+        talent_dbc = self._open("Talent.dbc", TALENT_FIELDS)
+
+        def distance(row: int) -> int:
+            talent_id = talent_dbc.u(row, TALENT_ID)
+            at = bisect.bisect_left(anchors, talent_id)
+            near = []
+            if at < len(anchors):
+                near.append(anchors[at] - talent_id)
+            if at:
+                near.append(talent_id - anchors[at - 1])
+            return min(near)
+
+        ranked = sorted((distance(row), row) for row in rows)
+        best = ranked[0][0]
+        rival = next(
+            (
+                d
+                for d, row in ranked
+                if talent_dbc.u(row, TALENT_RANK)
+                != talent_dbc.u(ranked[0][1], TALENT_RANK)
+            ),
+            None,
+        )
+        if rival is None:
+            return rows
+        if rival >= max(best * 10, 1):
+            return [row for d, row in ranked if d == best]
+        return rows
+
+    def talent_rank_spells(self) -> set[int]:
+        """Every spell any talent rank teaches, on this server.
+
+        Used to keep a held-back talent build honest: the checkpoint's known
+        spell list can carry a talent's own passive, and writing that to
+        character_spell would hand the player the effect without the point.
+        """
+        if self._talent_rank_spells is None:
+            talent_dbc = self._open("Talent.dbc", TALENT_FIELDS)
+            spells = set()
+            for row in range(len(talent_dbc)):
+                for offset in range(TALENT_MAX_RANK):
+                    spell = talent_dbc.u(row, TALENT_RANK + offset)
+                    if spell:
+                        spells.add(spell)
+            self._talent_rank_spells = spells
+        return self._talent_rank_spells
 
     def talent_tabs_for_class(self, class_id: int) -> list[tuple[int, str, int, int]]:
         """This class's talent tabs, in the order the client indexes them.
@@ -525,14 +685,36 @@ class Resolvers:
             return Resolution(
                 False, reason="%r has no rank %d on this server" % (talent_name, rank)
             )
+        note = ""
+        if len(spells) > 1:
+            # Prefer the copy that sits on the tree the client can actually
+            # draw. Picking the lowest id instead would hand a rebalanced fork
+            # its own abandoned originals.
+            live = self._live_tree_rows(tab.value, rows)
+            narrowed = {talent_dbc.u(row, TALENT_RANK + rank - 1) for row in live}
+            narrowed.discard(0)
+            if len(narrowed) == 1:
+                note = (
+                    "%r exists %d times in this tab; took the copy on the laid-out "
+                    "tree (spell %d) over %s"
+                    % (
+                        talent_name,
+                        len(rows),
+                        next(iter(narrowed)),
+                        ", ".join(
+                            str(s) for s in sorted(spells - narrowed)[:4]
+                        ),
+                    )
+                )
+                spells = narrowed
         if len(spells) > 1:
             return Resolution(
                 False,
                 reason="ambiguous: %d talents named %r in this tab teach different rank-%d "
-                "spells (%s)"
+                "spells (%s), and none is alone in its tree position"
                 % (len(rows), talent_name, rank, ", ".join(str(s) for s in sorted(spells)[:4])),
             )
-        return Resolution(True, spells.pop())
+        return Resolution(True, spells.pop(), note=note)
 
     # -- glyphs -----------------------------------------------------------
 
