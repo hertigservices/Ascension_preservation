@@ -85,3 +85,10 @@ The paired image URL and image dimensions must be verified before publication. T
 ## Collection discovery
 
 The homepage's All collections directory and both search selectors use the complete published catalog. New structured kinds appear automatically on the next successful data build; locale and mode views retain their existing entity categories. Auctionator observations have the readable label Auction price observations. Labels do not reclassify records or change source counts. Reference-only files remain in Sources & coverage.
+
+
+## Compact atlas controls
+
+Tracking markers use small inline SVG icons and screen-space proximity grouping. Every numbered group opens a persistent member chooser, including exact overlaps at maximum zoom; selecting a member preserves the chooser. Filtering closes the chooser, and keyboard focus returns to the matching map marker after zooming. Only roles present in the zone appear as controls; herb/ore display filters use exact resource names and preserve the original object records in exports. Generic NPCs remain neutral; creature sightings use red tracking dots. Advanced filters, map metadata and full source details are expandable, with active filter state visible.
+
+Atlas zone search, map location search, database search and the Name column recognize a shared, reviewed set of dungeon/raid/city shortcuts (BWL, MC, LBRS, SM lib, and others). Search includes literal matches and every recognized meaning of ambiguous aliases such as DM. IDs stay exact, wing queries stay specific, and alias unions retain each source record once before sorting/pagination. Names and map identities are never rewritten.

@@ -1,3 +1,4 @@
+importScripts('search-aliases.js');
 /* Search runs in a worker: filter and order the entire candidate set before paging. */
 const cache = new Map();
 let latest = 0;
@@ -79,28 +80,27 @@ async function load(path, signal) {
 }
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 function candidates(d) {
-  const m = d.manifest, q = String(d.q || '').trim(), terms = words(q).filter(t => t.length >= 2);
-  const nameTerms = words(d.name || '').filter(t => t.length >= 2);
-  const identifier = String(d.recordId || '').trim();
-  const numeric = /^-?\d+$/.test(q);
+  const m=d.manifest,q=String(d.q || '').trim(),identifier=String(d.recordId || '').trim(),numeric=/^-?\d+$/.test(q);
+  const queryVariants=numeric?[[]]:AscensionSearchAliases.variants(q).map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
+  const nameVariants=AscensionSearchAliases.variants(d.name || '').map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
+  const alternatives=queryVariants.flatMap(query=>nameVariants.map(name=>[...query,...name]));
   let keys;
-  if (identifier) keys = ['id:' + identifier.slice(0, 2)];
-  else if (numeric) keys = ['id:' + q.slice(0, 2)];
-  else if (terms.length || nameTerms.some(t => t.length >= 2)) {
-    keys = [...terms, ...nameTerms.filter(t => t.length >= 2)].map(t => 'name:' + t.slice(0, 2));
-    keys.sort((a, b) => (m.search[a]?.count || 0) - (m.search[b]?.count || 0));
-    keys = keys.slice(0, 1);
-  } else keys = d.kind ? ['browse:' + d.kind] : Object.keys(m.search).filter(k => k.startsWith('browse:'));
-  const parts = [...new Set(keys.flatMap(k => m.search[k]?.parts || []))];
-  const allTerms = [...(numeric ? [] : terms), ...nameTerms];
-  const match = r => {
-    if ((d.kind && r[2] !== d.kind) || (d.source && r[4] !== d.source) ||
-        (d.mode && !r[3].split(/[,|]/).map(s => s.trim()).includes(d.mode)) ||
-        (identifier && r[5] !== identifier) || (numeric && r[5] !== q)) return false;
-    if (allTerms.length) { const tokens = words(r[1]); if (!allTerms.every(t => tokens.some(w => w.startsWith(t)))) return false; }
+  if(identifier)keys=['id:'+identifier.slice(0,2)];
+  else if(numeric)keys=['id:'+q.slice(0,2)];
+  else if(alternatives.some(ts=>ts.some(t=>t.length>=2)))keys=alternatives.filter(ts=>ts.some(t=>t.length>=2)).map(ts=>ts.filter(t=>t.length>=2).map(t=>'name:'+t.slice(0,2)).sort((a,b)=>(m.search[a]?.count||0)-(m.search[b]?.count||0))[0]);
+  else keys=d.kind?['browse:'+d.kind]:Object.keys(m.search).filter(k=>k.startsWith('browse:'));
+  keys=[...new Set(keys)];
+  const parts=[...new Set(keys.flatMap(k=>m.search[k]?.parts||[]))],partsByKey=new Map(keys.map(k=>[k,new Set(m.search[k]?.parts||[])]));
+  const match=(r,part)=>{
+    if((d.kind&&r[2]!==d.kind)||(d.source&&r[4]!==d.source)||(d.mode&&!r[3].split(/[,|]/).map(s=>s.trim()).includes(d.mode))||(identifier&&r[5]!==identifier)||(numeric&&r[5]!==q))return false;
+    const tokens=words(r[1]);
+    if(!alternatives.some(ts=>ts.every(t=>tokens.some(w=>/^\d+$/.test(t)?w===t:w.startsWith(t)))))return false;
+    // An alias may read several name buckets. Assign each row one owning bucket,
+    // preserving distinct record keys without an unbounded deduplication cache.
+    if(keys.length>1){const owner=keys.find(k=>k.startsWith('browse:')?k==='browse:'+r[2]:k.startsWith('id:')?r[5].startsWith(k.slice(3)):tokens.some(t=>t.startsWith(k.slice(5))));if(!partsByKey.get(owner)?.has(part))return false;}
     return true;
   };
-  return { parts, match };
+  return {parts,match};
 }
 onmessage = async ({ data: d }) => {
   const job = ++latest;
@@ -109,8 +109,8 @@ onmessage = async ({ data: d }) => {
   const controller = activeController = new AbortController();
   try {
     const q = String(d.q || '').trim();
-    if (q && !/^-?\d+$/.test(q) && !words(q).some(t => t.length >= 2)) throw Error('Enter at least two letters, or an exact numeric ID.');
-    if (String(d.name || '').trim() && !words(d.name).some(t => t.length >= 2)) throw Error('Enter at least two letters in the Name column filter.');
+    if (q && !/^-?\d+$/.test(q) && !AscensionSearchAliases.variants(q).some(ts=>ts.some(t=>t.length>=2))) throw Error('Enter at least two letters, or an exact numeric ID.');
+    if (String(d.name || '').trim() && !AscensionSearchAliases.variants(d.name).some(ts=>ts.some(t=>t.length>=2))) throw Error('Enter at least two letters in the Name column filter.');
     const sort = ['name', 'id', 'kind', 'source', 'mode'].includes(d.sort) ? d.sort : 'name';
     const dir = d.dir === 'desc' ? 'desc' : 'asc';
     const key = JSON.stringify([d.dataBase, d.manifest.revision, d.manifest.built_at, q, d.name || '', d.recordId || '', d.kind || '', d.source || '', d.mode || '', sort, dir]);
@@ -139,7 +139,7 @@ onmessage = async ({ data: d }) => {
         if (job !== latest) return;
         for (let j = 0; j < rows.length; j++) {
           const r = rows[j];
-          if (match(r)) { total++; if (!anchor || compare(r, anchor) > 0) heap.add(r); }
+          if (match(r,parts[i])) { total++; if (!anchor || compare(r, anchor) > 0) heap.add(r); }
           if (j && j % 4096 === 0) { await pause(); if (job !== latest) return; }
         }
         postMessage({ id: d.id, progress: i + 1, parts: parts.length, skipped: offset });

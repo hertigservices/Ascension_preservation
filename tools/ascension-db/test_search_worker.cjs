@@ -26,13 +26,14 @@ function harness(rows, partitionSize) {
   let fetches = 0, id = 0;
   const pending = new Map(), messages = [];
   const context = vm.createContext({
+    importScripts: name=>{assert.equal(name,'search-aliases.js');vm.runInContext(fs.readFileSync(path.join(__dirname,'web',name),'utf8'),context);},
     AbortController, DOMException, Response, Blob, DecompressionStream, TextDecoder, Uint8Array, setTimeout,
     fetch: async (url) => { fetches++; if (!assets.has(url)) return new Response('', { status: 404 }); return new Response(JSON.stringify(assets.get(url))); },
     postMessage: message => { messages.push(message); if (!message.progress) { const resolve = pending.get(message.id); pending.delete(message.id); resolve?.(JSON.parse(JSON.stringify(message))); } },
   });
   vm.runInContext(code, context);
   return {
-    get fetches() { return fetches; }, messages, context, manifest,
+    get fetches() { return fetches; }, messages, context, manifest, assets,
     query: (fields = {}) => new Promise(resolve => { const request = ++id; pending.set(request, resolve); context.onmessage({ data: { id: request, manifest, q: '', page: 0, ...fields } }); }),
   };
 }
@@ -138,4 +139,36 @@ test('every visible column, filter value and option escapes hostile HTML', async
   assert.equal(html.includes(hostile), false);
   assert.ok(html.includes('&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;&amp;'));
   assert.equal((html.match(/data-column-filter=/g) || []).length, 5);
+});
+
+test('recognized aliases include literal names and both meanings without duplicate records',async()=>{
+ const w=harness([row('a','Blackwing Lair',469,'map'),row('b','BWL key',1),row('c','Blackwing Lair BWL notes',2),row('d','Blackwing Forest',3),row('e','The Deadmines',36,'map'),row('f','Dire Maul East',429,'map'),row('g','DM field notes',4)]);
+ for(const q of ['bwl','BWL','B.W.L.','b w l']){const r=await w.query({q});assert.deepEqual(r.rows.map(r=>r[0]).sort(),['a','b','c']);assert.equal(r.total,3);}
+ assert.deepEqual((await w.query({q:'DM'})).rows.map(r=>r[0]).sort(),['e','f','g']);
+ assert.deepEqual((await w.query({q:'Blackwing Lair'})).rows.map(r=>r[0]).sort(),['a','c']);
+});
+test('acronym qualifiers, column filters and exact numeric IDs compose',async()=>{
+ const w=harness([row('a','Blackwing Lair Floor 4',469,'map','Exiles DB'),row('b','Blackwing Lair Floor 1',469,'map','Exiles DB'),row('c','Blackwing Lair Floor 4',469,'map','Client captures'),row('d','Scarlet Monastery Library',1,'map'),row('e','Scarlet Monastery Armory',2,'map')]);
+ for(const q of ['BWL floor 4','B.W.L. floor 4','b w l floor 4'])assert.deepEqual((await w.query({q,source:'Exiles DB',kind:'map'})).rows.map(r=>r[0]),['a']);
+ assert.deepEqual((await w.query({q:'469',name:'BWL',source:'Exiles DB'})).rows.map(r=>r[0]),['b','a']);
+ assert.deepEqual((await w.query({q:'SM lib'})).rows.map(r=>r[0]),['d']);
+ assert.equal((await w.query({q:'bwlxyz'})).total,0);
+});
+test('alias unions retain all source records across sorted pages and direction changes',async()=>{
+ const rows=Array.from({length:130},(_,i)=>row('r'+i,(i%2?'BWL Blackwing Lair ':'Blackwing Lair ')+String(i).padStart(3,'0'),i));
+ const w=harness(rows,11),first=await w.query({q:'bwl',sort:'id'}),second=await w.query({q:'bwl',sort:'id',page:1}),last=await w.query({q:'bwl',sort:'id',page:2});
+ assert.equal(first.total,130);assert.equal(new Set([...first.rows,...second.rows,...last.rows].map(r=>r[0])).size,130);
+ assert.equal((await w.query({q:'bwl',sort:'id',dir:'desc'})).rows[0][5],'129');
+});
+
+test('dictionary property names remain ordinary literal searches',async()=>{
+ const w=harness([row('a','Constructor',1),row('b','Prototype',2)]);
+ assert.deepEqual((await w.query({q:'constructor'})).rows.map(r=>r[0]),['a']);
+ assert.deepEqual((await w.query({q:'__proto__'})).rows.map(r=>r[0]),['b']);
+});
+
+test('two alias buckets sharing one physical part still emit each record once',async()=>{
+ const rows=[row('a','Deadmines Dire Maul comparison',1)],w=harness(rows);w.assets.set('shared',rows);
+ w.manifest.search['name:de'].parts=['shared'];w.manifest.search['name:di'].parts=['shared'];
+ const result=await w.query({q:'DM'});assert.equal(result.total,1);assert.equal(result.rows[0][0],'a');assert.equal(w.fetches,1);
 });
