@@ -1054,17 +1054,57 @@ def _plan_talents(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
         })
 
 
+def _advancement_fields(row: dict) -> tuple[Any, list[int], str]:
+    """(entry id, spells taught, name) out of one captured advancement entry.
+
+    C_CharacterAdvancement returns the realm's own node records: an `ID` that is
+    the catalogue's EntryId, a `Spells` list, and a `Name` better than anything
+    Spell.dbc would give -- "Anomaly Spikes" rather than whichever of its two
+    spells got looked up. The shorter InternalID/SpellID spelling is accepted
+    too, because that is what the addon's own test harness describes and a
+    future client may yet return it.
+    """
+    entry_id = row.get("ID")
+    if entry_id is None:
+        entry_id = row.get("InternalID", row.get("internalId"))
+
+    raw = row.get("Spells")
+    if not isinstance(raw, list):
+        raw = row.get("spells") if isinstance(row.get("spells"), list) else []
+    if not raw:
+        single = row.get("SpellID", row.get("spellId"))
+        raw = [single] if single else []
+
+    spells: list[int] = []
+    for value in raw:
+        try:
+            spell = int(value)
+        except (TypeError, ValueError):
+            continue
+        if spell and spell not in spells:
+            spells.append(spell)
+    return entry_id, spells, str(row.get("Name") or "").strip()
+
+
 def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
                       catalogue: Any = None) -> None:
     """Restore what a Conquest of Azeroth character bought.
 
     Custom classes keep nothing in Talent.dbc -- TalentTab.dbc stops at class 13,
-    so a Starcaller's captured talentTabs are empty and _plan_talents has nothing
-    to do. What such a character bought is recorded as advancement entries, and
-    the server stores having one as knowing its spell, so restoring the spells IS
-    restoring the build. _plan_spells has usually written them already from the
-    spellbook; this pass exists to name them, to add any the spellbook missed,
-    and to refuse an entry that does not belong to this character.
+    so such a character's captured talentTabs are empty and _plan_talents has
+    nothing to do. What they bought is recorded as advancement entries instead,
+    and the server stores having one as knowing its spells, so restoring the
+    spells IS restoring the build.
+
+    This pass is what actually restores it. The captured spellbook is not enough:
+    measured on a live Chronomancer, 10 of the 15 spells its 12 purchases teach
+    never appear in knownSpellIds, because a passive is not in the spellbook. An
+    import that leaned on _plan_spells alone would silently deliver a third of
+    the character.
+
+    One purchase can teach several spells -- that Chronomancer's Warpstriker,
+    Luck and Anomaly Spikes each teach two -- so every id in the entry is taken,
+    not just the first.
 
     The specialization is deliberately not restored. The server keeps the active
     spec in memory only and drops it at logout, so there is nothing to write that
@@ -1083,7 +1123,7 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
         spec_id = 0
 
     planned = {row["spell"] for row in plan.rows.get("character_spell", [])}
-    added = restored = 0
+    added = restored = taught = 0
     for key, label in (("knownTalentEntries", "talent"),
                        ("knownSpellEntries", "ability")):
         rows = advancement.get(key)
@@ -1092,38 +1132,37 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            entry_id = row.get("InternalID", row.get("internalId"))
-            spell_id = row.get("SpellID", row.get("spellId"))
-            try:
-                spell_id = int(spell_id)
-            except (TypeError, ValueError):
-                spell_id = 0
-            name = resolvers.spell_name(spell_id) if spell_id else ""
-            what = "%s %s" % (label, name or ("entry %s" % entry_id))
+            entry_id, spells, given = _advancement_fields(row)
+            what = "%s %s" % (row.get("Type") or label,
+                              given or ("entry %s" % entry_id))
 
             if catalogue is not None:
                 wrong = catalogue.mismatch(entry_id, class_id, level, spec_id)
                 if wrong:
                     plan.skip("advancement", what, wrong)
                     continue
-            if not spell_id:
-                plan.skip("advancement", what, "the entry carries no spell id")
+            if not spells:
+                plan.skip("advancement", what, "the entry teaches no spell")
                 continue
-            if not resolvers.spell_exists(spell_id):
-                plan.skip("advancement", what,
-                          "spell %d is not in this server's Spell.dbc" % spell_id)
+            usable = [s for s in spells if resolvers.spell_exists(s)]
+            for missing in [s for s in spells if s not in usable]:
+                plan.skip("advancement", "%s (spell %d)" % (what, missing),
+                          "not in this server's Spell.dbc")
+            if not usable:
                 continue
             restored += 1
-            if spell_id in planned:
-                continue
-            planned.add(spell_id)
-            added += 1
-            plan.add("character_spell",
-                     {"guid": plan.guid, "spell": spell_id, "specMask": 1})
+            for spell_id in usable:
+                taught += 1
+                if spell_id in planned:
+                    continue
+                planned.add(spell_id)
+                added += 1
+                plan.add("character_spell",
+                         {"guid": plan.guid, "spell": spell_id, "specMask": 1})
 
     if restored:
-        note = ("Conquest of Azeroth advancement: %d purchased entries restored"
-                % restored)
+        note = ("Conquest of Azeroth advancement: %d purchased entries restored, "
+                "teaching %d spell(s)" % (restored, taught))
         if added:
             note += (", %d of which the captured spellbook did not list" % added)
         if spec_id:

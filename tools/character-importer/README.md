@@ -165,13 +165,21 @@ character's captured `talentTabs` are empty and there is no tree to resolve.
 What they bought is recorded separately, as advancement entries:
 
 ```
-knownTalentEntries: {"InternalID": 6770, "SpellID": 300250, "TECost": 1, ...}
-knownSpellEntries:  {"InternalID": 6313, "SpellID": 300258, "AECost": 1, ...}
+knownTalentEntries: {"ID": 7216, "Name": "Warpstriker", "Type": "Talent",
+                     "Spells": [707556, 707830], "TECost": 1, "Tab": "Duality", ...}
+knownSpellEntries:  {"ID": 30249, "Name": "Clasp of Infinity", "Type": "Ability",
+                     "Spells": [805847], "AECost": 1, "Tab": "Class", ...}
 ```
 
-The server stores *having* one of these as *knowing its spell*, so restoring the
-spells is restoring the build. The importer reads these entries, names them, and
-writes any that the captured spellbook did not already list.
+`ID` is the catalogue's entry id, and one purchase can teach several spells —
+all of them are taken, not just the first.
+
+The server stores *having* one of these as *knowing its spells*, so restoring the
+spells is restoring the build. **This is the only thing that restores it**: the
+captured spellbook is not enough. On a live level-20 Chronomancer, 10 of the 15
+spells its 12 purchases teach never appear in `knownSpellIds`, because a passive
+is not in the spellbook, so an import that leaned on the ordinary spell path
+would silently deliver a third of the character.
 
 **The class is resolved from the target's own `ChrClasses.dbc`,** never from a
 table built into this tool. A fork's class token and its display name are

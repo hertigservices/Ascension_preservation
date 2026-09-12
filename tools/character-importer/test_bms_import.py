@@ -814,15 +814,26 @@ class ResolveClassTests(unittest.TestCase):
 class AdvancementTests(unittest.TestCase):
     """Conquest of Azeroth characters buy advancement entries, not talents.
 
-    TalentTab.dbc stops at class 13, so a Starcaller's captured talentTabs are
-    empty. The server stores having an entry as knowing its spell, so restoring
-    the spells is restoring the build.
+    TalentTab.dbc stops at class 13, so such a character's captured talentTabs
+    are empty. The server stores having an entry as knowing its spells, so
+    restoring the spells is restoring the build.
+
+    The entries below are the real shape, taken from a live Chronomancer export:
+    C_CharacterAdvancement returns the realm's own node records, keyed `ID`, with
+    a `Spells` list and the realm's own `Name`.
     """
 
-    SPELLS = {92132: "Moon Guard", 300250: "Moonstone Hilt",
-              300258: "Protected by the Stars", 680788: "Will of Elune"}
+    SPELLS = {706114: "Gift of the Infinite Dragonflight",
+              707556: "Warpstriker", 707830: "Warpstriker",
+              503825: "Anomaly Spikes", 504886: "Anomaly Spikes",
+              805847: "Clasp of Infinity", 300250: "Moonstone Hilt"}
 
-    def capture(self, talents=(), abilities=(), spec=100, available=True, level=80):
+    WARPSTRIKER = {"ID": 7216, "Name": "Warpstriker", "Type": "Talent",
+                   "Spells": [707556, 707830], "TECost": 1, "Class": "Chronomancer"}
+    CLASP = {"ID": 30249, "Name": "Clasp of Infinity", "Type": "Ability",
+             "Spells": [805847], "AECost": 1, "Class": "Chronomancer"}
+
+    def capture(self, talents=(), abilities=(), spec=32, available=True, level=20):
         return {
             "level": level,
             "advancement": {
@@ -833,59 +844,85 @@ class AdvancementTests(unittest.TestCase):
             },
         }
 
-    def plan_with(self, char, catalogue=None, already=()):
+    def plan_with(self, char, catalogue=None, already=(), class_id=22):
         plan = Plan(account_id=1, guid=7, name="Probe")
         for spell in already:
             plan.add("character_spell", {"guid": 7, "spell": spell, "specMask": 1})
-        _plan_advancement(plan, char, 26, AdvancementResolvers(self.SPELLS), catalogue)
+        _plan_advancement(plan, char, class_id,
+                          AdvancementResolvers(self.SPELLS), catalogue)
         return plan
 
-    def test_a_purchased_entry_the_spellbook_missed_is_restored(self):
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
-        plan = self.plan_with(char)
-        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
+    def test_a_purchase_the_spellbook_missed_is_restored(self):
+        """A passive is not in the spellbook; 10 of a live character's 15 were not."""
+        plan = self.plan_with(self.capture(talents=[self.CLASP]))
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [805847])
+
+    def test_every_spell_of_a_multi_spell_purchase_is_taken(self):
+        """Warpstriker, Luck and Anomaly Spikes each teach two."""
+        plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER]))
+        self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
+                         [707556, 707830])
 
     def test_a_spell_already_planned_is_not_written_twice(self):
         """character_spell is keyed on (guid, spell); a duplicate would fail the insert."""
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
-        plan = self.plan_with(char, already=[300250])
-        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
+        plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER]), already=[707556])
+        self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
+                         [707556, 707830])
+
+    def test_a_repeated_spell_inside_one_entry_is_written_once(self):
+        entry = dict(self.WARPSTRIKER, Spells=[707556, 707556])
+        plan = self.plan_with(self.capture(talents=[entry]))
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [707556])
 
     def test_abilities_and_talents_are_both_restored(self):
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}],
-                            abilities=[{"InternalID": 6313, "SpellID": 300258}])
-        plan = self.plan_with(char)
+        plan = self.plan_with(self.capture(talents=[self.WARPSTRIKER],
+                                           abilities=[self.CLASP]))
         self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
-                         [300250, 300258])
+                         [707556, 707830, 805847])
 
-    def test_the_count_restored_is_reported(self):
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}],
-                            abilities=[{"InternalID": 6313, "SpellID": 300258}])
-        note = " ".join(self.plan_with(char).notes)
+    def test_entries_and_spells_are_counted_separately(self):
+        note = " ".join(self.plan_with(
+            self.capture(talents=[self.WARPSTRIKER], abilities=[self.CLASP])).notes)
         self.assertIn("2 purchased entries restored", note)
+        self.assertIn("teaching 3 spell(s)", note)
+
+    def test_the_realms_own_name_is_used_rather_than_a_spell_name(self):
+        """'Anomaly Spikes' beats whichever of its two spells got looked up."""
+        entry = dict(self.WARPSTRIKER, ID=99, Spells=[999999])
+        plan = self.plan_with(self.capture(talents=[entry]))
+        self.assertIn("Warpstriker", " ".join(s.what for s in plan.skips))
+
+    def test_the_short_harness_spelling_is_still_accepted(self):
+        """A future client may return InternalID/SpellID instead."""
+        plan = self.plan_with(self.capture(
+            talents=[{"InternalID": 6770, "SpellID": 300250}]))
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
 
     def test_the_unrestorable_specialization_is_called_out(self):
         """The server keeps the active spec in memory only, so it cannot be written."""
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
-        note = " ".join(self.plan_with(char).notes)
-        self.assertIn("specialization 100", note)
+        note = " ".join(self.plan_with(self.capture(talents=[self.CLASP])).notes)
+        self.assertIn("specialization 32", note)
         self.assertIn("memory only", note)
 
     def test_a_spell_the_target_does_not_have_is_skipped_by_name(self):
-        char = self.capture(talents=[{"InternalID": 1, "SpellID": 999999}])
-        plan = self.plan_with(char)
+        entry = dict(self.CLASP, Spells=[999999])
+        plan = self.plan_with(self.capture(talents=[entry]))
         self.assertEqual(plan.count("character_spell"), 0)
-        self.assertIn("999999", " ".join(s.reason for s in plan.skips))
+        self.assertIn("999999", " ".join(s.what for s in plan.skips))
+
+    def test_one_unknown_spell_does_not_lose_its_siblings(self):
+        entry = dict(self.WARPSTRIKER, Spells=[707556, 999999])
+        plan = self.plan_with(self.capture(talents=[entry]))
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [707556])
+        self.assertIn("999999", " ".join(s.what for s in plan.skips))
 
     def test_an_entry_with_no_spell_is_skipped(self):
-        char = self.capture(talents=[{"InternalID": 4043}])
-        plan = self.plan_with(char)
+        plan = self.plan_with(self.capture(talents=[{"ID": 4043, "Name": "Empty"}]))
         self.assertEqual(plan.count("character_spell"), 0)
-        self.assertIn("no spell id", " ".join(s.reason for s in plan.skips))
+        self.assertIn("teaches no spell", " ".join(s.reason for s in plan.skips))
 
     def test_a_capture_without_the_api_does_nothing(self):
-        plan = self.plan_with(self.capture(available=False,
-                                           talents=[{"InternalID": 1, "SpellID": 92132}]))
+        plan = self.plan_with(self.capture(available=False, talents=[self.CLASP]))
         self.assertEqual(plan.count("character_spell"), 0)
         self.assertEqual(plan.notes, [])
 
@@ -897,18 +934,16 @@ class AdvancementTests(unittest.TestCase):
     def test_the_catalogue_refuses_an_entry_of_another_class(self):
         import bms_coa
         cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
-            '[{"EntryId": 6770, "ClassId": 12, "SpellIds": [300250]}]'))
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
-        plan = self.plan_with(char, catalogue=cat)
+            '[{"EntryId": 30249, "ClassId": 12, "SpellIds": [805847]}]'))
+        plan = self.plan_with(self.capture(talents=[self.CLASP]), catalogue=cat)
         self.assertEqual(plan.count("character_spell"), 0)
         self.assertIn("class 12", " ".join(s.reason for s in plan.skips))
 
     def test_the_catalogue_refuses_an_entry_above_the_level(self):
         import bms_coa
         cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
-            '[{"EntryId": 6770, "ClassId": 26, "RequiredLevel": 70, "SpellIds": [300250]}]'))
-        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}], level=20)
-        plan = self.plan_with(char, catalogue=cat)
+            '[{"EntryId": 30249, "ClassId": 22, "RequiredLevel": 70, "SpellIds": [805847]}]'))
+        plan = self.plan_with(self.capture(talents=[self.CLASP], level=20), catalogue=cat)
         self.assertEqual(plan.count("character_spell"), 0)
         self.assertIn("needs level 70", " ".join(s.reason for s in plan.skips))
 
@@ -916,10 +951,11 @@ class AdvancementTests(unittest.TestCase):
         """A catalogue older than the realm must not cost the player their build."""
         import bms_coa
         cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
-            '[{"EntryId": 1, "ClassId": 26, "SpellIds": [1]}]'))
-        char = self.capture(talents=[{"InternalID": 987654, "SpellID": 300250}])
-        plan = self.plan_with(char, catalogue=cat)
-        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
+            '[{"EntryId": 1, "ClassId": 22, "SpellIds": [5]}]'))
+        entry = dict(self.CLASP, ID=987654)
+        plan = self.plan_with(self.capture(talents=[entry]), catalogue=cat)
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [805847])
+
 
 
 if __name__ == "__main__":
