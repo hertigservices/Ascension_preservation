@@ -1,3 +1,4 @@
+import {collectionDirectory, collectionLabel} from './collections.js';
 import {renderCoverage} from "./coverage-controls.js";
 import {searchColumnState, searchTable, bindSearchColumns} from './search-controls.js';
 import {showAtlas, atlasRecordLinks, closeAtlas} from './atlas.js';
@@ -83,7 +84,7 @@ function home() {
       )
       .join(
         "",
-      )}</div>${heading("One archive. Distinct sources.")}<div class="source-grid"><article class="source-card"><h3>Captured from the client</h3><p>Published WDB records retain their game modes and capture metadata. Different versions remain separate.</p><a href="#search?source=Client%20captures&kind=item">Explore client captures →</a></article><article class="source-card"><h3>Recovered from the web</h3><p>Exiles DB, BisBeard and archived AscensionDB pages preserve additional descriptions and historical claims.</p><a href="#guides">View recovered pages →</a></article><article class="source-card"><h3>Every file accounted for</h3><p>Structured records are searchable. Binary captures, addon code and supporting files remain available as references.</p><a href="#coverage">Inspect sources & coverage →</a></article></div>`;
+      )}</div>${heading("All collections")}<div class="collection-directory" aria-label="All data collections">${collectionDirectory(manifest.kinds, esc)}</div>${heading("One archive. Distinct sources.")}<div class="source-grid"><article class="source-card"><h3>Captured from the client</h3><p>Published WDB records retain their game modes and capture metadata. Different versions remain separate.</p><a href="#search?source=Client%20captures&kind=item">Explore client captures →</a></article><article class="source-card"><h3>Recovered from the web</h3><p>Exiles DB, BisBeard and archived AscensionDB pages preserve additional descriptions and historical claims.</p><a href="#guides">View recovered pages →</a></article><article class="source-card"><h3>Every file accounted for</h3><p>Structured records are searchable. Binary captures, addon code and supporting files remain available as references.</p><a href="#coverage">Inspect sources & coverage →</a></article></div>`;
 }
 function table(rows) {
   return `<div class="table-wrap"><table><thead><tr><th>Name / ID</th><th>Collection</th><th>Source</th><th>Game mode</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="#record=${esc(r[0])}">${esc(r[1])}</a><small>ID ${esc(r[5])}</small></td><td>${esc(label(r[2]))}</td><td>${esc(r[4])}</td><td><span class="badge">${esc(r[3])}</span></td></tr>`).join("")}</tbody></table></div>`;
@@ -296,6 +297,7 @@ try {
   if (!r.ok)
     throw Error("The catalog is unavailable. Please try again shortly.");
   manifest = await r.json();
+  for (const [key, entry] of Object.entries(manifest.kinds)) entry.label = collectionLabel(key, entry);
   manifest.modes = [...new Set(manifest.modes.flatMap(m=>m.split(/[,|]/).map(s=>s.trim()).filter(Boolean)))].sort();
   for (const [k, v] of Object.entries(manifest.kinds).sort((a, b) =>
     a[1].label.localeCompare(b[1].label),

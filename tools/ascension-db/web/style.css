@@ -613,3 +613,9 @@ summary {
     flex-wrap: wrap;
   }
 }
+
+.collection-directory { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr)); gap: 10px; margin-bottom: 32px; }
+.collection-directory a { display: flex; flex-direction: column; gap: 5px; padding: 14px 16px; border: 1px solid var(--line, #293441); border-radius: 4px; background: var(--panel, #151e28); text-decoration: none; }
+.collection-directory a:hover, .collection-directory a:focus-visible { border-color: #c6a254; outline-offset: 3px; }
+.collection-directory span { font-size: 1rem; overflow-wrap: anywhere; }
+.collection-directory small { font-size: .875rem; color: #aab4c1; }
