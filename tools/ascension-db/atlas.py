@@ -5,6 +5,7 @@ WorldMapArea IDs, server map IDs and source area names remain separate identitie
 import collections,csv,gzip,hashlib,json,math,re
 from pathlib import Path
 from atlas_metadata import enrich_atlas
+from instance_maps import add_instance_maps
 
 # Explicit legacy area IDs for external artwork. Never substitute a server/WMA ID.
 AREA_ROWS = [
@@ -126,6 +127,7 @@ def build_atlas(root,manifest,data_root):
        space=('percent' if world in CONTINENTS else 'reported') if inside else 'world'
        z=zone(area,world,space=space)
        add(record,title,eid,'npc',roles[0],'Exiles DB',mode,z,xy,{'meaning':'Historical website location claim. '+('Reported coordinates; coordinate units and floor are unverified.' if space!='percent' else 'Reported zone percentages; not independently verified.'),'source_zone':area,'map_name':mapname,'declared_spawns':count,'roles':', '.join(role_labels)},roles)
+ add_instance_maps(root,manifest,zones,add,inventory)
  layers=collections.Counter();sources=set();modes=set();total=0
  for key,z in zones.items():
   ps=points[key]
@@ -134,6 +136,8 @@ def build_atlas(root,manifest,data_root):
    z['extent']={'left':min(xs)-dx*.05,'right':max(xs)+dx*.05,'top':min(ys)-dy*.05,'bottom':max(ys)+dy*.05}
    e=z['extent']
    for p in ps:p['plot_x']=(p['x']-e['left'])/(e['right']-e['left'])*100;p['plot_y']=(p['y']-e['top'])/(e['bottom']-e['top'])*100
+  if z['space']=='floor':
+   for p in ps:p['plot_x']=p['x']/z['width']*100;p['plot_y']=p['y']/z['height']*100
   z['count']=len(ps);z['layers']=dict(collections.Counter(p['layer'] for p in ps));layers.update(z['layers']);total+=len(ps)
   for p in ps:sources.add(p['source']);modes.update(x.strip() for x in p['mode'].split(',') if x.strip())
   if ps:
@@ -141,6 +145,10 @@ def build_atlas(root,manifest,data_root):
   else:z['file']=''
   z['aliases'].sort()
  result={'schema':'ascension-atlas-1','revision':manifest['revision'],'zones':sorted(zones.values(),key=lambda z:(z['region'],z['name'],z['key'])),'observations':total,'layers':dict(layers),'sources':sorted(sources),'modes':sorted(modes),'unmapped':dict(skipped),'bounds_sources':bounds_sources,'inventory_maps':len(inventory),'bounds_count':len(bounds)}
+ result['reference_locations']=sum(v for k,v in layers.items() if k.startswith('route-'))
+ result['preserved_observations']=total-result['reference_locations']
+ result['instance_layouts']=len({z['layout'] for z in zones.values() if z['space']=='floor'})
+ result['instance_floors']=sum(z['space']=='floor' for z in zones.values())
  enrich_atlas(root,manifest,result)
  write_gz(root/'atlas-links.json.gz',dict(links));write_gz(root/'atlas-manifest.json.gz',result)
  manifest['atlas']={'manifest':'atlas-manifest.json.gz','links':'atlas-links.json.gz','observations':total,'zones':len(result['zones']),'unmapped':sum(skipped.values())}

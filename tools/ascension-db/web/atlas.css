@@ -78,3 +78,11 @@
 .atlas-empty-card { padding:18px; font-size:13px; color:var(--muted); }
 .atlas-empty-card h3 { color:var(--gold); margin:10px 0; }
 .atlas-empty-card ul { max-height:320px; overflow:auto; padding-left:18px; }
+
+.atlas-floor-nav { display:flex; flex-wrap:wrap; gap:12px 24px; padding:16px; margin:0 0 18px; border:1px solid var(--line); background:var(--panel); border-radius:5px; font-size:12px; }
+.atlas-floor-nav strong { color:var(--gold); display:block; margin-bottom:8px; }
+.atlas-floor-nav div div,.atlas-floor-nav details div { display:flex; gap:8px; flex-wrap:wrap; }
+.atlas-floor-nav a { display:inline-block; padding:5px 10px; border:1px solid var(--line); border-radius:4px; }
+.atlas-floor-nav .is-current { color:#141f2b; background:var(--gold); border-color:var(--gold); }
+.atlas-floor-nav details { flex-basis:100%; }
+.atlas-floor-nav summary { cursor:pointer; margin-bottom:8px; }

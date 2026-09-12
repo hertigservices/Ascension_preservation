@@ -47,7 +47,7 @@ jobs:
       - name: Test catalog rules
         working-directory: source/tools/ascension-db
         run: |
-          python -m unittest test_catalog test_atlas test_atlas_metadata -v
+          python -m unittest test_catalog test_atlas test_atlas_metadata test_instance_maps -v
           node --test test_search_worker.cjs test_coverage_controls.cjs test_atlas_roles.cjs
           for file in web/*.js; do node --input-type=module --check < "$file"; done
       - name: Build all published data

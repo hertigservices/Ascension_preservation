@@ -7,7 +7,7 @@ from atlas import build_atlas
 BASE=Path(__file__).resolve().parent
 SCHEMA='ascensiondb-1'
 KIND={'itemcache':'item','creaturecache':'npc','gameobjectcache':'gameobject','questcache':'quest','npccache':'gossip','pagetextcache':'page','itemnamecache':'item-name','creatures':'world-creature','gameobjects':'world-object','advancement':'advancement','vendors':'vendor','gossips':'gossip-observation','item_display_icons':'display-icon'}
-LABELS={'item':'Items','npc':'Creatures','gameobject':'World objects','quest':'Quests','spell':'Spells','achievement':'Achievements','talent':'Talent trees','guide':'Guides','raw-variant':'Captured variants'}
+LABELS={'route-npc':'Instance reference NPCs','instance-floor':'Instance floor maps','item':'Items','npc':'Creatures','gameobject':'World objects','quest':'Quests','spell':'Spells','achievement':'Achievements','talent':'Talent trees','guide':'Guides','raw-variant':'Captured variants'}
 def dump(v): return json.dumps(v,ensure_ascii=False,separators=(',',':'))
 def norm(s): return ''.join(c for c in unicodedata.normalize('NFKD',str(s)) if not unicodedata.combining(c)).lower().replace('ß','ss')
 def tokens(s): return re.findall(r'[^\W_]+',norm(s))
@@ -18,6 +18,7 @@ def zipped(path,v):
     return len(data)
 def git(root,*args): return subprocess.check_output(['git','-C',str(root),*args])
 def source_type(name):
+    if '/instance-route-maps/' in name: return 'Exiles route planner'
     if '/lootcollector/' in name: return 'LootCollector'
     if '/exiles-db/' in name: return 'Exiles DB'
     if '/bisbeard/' in name: return 'BisBeard'
@@ -56,6 +57,7 @@ def identify(path,r,i):
     if '/raw/' in path: kind='raw-variant'
     if '/exiles-db/' in path: kind=str(r.get('type') or {'talents':'talent','changes':'change'}.get(stem,kind))
     if '/bisbeard/' in path: kind='planner-item'
+    if '/instance-route-maps/' in path: kind=str(r['type'])
     inner=r.get('record',r)
     if not isinstance(inner,dict): inner=r
     identifier=str(inner.get('entry',inner.get('id',r.get('key',r.get('planner_id',f'row:{i}')))))
