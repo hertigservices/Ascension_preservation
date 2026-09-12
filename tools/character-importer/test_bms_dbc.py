@@ -282,6 +282,82 @@ class RebalancedTreeTests(DbcFixtureMixin, unittest.TestCase):
         self.assertNotIn(0, res.talent_rank_spells())
 
 
+class ClassTokenTests(DbcFixtureMixin, unittest.TestCase):
+    """A fork's class token and its display name are not the same string.
+
+    Ascension names class 32 "Runemaster" while UnitClass() returns SPIRITMAGE,
+    and 7 of its 21 custom classes disagree that way, so a captured token can
+    only be mapped by reading the target's own ChrClasses.dbc.
+    """
+
+    def build_classes(self, rows):
+        """rows: [(class_id, token, name)] -> a ChrClasses.dbc in the fixture dir."""
+        blob = b"\x00"
+        offsets = {}
+        for _cid, token, name in rows:
+            for text in (token, name):
+                if text not in offsets:
+                    offsets[text] = len(blob)
+                    blob += text.encode("utf-8") + b"\x00"
+        records = []
+        for cid, token, name in rows:
+            fields = [0] * (bms_dbc.CHRCLASSES_TOKEN + 1)
+            fields[bms_dbc.CHRCLASSES_ID] = cid
+            fields[bms_dbc.CHRCLASSES_NAME] = offsets[name]
+            fields[bms_dbc.CHRCLASSES_TOKEN] = offsets[token]
+            records.append(tuple(fields))
+        self.build("ChrClasses.dbc", records, blob,
+                   fields=bms_dbc.CHRCLASSES_TOKEN + 1)
+        return bms_dbc.Resolvers(self.dir)
+
+    def fork(self):
+        return self.build_classes([
+            (8, "MAGE", "Mage"),
+            (13, "WITCHDOCTOR", "Witch Doctor"),
+            (26, "STARCALLER", "Starcaller"),
+            (32, "SPIRITMAGE", "Runemaster"),
+        ])
+
+    def test_the_token_a_capture_records_resolves(self):
+        self.assertEqual(self.fork().class_by_token("STARCALLER").value, 26)
+
+    def test_a_token_that_disagrees_with_the_display_name_resolves(self):
+        self.assertEqual(self.fork().class_by_token("SPIRITMAGE").value, 32)
+
+    def test_the_display_name_resolves_too(self):
+        """Which of the two a checkpoint recorded is not worth guessing."""
+        self.assertEqual(self.fork().class_by_token("Runemaster").value, 32)
+
+    def test_spacing_and_case_do_not_matter(self):
+        res = self.fork()
+        self.assertEqual(res.class_by_token("witch doctor").value, 13)
+        self.assertEqual(res.class_by_token("Witch_Doctor").value, 13)
+        self.assertEqual(res.class_by_token("WITCHDOCTOR").value, 13)
+
+    def test_a_class_the_target_does_not_have_is_refused(self):
+        stock = self.build_classes([(8, "MAGE", "Mage"), (11, "DRUID", "Druid")])
+        got = stock.class_by_token("STARCALLER")
+        self.assertFalse(got.ok)
+        self.assertIn("ChrClasses.dbc", got.reason)
+
+    def test_an_empty_token_is_refused_rather_than_matched(self):
+        self.assertFalse(self.fork().class_by_token("").ok)
+        self.assertFalse(self.fork().class_by_token(None).ok)
+
+    def test_two_classes_sharing_a_name_stay_ambiguous(self):
+        res = self.build_classes([(8, "MAGE", "Mage"), (40, "MAGE2", "Mage")])
+        got = res.class_by_token("Mage")
+        self.assertFalse(got.ok)
+        self.assertIn("ambiguous", got.reason)
+
+    def test_the_display_name_is_available_for_reporting(self):
+        self.assertEqual(self.fork().class_name(32), "Runemaster")
+
+    def test_a_target_without_the_file_resolves_nothing_instead_of_raising(self):
+        res = bms_dbc.Resolvers(self.dir)
+        self.assertFalse(res.class_by_token("MAGE").ok)
+
+
 class DominantSpanTests(unittest.TestCase):
     def test_lumpy_ids_of_one_generation_are_kept_whole(self):
         ids = [110023, 110024, 110036, 111639, 111852, 112212]

@@ -27,6 +27,7 @@ from bms_import import (  # noqa: E402
     _captured_durability,
     _durability,
     _equipment_cache,
+    _plan_advancement,
     _plan_talents,
     blocks_planning,
     blocks_writing,
@@ -34,6 +35,7 @@ from bms_import import (  # noqa: E402
     column_limits,
     dbc_conflict,
     equipment_cache_width,
+    resolve_class,
     resolve_settings,
     value_fits,
 )
@@ -761,6 +763,163 @@ class TalentPolicyTests(unittest.TestCase):
         plan.add("character_spell", {"guid": 7, "spell": 133, "specMask": 1})
         _plan_talents(plan, self.CAPTURE, 8, resolvers, "auto")
         self.assertEqual([row["spell"] for row in plan.rows["character_spell"]], [133])
+
+
+class AdvancementResolvers(StubResolvers):
+    """Adds the spell/class lookups the advancement pass needs."""
+
+    def __init__(self, spells, classes=None):
+        super().__init__({})
+        self._spells = dict(spells)          # {spell_id: name}
+        self._classes = classes or {}        # {folded token: class id}
+
+    def spell_exists(self, spell_id):
+        return int(spell_id) in self._spells
+
+    def spell_name(self, spell_id):
+        return self._spells.get(int(spell_id), "")
+
+    def class_by_token(self, token):
+        from bms_dbc import Resolution
+        key = "".join(c for c in str(token or "").casefold() if c.isalnum())
+        if key in self._classes:
+            return Resolution(True, self._classes[key])
+        return Resolution(False, reason="no class named %r" % token)
+
+    def class_name(self, class_id):
+        return "class %d" % class_id
+
+
+class ResolveClassTests(unittest.TestCase):
+    """The target's ChrClasses.dbc knows what a fork calls its classes."""
+
+    def test_the_targets_own_file_wins(self):
+        res = AdvancementResolvers({}, {"starcaller": 26})
+        self.assertEqual(resolve_class({"classToken": "STARCALLER"}, res), 26)
+
+    def test_the_display_name_is_tried_when_the_token_fails(self):
+        res = AdvancementResolvers({}, {"runemaster": 32})
+        self.assertEqual(
+            resolve_class({"classToken": "SPIRITMAGE", "className": "Runemaster"}, res), 32)
+
+    def test_a_stock_class_still_resolves_without_dbcs(self):
+        self.assertEqual(resolve_class({"classToken": "MAGE"}, None), 8)
+
+    def test_a_custom_class_without_dbcs_keeps_the_clearer_message(self):
+        import bms_map
+        with self.assertRaises(bms_map.MappingError):
+            resolve_class({"classToken": "TINKER"}, None)
+
+
+class AdvancementTests(unittest.TestCase):
+    """Conquest of Azeroth characters buy advancement entries, not talents.
+
+    TalentTab.dbc stops at class 13, so a Starcaller's captured talentTabs are
+    empty. The server stores having an entry as knowing its spell, so restoring
+    the spells is restoring the build.
+    """
+
+    SPELLS = {92132: "Moon Guard", 300250: "Moonstone Hilt",
+              300258: "Protected by the Stars", 680788: "Will of Elune"}
+
+    def capture(self, talents=(), abilities=(), spec=100, available=True, level=80):
+        return {
+            "level": level,
+            "advancement": {
+                "available": available,
+                "activeSpecializationId": spec,
+                "knownTalentEntries": list(talents),
+                "knownSpellEntries": list(abilities),
+            },
+        }
+
+    def plan_with(self, char, catalogue=None, already=()):
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        for spell in already:
+            plan.add("character_spell", {"guid": 7, "spell": spell, "specMask": 1})
+        _plan_advancement(plan, char, 26, AdvancementResolvers(self.SPELLS), catalogue)
+        return plan
+
+    def test_a_purchased_entry_the_spellbook_missed_is_restored(self):
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
+        plan = self.plan_with(char)
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
+
+    def test_a_spell_already_planned_is_not_written_twice(self):
+        """character_spell is keyed on (guid, spell); a duplicate would fail the insert."""
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
+        plan = self.plan_with(char, already=[300250])
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
+
+    def test_abilities_and_talents_are_both_restored(self):
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}],
+                            abilities=[{"InternalID": 6313, "SpellID": 300258}])
+        plan = self.plan_with(char)
+        self.assertEqual(sorted(r["spell"] for r in plan.rows["character_spell"]),
+                         [300250, 300258])
+
+    def test_the_count_restored_is_reported(self):
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}],
+                            abilities=[{"InternalID": 6313, "SpellID": 300258}])
+        note = " ".join(self.plan_with(char).notes)
+        self.assertIn("2 purchased entries restored", note)
+
+    def test_the_unrestorable_specialization_is_called_out(self):
+        """The server keeps the active spec in memory only, so it cannot be written."""
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
+        note = " ".join(self.plan_with(char).notes)
+        self.assertIn("specialization 100", note)
+        self.assertIn("memory only", note)
+
+    def test_a_spell_the_target_does_not_have_is_skipped_by_name(self):
+        char = self.capture(talents=[{"InternalID": 1, "SpellID": 999999}])
+        plan = self.plan_with(char)
+        self.assertEqual(plan.count("character_spell"), 0)
+        self.assertIn("999999", " ".join(s.reason for s in plan.skips))
+
+    def test_an_entry_with_no_spell_is_skipped(self):
+        char = self.capture(talents=[{"InternalID": 4043}])
+        plan = self.plan_with(char)
+        self.assertEqual(plan.count("character_spell"), 0)
+        self.assertIn("no spell id", " ".join(s.reason for s in plan.skips))
+
+    def test_a_capture_without_the_api_does_nothing(self):
+        plan = self.plan_with(self.capture(available=False,
+                                           talents=[{"InternalID": 1, "SpellID": 92132}]))
+        self.assertEqual(plan.count("character_spell"), 0)
+        self.assertEqual(plan.notes, [])
+
+    def test_a_stock_capture_is_untouched(self):
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        _plan_advancement(plan, {"level": 20}, 8, AdvancementResolvers(self.SPELLS), None)
+        self.assertEqual(plan.count("character_spell"), 0)
+
+    def test_the_catalogue_refuses_an_entry_of_another_class(self):
+        import bms_coa
+        cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
+            '[{"EntryId": 6770, "ClassId": 12, "SpellIds": [300250]}]'))
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}])
+        plan = self.plan_with(char, catalogue=cat)
+        self.assertEqual(plan.count("character_spell"), 0)
+        self.assertIn("class 12", " ".join(s.reason for s in plan.skips))
+
+    def test_the_catalogue_refuses_an_entry_above_the_level(self):
+        import bms_coa
+        cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
+            '[{"EntryId": 6770, "ClassId": 26, "RequiredLevel": 70, "SpellIds": [300250]}]'))
+        char = self.capture(talents=[{"InternalID": 6770, "SpellID": 300250}], level=20)
+        plan = self.plan_with(char, catalogue=cat)
+        self.assertEqual(plan.count("character_spell"), 0)
+        self.assertIn("needs level 70", " ".join(s.reason for s in plan.skips))
+
+    def test_an_entry_the_catalogue_has_never_heard_of_is_still_restored(self):
+        """A catalogue older than the realm must not cost the player their build."""
+        import bms_coa
+        cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
+            '[{"EntryId": 1, "ClassId": 26, "SpellIds": [1]}]'))
+        char = self.capture(talents=[{"InternalID": 987654, "SpellID": 300250}])
+        plan = self.plan_with(char, catalogue=cat)
+        self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
 
 
 if __name__ == "__main__":

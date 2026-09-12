@@ -24,6 +24,7 @@ bms-import = "bms_import:cli"
 [tool.setuptools]
 py-modules = [
     "bms_bundle",
+    "bms_coa",
     "bms_config",
     "bms_dbc",
     "bms_import",

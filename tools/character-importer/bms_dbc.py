@@ -83,6 +83,16 @@ GLYPH_ID = 0
 GLYPH_SPELL_ID = 1
 GLYPH_FIELDS = 4
 
+# ChrClasses carries both the display name and the uppercase token UnitClass()
+# returns. They are not interchangeable on a fork: Ascension's class 32 is named
+# "Runemaster" but its token is SPIRITMAGE, and 7 of its 21 custom classes
+# disagree the same way. Reading the target's own file is the only way to map a
+# captured token without hard-coding one realm's roster.
+CHRCLASSES_ID = 0
+CHRCLASSES_NAME = 4        # enUS, first of 16 locale strings
+CHRCLASSES_TOKEN = 55
+CHRCLASSES_FIELDS = 56
+
 # FactionFlags the server actually reads back out of character_reputation
 # (ReputationMgr::LoadFromDB reads only these three bits).
 FACTION_FLAG_VISIBLE = 0x01
@@ -225,6 +235,14 @@ def _norm(text: Any) -> str:
     return " ".join(str(text or "").split()).casefold()
 
 
+def _fold_token(text: Any) -> str:
+    """Compare class tokens ignoring case, spaces and punctuation.
+
+    "Witch Doctor", "WITCHDOCTOR" and "witch_doctor" are the same class.
+    """
+    return "".join(c for c in str(text or "").casefold() if c.isalnum())
+
+
 def _dominant_span(ids: list[int]) -> tuple[int, int] | None:
     """The id range of the largest generation in a set of talent ids.
 
@@ -284,6 +302,8 @@ class Resolvers:
         self._talent_cell_users: dict[int, dict[tuple[int, int], int]] | None = None
         self._talent_anchor_span: dict[int, list[int]] | None = None
         self._talent_rank_spells: set[int] | None = None
+        self._class_by_token: dict[str, list[int]] | None = None
+        self._class_names: dict[int, str] | None = None
         self._glyph_by_spell: dict[int, int] | None = None
 
     # -- file access ------------------------------------------------------
@@ -586,6 +606,59 @@ class Resolvers:
         if rival >= max(best * 10, 1):
             return [row for d, row in ranked if d == best]
         return rows
+
+    def _load_classes(self) -> None:
+        if self._class_by_token is not None:
+            return
+        by_token: dict[str, list[int]] = {}
+        names: dict[int, str] = {}
+        try:
+            dbc = self._open("ChrClasses.dbc")
+        except DbcError:
+            self._class_by_token = {}
+            self._class_names = {}
+            return
+        if dbc.fields <= CHRCLASSES_TOKEN:
+            self._class_by_token = {}
+            self._class_names = {}
+            return
+        for row in range(len(dbc)):
+            class_id = dbc.u(row, CHRCLASSES_ID)
+            token = dbc.s(row, CHRCLASSES_TOKEN)
+            name = dbc.s(row, CHRCLASSES_NAME)
+            names[class_id] = name or token
+            # A capture carries UnitClass()'s token, but accept the display name
+            # too: they disagree for most of Ascension's custom classes, and
+            # which one a checkpoint recorded is not worth guessing.
+            for key in (token, name):
+                folded = _fold_token(key)
+                if folded and class_id not in by_token.setdefault(folded, []):
+                    by_token[folded].append(class_id)
+        self._class_by_token = by_token
+        self._class_names = names
+
+    def class_by_token(self, token: Any) -> Resolution:
+        """UnitClass() token (or class display name) -> class id on this server."""
+        self._load_classes()
+        assert self._class_by_token is not None
+        folded = _fold_token(token)
+        if not folded:
+            return Resolution(False, reason="no class token in the checkpoint")
+        found = self._class_by_token.get(folded) or []
+        if not found:
+            return Resolution(
+                False, reason="no class named %r in this server's ChrClasses.dbc" % token)
+        if len(found) > 1:
+            return Resolution(
+                False,
+                reason="ambiguous class token %r (matches classes %s)"
+                % (token, ", ".join(str(c) for c in sorted(found))),
+            )
+        return Resolution(True, found[0])
+
+    def class_name(self, class_id: int) -> str:
+        self._load_classes()
+        return (self._class_names or {}).get(int(class_id), "")
 
     def talent_rank_spells(self) -> set[int]:
         """Every spell any talent rank teaches, on this server.

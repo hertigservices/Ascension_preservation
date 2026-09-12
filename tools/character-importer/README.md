@@ -107,6 +107,7 @@ PyMySQL is pure Python, so no compiler and no MySQL client library are needed.
 | Equipment and bags | including per-item durability and enchantments |
 | Spells | filtered against the target's `Spell.dbc` |
 | Talents | resolved by name through `Talent.dbc` / `TalentTab.dbc`, all-or-nothing — see [Talents on a rebalanced realm](#talents-on-a-rebalanced-realm) |
+| Custom-class advancement | Ascension's purchased abilities and talents — see [Conquest of Azeroth custom classes](#conquest-of-azeroth-custom-classes) |
 | Skills | resolved by name through `SkillLine.dbc` |
 | Reputations | resolved by name through `Faction.dbc` |
 | Action bars | spells and macros |
@@ -155,6 +156,44 @@ otherwise the player would keep the effect without paying the point. The
 character then logs in with its full allowance unspent, because AzerothCore
 recomputes free points from the talents it loads
 (`m_usedTalentCount = spentTalents; InitTalentForLevel();`).
+
+## Conquest of Azeroth custom classes
+
+Ascension's custom classes — Starcaller, Runemaster, Tinker and eighteen others
+— keep nothing in `Talent.dbc`. `TalentTab.dbc` stops at class 13, so such a
+character's captured `talentTabs` are empty and there is no tree to resolve.
+What they bought is recorded separately, as advancement entries:
+
+```
+knownTalentEntries: {"InternalID": 6770, "SpellID": 300250, "TECost": 1, ...}
+knownSpellEntries:  {"InternalID": 6313, "SpellID": 300258, "AECost": 1, ...}
+```
+
+The server stores *having* one of these as *knowing its spell*, so restoring the
+spells is restoring the build. The importer reads these entries, names them, and
+writes any that the captured spellbook did not already list.
+
+**The class is resolved from the target's own `ChrClasses.dbc`,** never from a
+table built into this tool. A fork's class token and its display name are
+different strings: Ascension names class 32 "Runemaster" while `UnitClass()`
+returns `SPIRITMAGE`, and 7 of its 21 custom classes disagree the same way.
+Either spelling is accepted, and a class the target does not have is refused by
+name.
+
+`--coa-data PATH` optionally points at the realm's advancement catalogue —
+`AscensionCoATalentData.h`, or a JSON export of it. It is used to name purchases
+and to refuse an entry belonging to another class, level or specialization.
+Nothing is bundled: the catalogue is the realm's own data, and a stale copy
+shipped inside this tool would be worse than none. An entry the catalogue has
+never heard of is still restored, because a catalogue older than the realm must
+not cost a player their build.
+
+**The specialization is not restored**, and cannot be. The server keeps the
+active specialization in memory only and drops it at logout
+(`_activeSpecializations` is erased in `OnPlayerLogout` and never loaded back),
+so there is nothing to write that would survive. The report says which
+specialization the capture was in; the player picks it again at login exactly as
+they would after any logout.
 
 ## What it does not restore, and why
 

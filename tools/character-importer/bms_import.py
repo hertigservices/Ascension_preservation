@@ -46,6 +46,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import bms_coa  # noqa: E402
 import bms_config  # noqa: E402
 import bms_map as M  # noqa: E402
 from bms_bundle import (  # noqa: E402
@@ -410,10 +411,11 @@ def preflight(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers |
     # 5. identity mappable
     try:
         race = M.race_id(char.get("raceToken"))
-        klass = M.class_id(char.get("classToken"))
+        klass = resolve_class(char, resolvers)
+        named = (resolvers.class_name(klass) if resolvers else "") or char.get("classToken")
         checks.append(Check("race / class", OK,
                             "%s (%d) / %s (%d)" % (char.get("raceToken"), race,
-                                                   char.get("classToken"), klass)))
+                                                   named, klass)))
     except M.MappingError as exc:
         checks.append(Check("race / class", FAIL, str(exc)))
         race = klass = 0
@@ -490,7 +492,7 @@ def build_plan(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers)
     plan.account_id = account[0]["id"] if account else 0
 
     race = M.race_id(char.get("raceToken"))
-    klass = M.class_id(char.get("classToken"))
+    klass = resolve_class(char, resolvers)
     gender = M.gender_id(char.get("sexId"))
 
     taken = {r["name"] for r in query(
@@ -589,6 +591,7 @@ def build_plan(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers)
     # -- spells, talents, skills -----------------------------------------
     _plan_spells(plan, char, resolvers)
     _plan_talents(plan, char, klass, resolvers, getattr(args, "talents", "auto"))
+    _plan_advancement(plan, char, klass, resolvers, getattr(args, "coa_catalogue", None))
     _plan_skills(plan, char, resolvers)
     _plan_reputations(plan, char, race, klass, resolvers)
     _plan_action_bars(plan, char)
@@ -898,6 +901,27 @@ def _plan_mail(plan: Plan, mailed: list[tuple[dict, Any]]) -> None:
             })
 
 
+def resolve_class(char: dict, resolvers: Resolvers | None) -> int:
+    """Class id for this checkpoint on this server.
+
+    The target's own ChrClasses.dbc is asked first, because it is the only thing
+    that knows what a fork's classes are called: Ascension names class 32
+    "Runemaster" while UnitClass() returns SPIRITMAGE, and 7 of its 21 custom
+    classes disagree that way. The stock table stays as the fallback for a run
+    without DBCs, and keeps its clearer message for a custom class that the
+    target genuinely cannot represent.
+    """
+    token = char.get("classToken")
+    if resolvers is not None:
+        found = resolvers.class_by_token(token)
+        if found.ok:
+            return found.value
+        by_name = resolvers.class_by_token(char.get("className"))
+        if by_name.ok:
+            return by_name.value
+    return M.class_id(token)
+
+
 def _plan_spells(plan: Plan, char: dict, resolvers: Resolvers) -> None:
     seen: set[int] = set()
     for raw in char.get("knownSpellIds") or []:
@@ -1028,6 +1052,85 @@ def _plan_talents(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
         plan.add("character_spell", {
             "guid": plan.guid, "spell": spell, "specMask": 1,
         })
+
+
+def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolvers,
+                      catalogue: Any = None) -> None:
+    """Restore what a Conquest of Azeroth character bought.
+
+    Custom classes keep nothing in Talent.dbc -- TalentTab.dbc stops at class 13,
+    so a Starcaller's captured talentTabs are empty and _plan_talents has nothing
+    to do. What such a character bought is recorded as advancement entries, and
+    the server stores having one as knowing its spell, so restoring the spells IS
+    restoring the build. _plan_spells has usually written them already from the
+    spellbook; this pass exists to name them, to add any the spellbook missed,
+    and to refuse an entry that does not belong to this character.
+
+    The specialization is deliberately not restored. The server keeps the active
+    spec in memory only and drops it at logout, so there is nothing to write that
+    would survive, and the player picks it again exactly as they would after any
+    logout.
+    """
+    advancement = char.get("advancement")
+    if not isinstance(advancement, dict) or not advancement.get("available"):
+        return
+
+    level = max(1, min(255, int(char.get("level") or 1)))
+    spec = advancement.get("activeSpecializationId")
+    try:
+        spec_id = int(spec) if spec is not None else 0
+    except (TypeError, ValueError):
+        spec_id = 0
+
+    planned = {row["spell"] for row in plan.rows.get("character_spell", [])}
+    added = restored = 0
+    for key, label in (("knownTalentEntries", "talent"),
+                       ("knownSpellEntries", "ability")):
+        rows = advancement.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            entry_id = row.get("InternalID", row.get("internalId"))
+            spell_id = row.get("SpellID", row.get("spellId"))
+            try:
+                spell_id = int(spell_id)
+            except (TypeError, ValueError):
+                spell_id = 0
+            name = resolvers.spell_name(spell_id) if spell_id else ""
+            what = "%s %s" % (label, name or ("entry %s" % entry_id))
+
+            if catalogue is not None:
+                wrong = catalogue.mismatch(entry_id, class_id, level, spec_id)
+                if wrong:
+                    plan.skip("advancement", what, wrong)
+                    continue
+            if not spell_id:
+                plan.skip("advancement", what, "the entry carries no spell id")
+                continue
+            if not resolvers.spell_exists(spell_id):
+                plan.skip("advancement", what,
+                          "spell %d is not in this server's Spell.dbc" % spell_id)
+                continue
+            restored += 1
+            if spell_id in planned:
+                continue
+            planned.add(spell_id)
+            added += 1
+            plan.add("character_spell",
+                     {"guid": plan.guid, "spell": spell_id, "specMask": 1})
+
+    if restored:
+        note = ("Conquest of Azeroth advancement: %d purchased entries restored"
+                % restored)
+        if added:
+            note += (", %d of which the captured spellbook did not list" % added)
+        if spec_id:
+            note += (". The capture was in specialization %d; the server keeps the "
+                     "active specialization in memory only, so the player chooses "
+                     "it again at login" % spec_id)
+        plan.notes.append(note + ".")
 
 
 def _plan_skills(plan: Plan, char: dict, resolvers: Resolvers) -> None:
@@ -1421,6 +1524,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dbc-dir", default=None,
                         help="the target server's Data/dbc directory")
     parser.add_argument("--name", default=None, help="override the character name")
+    parser.add_argument("--coa-data", default=None, metavar="PATH",
+                        help="the realm's Conquest of Azeroth advancement catalogue "
+                             "(AscensionCoATalentData.h, or a JSON export of it). "
+                             "Optional: it is used to name a custom class's purchases "
+                             "and to refuse entries that belong to another class, "
+                             "level or specialization.")
     parser.add_argument("--talents", choices=("auto", "import", "rebuild"), default="auto",
                         help="auto (default): import the talent build only if every talent "
                              "in it resolves on this server, otherwise import none and leave "
@@ -1700,6 +1809,14 @@ def main(argv: list[str]) -> int:
         print("error: no DBC directory. A server config supplies one automatically; "
               "otherwise pass --dbc-dir (the target server's Data/dbc).", file=sys.stderr)
         return 2
+
+    args.coa_catalogue = None
+    if args.coa_data:
+        try:
+            args.coa_catalogue = bms_coa.load(args.coa_data)
+        except bms_coa.CoaError as exc:
+            print("error: %s" % exc, file=sys.stderr)
+            return 2
 
     try:
         conn = connect(args)
