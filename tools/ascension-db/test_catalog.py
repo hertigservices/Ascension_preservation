@@ -24,6 +24,18 @@ class CatalogTests(unittest.TestCase):
         a=build.identify('cachedata/by-mode/a/itemcache.tsv.gz',{'entry':'1','name':'Old','damage':'4'},0)
         b=build.identify('cachedata/by-mode/b/itemcache.tsv.gz',{'entry':'1','name':'New','damage':'8'},0)
         self.assertNotEqual(a,b);self.assertEqual(a[5]['damage'],'4');self.assertEqual(b[5]['damage'],'8')
+    def test_storage_origin_is_allowed_for_data_and_images(self):
+        headers=(Path(__file__).parent/'web/_headers').read_text(encoding='utf-8')
+        origin='https://ascension-public-data.ascension-archive.workers.dev'
+        for directive in ('connect-src','img-src'):
+            self.assertIn(origin,headers.split(directive,1)[1].split(';',1)[0])
+    def test_scoped_legacy_json_escapes_preserve_slashes(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'supplemental/coa-databank/fixture/databank/palette/spells.jsonl.gz';p.parent.mkdir(parents=True)
+            with gzip.open(p,'wt',encoding='utf-8') as f:f.write(r'{"id":1,"path":"Icons\Quest"}'+"\n")
+            self.assertEqual(list(build.rows(p,'jsonl'))[0]['path'],r'Icons\Quest')
+            other=Path(d)/'unknown.jsonl.gz';other.write_bytes(p.read_bytes())
+            with self.assertRaises(json.JSONDecodeError):list(build.rows(other,'jsonl'))
     def test_missing_id_is_explicit_row_reference(self):
         self.assertEqual(build.identify("cachedata/sources.tsv",{"file":"example"},7)[0],"row:7")
     def test_html_stays_data(self):

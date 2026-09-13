@@ -108,3 +108,11 @@ Search results show an icon beside the name when the build is given an icon host
 - **Build record:** `manifest.json` records the base, the number of published icons and the number of rows carrying one.
 
 Run `node --test test_search_icons.cjs` for the rendering rules and `python -m unittest test_catalog` for the icon index.
+
+## Research donations
+
+`../research-intake` preserves non-cache donations privately and exports explicitly
+approved fields under `supplemental/research-intake`. Catalog rows retain source
+title, declared entity kind, mode, artifact/record hashes and original ordinals.
+Raw private files are never read by the website builder. These are attributed
+claims, not confirmed server state or inferred map pins.

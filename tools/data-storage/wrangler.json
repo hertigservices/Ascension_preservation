@@ -1,0 +1,6 @@
+{
+  "name": "ascension-public-data",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-12",
+  "r2_buckets": [{"binding": "PUBLIC_DATA", "bucket_name": "ascension-public-data"}]
+}

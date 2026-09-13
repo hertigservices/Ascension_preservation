@@ -1,0 +1,24 @@
+name: Test research intake
+on:
+  pull_request:
+    paths: ['tools/research-intake/**', 'tools/data-storage/**', 'tools/ascension-db/**', '.github/workflows/research-intake.yml']
+  push:
+    paths: ['tools/research-intake/**', 'tools/data-storage/**', 'tools/ascension-db/**', '.github/workflows/research-intake.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.12', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -B -m unittest discover -v
+        working-directory: tools/research-intake
+
+      - run: python -B -m unittest discover -s tools/data-storage -v

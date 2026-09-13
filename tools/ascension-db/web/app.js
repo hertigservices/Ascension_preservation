@@ -25,12 +25,12 @@ let manifest,
 const worker = new Worker("search-worker.js");
 const params = () =>
   new URLSearchParams(location.hash.replace(/^#(?:search\?|record=)?/, ""));
-const sourceUrl = (path) =>
+const sourceUrl = (path) => manifest.downloads?.[path]?.release ||
   "https://github.com/hertigservices/ascension-data/blob/" +
   manifest.revision +
   "/" +
   path.split("/").map(encodeURIComponent).join("/");
-const rawUrl = (path) =>
+const rawUrl = (path) => manifest.downloads?.[path]?.release ||
   "https://raw.githubusercontent.com/hertigservices/ascension-data/" +
   manifest.revision +
   "/" +
@@ -235,7 +235,7 @@ async function showCoverage() {
   if (routeId !== request) return;
   notice("");
   $("#content").innerHTML =
-    `${heading("Sources & coverage")}<p>Every tracked file in snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a> is listed here. ${num(manifest.indexed_files)} files supply searchable records; ${num(manifest.reference_files)} remain downloadable references. Counts are source records, not unique game entities.</p><div class="banner">Coverage means coverage of this published repository, not the entire game or every original upload. Unknown formats remain references; a new structured-file parsing error stops publication. Binary variants and addon source files are preserved without inventing decoded facts.</div><p><a href="${esc(dataBase)}coverage.json.gz">Download full report →</a></p><div id="file-results"></div>`;
+    `${heading("Sources & coverage")}<p>Every published file in snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 12)}</a> is listed here. ${num(manifest.indexed_files)} files supply searchable records; ${num(manifest.reference_files)} remain downloadable references. Counts are source records, not unique game entities.</p><div class="banner">Coverage means coverage of this published repository, not the entire game or every original upload. Unknown formats remain references; a new structured-file parsing error stops publication. Binary variants and addon source files are preserved without inventing decoded facts.</div><p><a href="${esc(dataBase)}coverage.json.gz">Download full report →</a></p><div id="file-results"></div>`;
   renderCoverage({root:$("#file-results"),coverage,manifest,sourceUrl,rawUrl,esc,params:new URLSearchParams(location.hash.split("?")[1] || "")});
 }
 async function guides() {
@@ -293,6 +293,15 @@ addEventListener("hashchange", route);
 try {
   const config = await fetch("config.json").then((r) => (r.ok ? r.json() : {}));
   dataBase = config.dataBase || "";
+  if (config.catalogService) {
+    const service = new URL(config.catalogService);
+    if (service.protocol !== 'https:') throw Error('Invalid catalog service');
+    const currentResponse = await fetch(new URL('catalog/current.json', service), {cache:'no-store'});
+    if (!currentResponse.ok) throw Error('The catalog is unavailable. Please try again shortly.');
+    const current = await currentResponse.json();
+    if (current.schema !== 'ascension-current-1' || !/^[0-9a-f]{64}$/.test(current.snapshot) || current.prefix !== `catalog/snapshots/${current.snapshot}/`) throw Error('Invalid catalog snapshot');
+    dataBase = new URL(current.prefix, service).href;
+  }
   const r = await fetch(dataBase + "manifest.json", { cache: "no-cache" });
   if (!r.ok)
     throw Error("The catalog is unavailable. Please try again shortly.");

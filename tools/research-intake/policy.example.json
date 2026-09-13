@@ -1,0 +1,20 @@
+{
+  "source": "example-game-dump",
+  "title": "Example donated game data",
+  "publication": "private",
+  "permission": "Record the donor's permission or applicable licence before approving publication",
+  "mode": "Unspecified",
+  "captured_at": null,
+  "max_records": 1000000,
+  "max_compressed_bytes": 134217728,
+  "collections": {
+    "records": {
+      "kind": "npc",
+      "fields": {"id": "id", "name": "name"}
+    },
+    "public.creature": {
+      "kind": "npc",
+      "fields": {"id": "id", "name": "name", "level": "level"}
+    }
+  }
+}
