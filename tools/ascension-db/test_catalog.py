@@ -24,6 +24,11 @@ class CatalogTests(unittest.TestCase):
         a=build.identify('cachedata/by-mode/a/itemcache.tsv.gz',{'entry':'1','name':'Old','damage':'4'},0)
         b=build.identify('cachedata/by-mode/b/itemcache.tsv.gz',{'entry':'1','name':'New','damage':'8'},0)
         self.assertNotEqual(a,b);self.assertEqual(a[5]['damage'],'4');self.assertEqual(b[5]['damage'],'8')
+    def test_storage_origin_is_allowed_for_data_and_images(self):
+        headers=(Path(__file__).parent/'web/_headers').read_text(encoding='utf-8')
+        origin='https://ascension-public-data.ascension-archive.workers.dev'
+        for directive in ('connect-src','img-src'):
+            self.assertIn(origin,headers.split(directive,1)[1].split(';',1)[0])
     def test_scoped_legacy_json_escapes_preserve_slashes(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'supplemental/coa-databank/fixture/databank/palette/spells.jsonl.gz';p.parent.mkdir(parents=True)
