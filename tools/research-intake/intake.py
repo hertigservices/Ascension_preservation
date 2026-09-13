@@ -265,9 +265,11 @@ class Intake:
         rows=self.db.execute('SELECT DISTINCT d.* FROM documents d JOIN receipts r ON r.document=d.id'+clause,args).fetchall()
         return {'documents':len(rows),'parsed':sum(r['status']=='parsed' for r in rows),'containers':sum(r['status']=='container' for r in rows),'held':sum(r['status'] not in ('parsed','container') for r in rows),'record_occurrences':sum(r['rows'] for r in rows),'unique_record_payloads':self.db.execute('SELECT count(*) FROM records').fetchone()[0],'stored_bytes':self.db.execute('SELECT coalesce(sum(bytes),0) FROM artifacts').fetchone()[0]}
     def examples(self,source,limit=5):
-        result=[];seen=set()
+        result=[];seen=set();sample_bytes=0
         rows=self.db.execute('SELECT r.locator,o.ordinal,x.collection,x.payload FROM receipts r JOIN occurrences o ON o.document=r.document JOIN records x ON x.hash=o.record WHERE r.source=? ORDER BY r.document,o.ordinal LIMIT 5000',(source,))
         for row in rows:
+            sample_bytes+=len(row['payload'].encode('utf-8'))
+            if sample_bytes>16*CHUNK:break
             value=json.loads(row['payload'])
             if not isinstance(value,dict):continue
             name=next((str(value[k]) for k in ('name','Name','title','Title','text','label','npcName','spellName') if value.get(k)),None)

@@ -1,5 +1,7 @@
 """Poll the private drop folder; unchanged submissions require no parsing or hashing."""
 import argparse
+import hashlib
+import itertools
 import json
 from pathlib import Path
 import time
@@ -7,12 +9,23 @@ import intake
 
 
 def fingerprint(path):
-    rows=[]
-    for p in sorted(path.rglob('*')):
-        if intake.linked(p): raise ValueError('Drop folder contains a symlink/junction')
-        if p.is_file():
-            s=p.stat();rows.append([p.relative_to(path).as_posix(),s.st_size,s.st_mtime_ns])
-    return intake.digest(intake.encoded(rows))
+    h=hashlib.sha256();count=0
+    def walk(folder):
+        nonlocal count
+        if intake.linked(folder):raise ValueError('Drop folder contains a symlink/junction')
+        entries=list(itertools.islice(folder.iterdir(),100001))
+        if len(entries)>100000:raise ValueError('Drop directory exceeds the entry budget')
+        for p in sorted(entries):
+            if intake.linked(p):raise ValueError('Drop folder contains a symlink/junction')
+            if p.is_dir():yield from walk(p)
+            elif p.is_file():
+                count+=1
+                if count>100000:raise ValueError('Drop folder exceeds the file budget')
+                yield p
+    for p in walk(path):
+        s=p.stat();h.update(intake.encoded([p.relative_to(path).as_posix(),s.st_size,s.st_mtime_ns])+b'\n')
+    return h.hexdigest()
+
 
 
 def sweep(root,stable_seconds=60):
