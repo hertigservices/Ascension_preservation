@@ -99,11 +99,11 @@ Search results show an icon beside the name when the build is given an icon host
 
 - **When icons attach:** at search-index time, as an optional seventh field of a search row. Parsed-file caches are untouched, so enabling icons never forces a reparse.
 - **Which collections get icons:** items, item names, loot pins, spells, achievements, currencies and item display icons. BisBeard planner IDs are not item IDs and never get one.
-- **Where names come from**, later sources overriding earlier ones for the same ID:
-  1. `cachedata/dbc/item_display_icons.tsv.gz`, joined through the union item cache's display IDs
-  2. Exiles DB item and spell pages
-  3. a published database export's icon map (`supplemental/<set>/<sha>/icon-map.csv.gz`, columns `kind,id,icon`, kind one of item, spell, achievement, currency)
-- **Only published icons are used.** A name counts only when that icon file is itself published: `supplemental/*/assets/icons/<name>.png`, or the `static/icons-clean/<name>.png` rows of an export's `ASSET_INDEX.csv(.gz)`. Names are normalised: lowercase, with folder and image extension removed.
+- **Item icons come only from captured client data:** `cachedata/dbc/item_display_icons.tsv.gz`, joined through the union item cache's display IDs.
+  - The Exiles site and its database export disagree with the client on 15-18% of the items both cover. A glyph is drawn as a bracer, a chestplate as a cloak. That is consistent with a stock display-id join against Ascension's renumbered ItemDisplayInfo.
+  - Their item icons are never used, not even where the client has none: an empty slot is better than a wrong icon.
+- **Spell, achievement and currency icons:** Exiles DB spell pages, overridden by a published database export's icon map (`supplemental/<set>/<sha>/icon-map.csv.gz`, columns `kind,id,icon`). The map's item rows are ignored.
+- **Only published icons are used.** A name counts only when that icon file is itself published: `supplemental/*/assets/icons/<name>.png`, or the `static/icons-clean/<name>.png` rows of an export's `ASSET_INDEX.csv(.gz)`. Names are normalised: HTML entities decoded, lowercase, with folder and image extension removed.
 - **Browser safety:** the browser accepts only an https base or a plain relative path, escapes every name, and replaces an image that fails to load with an empty slot. The icon host must be allowed by `img-src` in `web/_headers`.
 - **Build record:** `manifest.json` records the base, the number of published icons and the number of rows carrying one.
 

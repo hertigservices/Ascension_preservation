@@ -44,6 +44,7 @@ class CatalogTests(unittest.TestCase):
     def test_icon_names_are_normalised(self):
         self.assertEqual(build.icon_name('Interface\\Icons\\INV_Chest_Fur.TGA'),'inv_chest_fur')
         self.assertEqual(build.icon_name('interface/icons/leywalk'),'leywalk')
+        self.assertEqual(build.icon_name('inv_misc_fork&amp;knife'),'inv_misc_fork&knife')  # HTML-escaped page field
     def test_icon_index_only_references_published_icons(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
@@ -55,15 +56,18 @@ class CatalogTests(unittest.TestCase):
             put('supplemental/exiles-db/assets/icons/inv_a.png','')
             put('cachedata/dbc/item_display_icons.tsv.gz','displayid\ticon\tstock_displayid\n7\tINV_A\t\n8\tINV_Gone\t\n',True)
             put('cachedata/union/itemcache.tsv.gz','entry\tname\tdisplayid\n100\tSword\t7\n101\tAxe\t8\n',True)
-            put('supplemental/exiles-db/abc123/spells.jsonl.gz','{"type":"spell","id":"5","icon":"Interface/Icons/INV_A.blp"}\n{"type":"spell","id":"6","icon":"missing"}\n',True)
+            put('supplemental/exiles-db/abc123/items.jsonl.gz','{"type":"item","id":"100","icon":"inv_b"}\n',True)
+            put('supplemental/exiles-db/abc123/spells.jsonl.gz','{"type":"spell","id":"5","icon":"Interface/Icons/INV_A.blp"}\n{"type":"spell","id":"6","icon":"missing"}\n{"type":"spell","id":"7","icon":"inv_a"}\n',True)
             export='supplemental/rebuild/0123456789abcdef'
             put(export+'/ASSET_INDEX.csv','path,size_bytes,sha256\nstatic/icons-clean/inv_b.png,1,x\n')
-            put(export+'/icon-map.csv.gz','kind,id,icon\nitem,101,inv_b\nnpc,101,inv_a\n',True)
+            put(export+'/icon-map.csv.gz','kind,id,icon\nitem,100,inv_b\nitem,101,inv_b\nspell,7,inv_b\ncurrency,9,inv_b\nnpc,101,inv_a\n',True)
             icons=build.IconIndex(root,[p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()])
-            self.assertEqual(icons.lookup('item','100'),'inv_a')      # display id -> display icon
-            self.assertEqual(icons.lookup('item','101'),'inv_b')      # export overrides an unpublished display icon
+            self.assertEqual(icons.lookup('item','100'),'inv_a')      # captured display icon wins over the site and export
+            self.assertEqual(icons.lookup('item','101'),'')           # export item rows are never used, even as a fallback
             self.assertEqual(icons.lookup('spell','5'),'inv_a')       # Exiles path + extension normalised
             self.assertEqual(icons.lookup('spell','6'),'')            # icon file not published
+            self.assertEqual(icons.lookup('spell','7'),'inv_b')       # export overrides an Exiles spell page
+            self.assertEqual(icons.lookup('currency','9'),'inv_b')
             self.assertEqual(icons.lookup('planner-item','100'),'')   # planner IDs are not item IDs
             self.assertEqual(icons.lookup('npc','100'),'')
 if __name__=='__main__':unittest.main()

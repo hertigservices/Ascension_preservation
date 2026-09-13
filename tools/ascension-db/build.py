@@ -1,7 +1,7 @@
 """Build a static, attributed catalog from a clean published ascension-data checkout.
 Only changed source blobs are parsed again. No private inbox or runtime input is read.
 """
-import argparse, collections, csv, gzip, hashlib, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
+import argparse, collections, csv, gzip, hashlib, html, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
 from pathlib import Path
 from atlas import build_atlas
 from datasets import resolve as resolve_datasets
@@ -82,8 +82,8 @@ def identify(path,r,i):
 # absent; they are not item IDs.
 ICON_KINDS={'item':'item','item-name':'item','loot-pin':'item','spell':'spell','achievement':'achievement','currency':'currency','display-icon':'display'}
 def icon_name(value):
-    """Normalise an icon reference to a published file stem: lowercase, no folder, no image extension."""
-    n=str(value or '').strip().replace('\\','/').rsplit('/',1)[-1].lower()
+    """Normalise an icon reference to a published file stem: HTML entities decoded, lowercase, no folder, no image extension."""
+    n=html.unescape(str(value or '')).strip().replace('\\','/').rsplit('/',1)[-1].lower()
     for ext in ('.blp','.tga','.png','.jpg','.webp'):
         if n.endswith(ext): n=n[:-len(ext)]
     return n.strip()
@@ -92,8 +92,13 @@ def csv_rows(path,delimiter=','):
     with textopen(path) as f: yield from csv.DictReader(f,delimiter=delimiter)
 class IconIndex:
     """Icon names for search rows. A name is only used when that icon file is itself published, so a result never
-    references an image the archive does not hold. Later sources override earlier ones for the same ID:
-    item display icons, then Exiles DB item/spell pages, then a published database export's icon map."""
+    references an image the archive does not hold.
+
+    Item icons come only from captured client data: item display icons joined through the union item cache. The
+    Exiles site and its database export assign item icons that disagree with the client for 15-18% of the items both
+    cover (glyphs drawn as bracers, a chestplate as a cloak), as a stock display-id join against Ascension's
+    renumbered ItemDisplayInfo would. Neither is used for items; a missing icon is better than a wrong one.
+    Spell, achievement and currency icons come from Exiles spell pages, overridden by a published export's icon map."""
     def __init__(self,data,paths):
         paths=sorted(paths);present=set(paths)
         self.available=set();self.maps={k:{} for k in set(ICON_KINDS.values())}
@@ -107,6 +112,15 @@ class IconIndex:
                     for r in csv_rows(data/index):
                         m=re.fullmatch(r'static/icons-clean/([^/]+)\.png',r.get('path') or '')
                         if m: self.available.add(m.group(1).lower())
+        for p in paths:
+            if re.fullmatch(r'supplemental/exiles-db/[0-9a-f]+/spells\.jsonl\.gz',p):
+                for r in rows(data/p,'jsonl'):
+                    if str(r.get('type'))=='spell' and r.get('icon') and r.get('id') is not None: self.maps['spell'][str(r['id'])]=icon_name(r['icon'])
+        for root in exports:
+            # A database export's own icon assignments, precomputed as kind,id,icon. Its item rows are ignored.
+            for r in csv_rows(data/f'{root}/icon-map.csv.gz'):
+                kind=r.get('kind','')
+                if kind in ('spell','achievement','currency') and r.get('id') and r.get('icon'): self.maps[kind][str(r['id'])]=icon_name(r['icon'])
         if 'cachedata/dbc/item_display_icons.tsv.gz' in present:
             for r in csv_rows(data/'cachedata/dbc/item_display_icons.tsv.gz','\t'):
                 if r.get('icon'): self.maps['display'][str(r['displayid'])]=icon_name(r['icon'])
@@ -116,16 +130,6 @@ class IconIndex:
                 for r in reader:
                     icon=self.maps['display'].get(r[display]) if len(r)>display else None
                     if icon: self.maps['item'][r[entry]]=icon
-        for p in paths:
-            if re.fullmatch(r'supplemental/exiles-db/[0-9a-f]+/(items|spells)\.jsonl\.gz',p):
-                for r in rows(data/p,'jsonl'):
-                    kind=ICON_KINDS.get(str(r.get('type')))
-                    if kind in ('item','spell') and r.get('icon') and r.get('id') is not None: self.maps[kind][str(r['id'])]=icon_name(r['icon'])
-        for root in exports:
-            # A database export's own icon assignments, precomputed as kind,id,icon.
-            for r in csv_rows(data/f'{root}/icon-map.csv.gz'):
-                kind=r.get('kind','')
-                if kind in ('item','spell','achievement','currency') and r.get('id') and r.get('icon'): self.maps[kind][str(r['id'])]=icon_name(r['icon'])
     def lookup(self,kind,identifier):
         k=ICON_KINDS.get(kind);icon=self.maps[k].get(identifier) if k else None
         return icon if icon and icon in self.available else ''
