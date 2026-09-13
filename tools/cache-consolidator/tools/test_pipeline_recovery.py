@@ -27,7 +27,8 @@ class RecoveryTests(unittest.TestCase):
                 merge.write_tsv(str(root/n),['value'],[{'value':'old'}])
             original=os.replace
             def interrupted(src,dst):
-                if Path(dst)==root/'sources.tsv': raise OSError('simulated power loss')
+                # Windows runners can give tempfile an 8.3 alias; commit resolves it.
+                if Path(dst).resolve()==(root/'sources.tsv').resolve(): raise OSError('simulated power loss')
                 return original(src,dst)
             tables=[(str(root/'itemcache/index.tsv'),['value'],[{'value':'new'}]),
                     (str(root/'sources.tsv'),['value'],[{'value':'new'}])]
