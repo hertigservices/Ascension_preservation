@@ -18,6 +18,7 @@ def zipped(path,v):
     return len(data)
 def git(root,*args): return subprocess.check_output(['git','-C',str(root),*args])
 def source_type(name):
+    if '/research-intake/' in name: return 'Research contributions'
     if '/instance-route-maps/' in name: return 'Exiles route planner'
     if '/lootcollector/' in name: return 'LootCollector'
     if '/exiles-db/' in name: return 'Exiles DB'
@@ -54,6 +55,7 @@ def identify(path,r,i):
     if not isinstance(r,dict): r={'value':r}
     stem=Path(path).name.split('.')[0]; source=source_type(path)
     kind=KIND.get(stem,stem.rstrip('s') or 'reference')
+    if '/research-intake/' in path: kind=str(r.get('type') or 'research-evidence'); source=str(r.get('source') or 'Research contributions')
     if '/raw/' in path: kind='raw-variant'
     if '/exiles-db/' in path: kind=str(r.get('type') or {'talents':'talent','changes':'change'}.get(stem,kind))
     if '/bisbeard/' in path: kind='planner-item'
@@ -109,7 +111,7 @@ def main():
     try:
         for path,blob in entries:
             src=a.data/path;ak,reason=adapter(path)
-            parser_version='atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
+            parser_version='research-evidence-1' if '/research-intake/' in path else 'atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
             fid=hashlib.sha256((path+'\0'+blob+parser_version+str(a.sample)).encode()).hexdigest()[:20]
             prior=legacy.get((path,blob))
             if prior and (a.cache/prior[0]/'meta.json').exists() and (a.cache/prior[0]/'index.jsonl.gz').exists():

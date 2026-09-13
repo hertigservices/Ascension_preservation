@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "component": "research-intake",
+  "files": [
+    {
+      "source": "tools/research-intake/intake.py",
+      "destination": "tools/intake.py"
+    },
+    {
+      "source": "tools/research-intake/readers.py",
+      "destination": "tools/readers.py"
+    },
+    {
+      "source": "tools/research-intake/desktop.py",
+      "destination": "tools/desktop.py"
+    },
+    {
+      "source": "tools/research-intake/watch.py",
+      "destination": "tools/watch.py"
+    },
+    {
+      "source": "tools/research-intake/baseline.py",
+      "destination": "tools/baseline.py"
+    },
+    {
+      "source": "tools/research-intake/publish.py",
+      "destination": "tools/publish.py"
+    },
+    {
+      "source": "tools/research-intake/launch.ps1",
+      "destination": "tools/launch.ps1"
+    },
+    {
+      "source": "tools/research-intake/policy.example.json",
+      "destination": "tools/policy.example.json"
+    },
+    {
+      "source": "tools/research-intake/README.md",
+      "destination": "tools/README.md"
+    }
+  ]
+}

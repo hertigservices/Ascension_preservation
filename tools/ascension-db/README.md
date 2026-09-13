@@ -92,3 +92,12 @@ The homepage's All collections directory and both search selectors use the compl
 Tracking markers use small inline SVG icons and screen-space proximity grouping. Every numbered group opens a persistent member chooser, including exact overlaps at maximum zoom; selecting a member preserves the chooser. Filtering closes the chooser, and keyboard focus returns to the matching map marker after zooming. Only roles present in the zone appear as controls; herb/ore display filters use exact resource names and preserve the original object records in exports. Generic NPCs remain neutral; creature sightings use red tracking dots. Advanced filters, map metadata and full source details are expandable, with active filter state visible.
 
 Atlas zone search, map location search, database search and the Name column recognize a shared, reviewed set of dungeon/raid/city shortcuts (BWL, MC, LBRS, SM lib, and others). Search includes literal matches and every recognized meaning of ambiguous aliases such as DM. IDs stay exact, wing queries stay specific, and alias unions retain each source record once before sorting/pagination. Names and map identities are never rewritten.
+
+
+## Research donations
+
+`../research-intake` preserves non-cache donations privately and exports explicitly
+approved fields under `supplemental/research-intake`. Catalog rows retain source
+title, declared entity kind, mode, artifact/record hashes and original ordinals.
+Raw private files are never read by the website builder. These are attributed
+claims, not confirmed server state or inferred map pins.
