@@ -92,3 +92,19 @@ The homepage's All collections directory and both search selectors use the compl
 Tracking markers use small inline SVG icons and screen-space proximity grouping. Every numbered group opens a persistent member chooser, including exact overlaps at maximum zoom; selecting a member preserves the chooser. Filtering closes the chooser, and keyboard focus returns to the matching map marker after zooming. Only roles present in the zone appear as controls; herb/ore display filters use exact resource names and preserve the original object records in exports. Generic NPCs remain neutral; creature sightings use red tracking dots. Advanced filters, map metadata and full source details are expandable, with active filter state visible.
 
 Atlas zone search, map location search, database search and the Name column recognize a shared, reviewed set of dungeon/raid/city shortcuts (BWL, MC, LBRS, SM lib, and others). Search includes literal matches and every recognized meaning of ambiguous aliases such as DM. IDs stay exact, wing queries stay specific, and alias unions retain each source record once before sorting/pagination. Names and map identities are never rewritten.
+
+## Search icons
+
+Search results show an icon beside the name when the build is given an icon host: `--icon-base`, the `ASCENSIONDB_ICON_BASE` environment variable, or the reusable workflow's optional `icon_base` input. Without one, the column is omitted.
+
+- **When icons attach:** at search-index time, as an optional seventh field of a search row. Parsed-file caches are untouched, so enabling icons never forces a reparse.
+- **Which collections get icons:** items, item names, loot pins, spells, achievements, currencies and item display icons. BisBeard planner IDs are not item IDs and never get one.
+- **Where names come from**, later sources overriding earlier ones for the same ID:
+  1. `cachedata/dbc/item_display_icons.tsv.gz`, joined through the union item cache's display IDs
+  2. Exiles DB item and spell pages
+  3. a published database export's icon map (`supplemental/<set>/<sha>/icon-map.csv.gz`, columns `kind,id,icon`, kind one of item, spell, achievement, currency)
+- **Only published icons are used.** A name counts only when that icon file is itself published: `supplemental/*/assets/icons/<name>.png`, or the `static/icons-clean/<name>.png` rows of an export's `ASSET_INDEX.csv(.gz)`. Names are normalised: lowercase, with folder and image extension removed.
+- **Browser safety:** the browser accepts only an https base or a plain relative path, escapes every name, and replaces an image that fails to load with an empty slot. The icon host must be allowed by `img-src` in `web/_headers`.
+- **Build record:** `manifest.json` records the base, the number of published icons and the number of rows carrying one.
+
+Run `node --test test_search_icons.cjs` for the rendering rules and `python -m unittest test_catalog` for the icon index.

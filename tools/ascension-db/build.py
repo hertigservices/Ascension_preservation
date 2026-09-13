@@ -70,6 +70,58 @@ def identify(path,r,i):
     mode=path.split('/')[2] if path.startswith('cachedata/by-mode/') else str(r.get('_modes',r.get('modes','Unspecified')))
     return identifier,name[:500],kind,mode,source,r
 
+# Search-row icons: collection -> the ID namespace its icon is keyed by. BisBeard planner IDs are deliberately
+# absent; they are not item IDs.
+ICON_KINDS={'item':'item','item-name':'item','loot-pin':'item','spell':'spell','achievement':'achievement','currency':'currency','display-icon':'display'}
+def icon_name(value):
+    """Normalise an icon reference to a published file stem: lowercase, no folder, no image extension."""
+    n=str(value or '').strip().replace('\\','/').rsplit('/',1)[-1].lower()
+    for ext in ('.blp','.tga','.png','.jpg','.webp'):
+        if n.endswith(ext): n=n[:-len(ext)]
+    return n.strip()
+def csv_rows(path,delimiter=','):
+    csv.field_size_limit(100000000)
+    with textopen(path) as f: yield from csv.DictReader(f,delimiter=delimiter)
+class IconIndex:
+    """Icon names for search rows. A name is only used when that icon file is itself published, so a result never
+    references an image the archive does not hold. Later sources override earlier ones for the same ID:
+    item display icons, then Exiles DB item/spell pages, then a published database export's icon map."""
+    def __init__(self,data,paths):
+        paths=sorted(paths);present=set(paths)
+        self.available=set();self.maps={k:{} for k in set(ICON_KINDS.values())}
+        for p in paths:
+            m=re.fullmatch(r'supplemental/[^/]+/assets/icons/([^/]+)\.png',p)
+            if m: self.available.add(m.group(1).lower())
+        exports=sorted(p.rsplit('/',1)[0] for p in paths if re.fullmatch(r'supplemental/[^/]+/[0-9a-f]{16,64}/icon-map\.csv\.gz',p))
+        for root in exports:
+            for index in (f'{root}/ASSET_INDEX.csv.gz',f'{root}/ASSET_INDEX.csv'):
+                if index in present:
+                    for r in csv_rows(data/index):
+                        m=re.fullmatch(r'static/icons-clean/([^/]+)\.png',r.get('path') or '')
+                        if m: self.available.add(m.group(1).lower())
+        if 'cachedata/dbc/item_display_icons.tsv.gz' in present:
+            for r in csv_rows(data/'cachedata/dbc/item_display_icons.tsv.gz','\t'):
+                if r.get('icon'): self.maps['display'][str(r['displayid'])]=icon_name(r['icon'])
+        if 'cachedata/union/itemcache.tsv.gz' in present:
+            with textopen(data/'cachedata/union/itemcache.tsv.gz') as f:
+                reader=csv.reader(f,delimiter='\t');head=next(reader);entry,display=head.index('entry'),head.index('displayid')
+                for r in reader:
+                    icon=self.maps['display'].get(r[display]) if len(r)>display else None
+                    if icon: self.maps['item'][r[entry]]=icon
+        for p in paths:
+            if re.fullmatch(r'supplemental/exiles-db/[0-9a-f]+/(items|spells)\.jsonl\.gz',p):
+                for r in rows(data/p,'jsonl'):
+                    kind=ICON_KINDS.get(str(r.get('type')))
+                    if kind in ('item','spell') and r.get('icon') and r.get('id') is not None: self.maps[kind][str(r['id'])]=icon_name(r['icon'])
+        for root in exports:
+            # A database export's own icon assignments, precomputed as kind,id,icon.
+            for r in csv_rows(data/f'{root}/icon-map.csv.gz'):
+                kind=r.get('kind','')
+                if kind in ('item','spell','achievement','currency') and r.get('id') and r.get('icon'): self.maps[kind][str(r['id'])]=icon_name(r['icon'])
+    def lookup(self,kind,identifier):
+        k=ICON_KINDS.get(kind);icon=self.maps[k].get(identifier) if k else None
+        return icon if icon and icon in self.available else ''
+
 class Buckets:
     def __init__(self,root): self.root=root;self.handles=collections.OrderedDict();self.keys={}
     def add(self,key,row,line=None):
@@ -85,7 +137,7 @@ class Buckets:
         self.handles.clear()
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('--data',type=Path,required=True);ap.add_argument('--out',type=Path,default=BASE/'dist');ap.add_argument('--cache',type=Path,default=BASE/'.build-cache');ap.add_argument('--sample',type=int,default=0);ap.add_argument('--reuse-manifest',type=Path,help='Trusted previous catalog manifest for unchanged legacy parser cache reuse');a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('--data',type=Path,required=True);ap.add_argument('--out',type=Path,default=BASE/'dist');ap.add_argument('--cache',type=Path,default=BASE/'.build-cache');ap.add_argument('--sample',type=int,default=0);ap.add_argument('--reuse-manifest',type=Path,help='Trusted previous catalog manifest for unchanged legacy parser cache reuse');ap.add_argument('--icon-base',default=os.environ.get('ASCENSIONDB_ICON_BASE',''),help='URL prefix of the published icon files (…/<name>.png); empty disables search icons');a=ap.parse_args()
     a.data=a.data.resolve();a.out=a.out.resolve();a.cache=a.cache.resolve()
     if git(a.data,'status','--porcelain','--untracked-files=no').strip(): raise SystemExit('Use a clean published checkout, never a live publisher working tree.')
     revision=git(a.data,'rev-parse','HEAD').decode().strip()
@@ -93,6 +145,9 @@ def main():
     for l in git(a.data,'ls-tree','-r','HEAD').decode().splitlines():
         meta,path=l.split('\t',1);mode,typ,blob=meta.split()
         if typ=='blob': entries.append((path,blob))
+    if a.icon_base and not (a.icon_base.startswith('https://') or (':' not in a.icon_base and not a.icon_base.startswith('//') and re.fullmatch(r'[\w./-]+',a.icon_base))): raise SystemExit('--icon-base must be an https URL or a relative path')
+    icons=IconIndex(a.data,[p for p,_ in entries]) if a.icon_base else None;icon_rows=0
+    if icons: print(f'Icon index: {len(icons.available):,} published icons; mapped IDs '+', '.join(f'{k} {len(v):,}' for k,v in sorted(icons.maps.items())),flush=True)
     a.out.mkdir(parents=True,exist_ok=True);a.cache.mkdir(parents=True,exist_ok=True)
     # Stable parser revisions keep unrelated atlas/UI changes from reparsing millions of records.
     # Bump the applicable revision whenever a parser or identity adapter changes.
@@ -144,6 +199,9 @@ def main():
             with gzip.open(idx,'rt',encoding='utf-8') as index:
                 for line in index:
                     row=json.loads(line);key,title,kind,mode,source,eid=row
+                    # The optional seventh field is added after the parser cache, so icons never force a reparse.
+                    icon=icons.lookup(kind,eid) if icons else ''
+                    if icon: row.append(icon);line=dump(row)+'\n';icon_rows+=1
                     kinds[kind]+=1;modes.update(x.strip() for x in mode.split(',') if x.strip())
                     manifest['sources'][source]=manifest['sources'].get(source,0)+1
                     if len(browsing[kind])<100: browsing[kind].append(row)
@@ -183,6 +241,9 @@ def main():
                         if len(chunk)>=12000 or size+len(line)>4000000: flush()
                         row=json.loads(line);chunk.append(row);count+=1;size+=len(line)
             flush();manifest['search'][group]={'parts':parts,'count':count}
+        if icons:
+            manifest['icons']={'base':a.icon_base,'extension':'.png','available':len(icons.available),'rows':icon_rows}
+            print(f'Search icons: {icon_rows:,} rows reference one of {len(icons.available):,} published icons',flush=True)
         for k,r in browsing.items(): manifest['browse'][k]=r
         manifest['kinds']={k:{'label':LABELS.get(k,k.replace('-',' ').title()),'records':n} for k,n in kinds.items()};manifest['modes']=sorted(modes)
         manifest['recovery']={'pages':len(recovery.get('records',[])),'attempted':len(recovery.get('results',[])),'inventory':len(recovery.get('inventory',[])),'complete_mirror':False}

@@ -36,17 +36,18 @@ uninterpreted**: `stat7` is recorded as `stat7`, never as "Stamina".
 
 ### The specification's own declarations
 
-`openapi.json` states `info.license` as **`AGPL-3.0-or-later`** and attributes
-contact to **Sub-Net e.U.** Both are recorded in the manifest under
-`source.api_specification`. The licence line describes the API the document
-specifies; it is not a grant covering the mirrored database content, and this
-catalog asserts nothing about how that content may be reused.
+`openapi.json` states `info.license` as **`AGPL-3.0-or-later`**, recorded in the
+manifest under `source.api_specification`. The licence line describes the API the
+document specifies; it is not a grant covering the mirrored database content, and
+this catalog asserts nothing about how that content may be reused.
 
-The specification also arrived with a named individual's email address in
-`info.contact`. The published copy is byte-identical to the original except that
-every address is replaced with `<redacted: contact address>`; the organisation
-name is kept, the redaction count and the unmodified file's SHA-256 are recorded
-in the manifest, and `verify` refuses a snapshot in which one reappears.
+The specification also arrived with a contact in `info.contact`: a named
+individual's email address, and an organisation that identifies the site's operator,
+who has asked to remain anonymous. The published copy is byte-identical to the
+original except that every address is replaced with `<redacted: contact address>`
+and the contact organisation with `<redacted: operator>`. Both redaction counts and
+the unmodified file's SHA-256 are recorded in the manifest, and `verify` refuses a
+snapshot in which an address reappears.
 
 ## Reproduce the import
 
@@ -85,7 +86,7 @@ A successful import creates `OUTPUT/<full-archive-sha256>/`:
 | `changes.jsonl.gz` | The daily changelog: field-level diffs with old and new values, significance and source. |
 | `histories.jsonl.gz` | Per-entity change history pages. |
 | `structural-pages.tar.gz` | Byte-exact original HTML of the talent tree and class pages. |
-| `openapi.json.gz` | The original API specification, with contact addresses redacted in place. |
+| `openapi.json.gz` | The original API specification, with its contact redacted in place. |
 | `catalog.sqlite.gz` | Queryable entity, tree and talent tables. |
 | `comparison.json.gz` | Named conflict, missing-candidate and unnamed lists against a captured baseline. |
 | `manifest.json` | Schema, provenance, counts, interpretation limits, and every artifact's hash and size. |
@@ -197,8 +198,10 @@ counts. There is a regression test.
   authoritative wherever the two disagree.
 - Drop percentages are the site's own stated figures. They were not observed
   here and no probability is derived from them. Many rows state `Observed 0`.
-- The crawl recorded 39,858 failed asset fetches, so the mirrored icon set is
-  incomplete. Absence of an icon is not evidence the icon does not exist.
+- The crawl recorded 39,858 failed asset fetches. They are not missing icons:
+  22,151 asked for a `/coa/static/icons/` path the site never served, 16,702 were
+  creature renders that were never made, and 498 were `icons-clean` files. The
+  operator's complete icon set is published separately; see the dataset README.
 - IDs are Ascension's renumbered space. Item display IDs in particular do not
   match stock 3.3.5a; see the display-id notes before joining anything by ID.
 - 12,639 item, 62,115 spell, 9,463 quest, 1,932 npc and 491 gameobject pages are

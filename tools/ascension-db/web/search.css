@@ -46,6 +46,17 @@
 .search-results .empty-search { padding: 30px 18px; color: var(--muted); }
 .column-filter-actions { font-size: 12px; }
 .column-filter-actions button { padding: 8px 14px; font-size: 12px; }
+.search-results .result-name { display: inline-flex; align-items: center; gap: 10px; }
+.search-results .result-icon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  object-fit: cover;
+}
+.search-results .result-icon.is-empty { display: inline-block; opacity: .45; }
 @media (max-width: 650px) {
   .search-column-tools,
   .column-filter-actions { align-items: flex-start; flex-direction: column; gap: 9px; }
