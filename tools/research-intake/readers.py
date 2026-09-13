@@ -195,6 +195,9 @@ def read_sql(f,tick=lambda:None):
                 if cols and len(cols) != len(values): raise Held('INSERT column mismatch')
                 yield table, dict(zip(cols,values)) if cols else {'values':values,'columns':'unspecified'}
                 found = True
+            continue
+        if re.match(r'^(?:COPY|UPDATE|DELETE|REPLACE|MERGE|LOAD|TRUNCATE)\b',s,re.I):
+            raise Held('SQL contains an unsupported data-changing statement; original retained without a partial data interpretation')
     if copy: raise Held('Truncated PostgreSQL COPY')
     if not found: raise Held('No supported SQL data section; original retained (DDL is never executed)')
 

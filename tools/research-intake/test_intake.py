@@ -62,6 +62,12 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(rows[0],('public.npc',{'id':'1','name':'One','note':None}))
         self.assertEqual(rows[1][1]['note'],'hello\tthere');self.assertEqual(rows[2][1]['name'],"O'Brien")
         with self.assertRaises(readers.Held):list(readers.read_sql(io.StringIO('INSERT INTO x VALUES (danger());\n')))
+    def test_sql_mixed_update_is_not_reported_as_fully_parsed(self):
+        p=self.file('mixed.sql',"INSERT INTO npc (id,name) VALUES (448,'Hogger');\nUPDATE npc SET name='Changed' WHERE id=448;\n")
+        with self.engine() as e:
+            result=e.ingest(p)
+            self.assertEqual(result['status'],'needs-review')
+            self.assertEqual(e.summary()['record_occurrences'],0)
     def test_sqlite_types_and_view_not_run(self):
         p=self.donations/'db.sqlite';db=sqlite3.connect(p)
         db.executescript('CREATE TABLE npc(id INTEGER,name TEXT,payload BLOB); CREATE VIEW bad AS SELECT unknown_func();')
