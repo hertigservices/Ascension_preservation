@@ -22,3 +22,9 @@ test('bounded batch preserves checksum and immutable-write conditions',async()=>
   const result=await worker.fetch(new Request(draft.url,{method:'POST',headers:{'Content-Type':draft.headers.get('Content-Type'),'Content-Length':String(bytes.byteLength),Authorization:'Bearer fixture'},body:bytes}),{PUBLISH_TOKEN:'fixture',PUBLIC_DATA:{put:async(k,b,opts)=>{puts++;assert.equal(k,key);assert.equal(opts.sha256,sha);assert.equal(opts.onlyIf.get('If-None-Match'),'*');assert.equal(b.byteLength,4);return {size:4};}}});
   assert.equal(result.status,200);assert.equal(puts,1);assert.equal((await result.json())[0].sha256,sha);
 });
+
+test('preserved image filenames can contain spaces and Unicode; SVG keeps its policy',async()=>{
+  for(const path of ['images/maps/Floor%201.png','images/portraits/%C3%89toile.PNG'])assert.equal((await worker.fetch(new Request('https://example.test/'+path),env)).status,200);
+  const svg=await worker.fetch(new Request('https://example.test/images/Icon.SVG'),env);assert.match(svg.headers.get('Content-Security-Policy'),/sandbox/);
+  assert.equal((await worker.fetch(new Request('https://example.test/images/bad%5Cname.png'),env)).status,404);
+});

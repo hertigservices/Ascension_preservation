@@ -1,5 +1,6 @@
 // Public reads and bounded maintainer publication use a dedicated bucket and token.
 const safe = s => /^[a-zA-Z0-9_./-]+$/.test(s) && !s.split('/').some(p => p === '..' || p === '.');
+const imageKey = s => typeof s==='string' && !s.includes('\\') && !/[\u0000-\u001f\u007f]/.test(s) && !s.split('/').some(p=>!p||p==='.'||p==='..') && /^images\/.+\.(png|jpe?g|webp|gif|avif|svg)$/i.test(s);
 const valid = s => safe(s) && /^(catalog|media)\/(current\.json|snapshots\/[0-9a-f]{64}\/.+)$/.test(s);
 const publicHeaders = {'Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff'};
 async function authorized(request, env) {
@@ -41,7 +42,7 @@ export default {
       return Response.json(result);
     }
     const headers=admin?{'X-Content-Type-Options':'nosniff'}:publicHeaders;
-    if (!(valid(key) || (!admin && safe(key) && /^images\/.+\.(png|jpe?g|webp|gif|avif|svg)$/i.test(key))))return new Response('Not found',{status:404,headers});
+    if (!(valid(key) || (!admin && imageKey(key))))return new Response('Not found',{status:404,headers});
     if (admin && request.method==='PUT') {
       const size=Number(request.headers.get('Content-Length')),sha=request.headers.get('X-Object-Sha256')||'';
       if (!Number.isSafeInteger(size)||size<0||size>64*1024*1024||!/^[0-9a-f]{64}$/.test(sha))return new Response('Invalid upload',{status:400});
@@ -64,7 +65,7 @@ export default {
     const object=await (request.method==='HEAD'?env.PUBLIC_DATA.head(key):env.PUBLIC_DATA.get(key));
     if(!object)return new Response('Not found',{status:404,headers});
     const h=new Headers(headers);object.writeHttpMetadata(h);h.set('ETag',object.httpEtag);h.set('X-Object-Sha256',object.customMetadata?.sha256||'');
-    if(key.endsWith('.svg'))h.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    if(key.toLowerCase().endsWith('.svg'))h.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; sandbox");
     h.delete('Content-Encoding'); // AscensionDB decompresses .gz itself.
     h.set('Cache-Control',admin||key.endsWith('/current.json')?'no-store':'public, max-age=31536000, immutable');
     if(request.headers.get('If-None-Match')===object.httpEtag)return new Response(null,{status:304,headers:h});
