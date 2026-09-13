@@ -27,6 +27,7 @@ py-modules = [
     "bms_coa",
     "bms_config",
     "bms_dbc",
+    "bms_equip",
     "bms_import",
     "bms_map",
     "bms_parse",

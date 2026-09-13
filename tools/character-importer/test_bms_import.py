@@ -7,28 +7,35 @@ Run:  python test_bms_import.py
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bms_config  # noqa: E402
+from bms_equip import Wearer  # noqa: E402
 from bms_import import (  # noqa: E402
     EQUIPMENT_CACHE_MAX,
     EQUIPMENT_CACHE_SIZE,
     FAIL,
     OK,
     WARN,
+    WRITE_ORDER,
     Check,
     Plan,
     _captured_durability,
     _durability,
     _equipment_cache,
     _plan_advancement,
+    _plan_items,
+    _plan_settings,
     _plan_talents,
+    build_plan,
     blocks_planning,
     blocks_writing,
     choose_config,
@@ -920,11 +927,11 @@ class AdvancementTests(unittest.TestCase):
             talents=[{"InternalID": 6770, "SpellID": 300250}]))
         self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [300250])
 
-    def test_the_unrestorable_specialization_is_called_out(self):
-        """The server keeps the active spec in memory only, so it cannot be written."""
-        note = " ".join(self.plan_with(self.capture(talents=[self.CLASP])).notes)
-        self.assertIn("specialization 32", note)
-        self.assertIn("memory only", note)
+    def test_the_specialization_is_left_to_the_settings_pass(self):
+        """The realm persists the active spec in character_settings; _plan_settings writes it."""
+        plan = self.plan_with(self.capture(talents=[self.CLASP]))
+        self.assertEqual(plan.count("character_settings"), 0)
+        self.assertNotIn("memory only", " ".join(plan.notes))
 
     def test_a_spell_the_target_does_not_have_is_skipped_by_name(self):
         entry = dict(self.CLASP, Spells=[999999])
@@ -978,6 +985,232 @@ class AdvancementTests(unittest.TestCase):
         plan = self.plan_with(self.capture(talents=[entry]), catalogue=cat)
         self.assertEqual([r["spell"] for r in plan.rows["character_spell"]], [805847])
 
+
+class RoutedConn:
+    """Answers each SELECT from canned rows, chosen by the first matching SQL substring."""
+
+    def __init__(self, routes):
+        self.routes = routes          # [(substring, rows)]
+
+    def cursor(self, *_args, **_kwargs):
+        return RoutedCursor(self.routes)
+
+
+class RoutedCursor:
+    def __init__(self, routes):
+        self.routes = routes
+        self.rows = []
+
+    def execute(self, sql, params=()):
+        self.rows = next((rows for key, rows in self.routes if key in sql), [])
+
+    def fetchall(self):
+        return [dict(r) for r in self.rows]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+def equipped(entry, name, slot_id):
+    return {"location": "equipped", "slotId": slot_id, "itemId": entry, "name": name,
+            "itemLinkFields": [str(entry), "0", "0", "0", "0", "0", "0", "0", "20"],
+            "stackCount": 1, "durability": {"current": 10, "maximum": 20}}
+
+
+def carried(entry, name, bag_slot, bag_id=0):
+    return {"location": "bags", "bagId": bag_id, "bagSlot": bag_slot, "itemId": entry,
+            "name": name, "itemLinkFields": [str(entry)], "stackCount": 1}
+
+
+# item_template rows in the shape of the live export's gear on the CoA repack.
+HOOD = {"entry": 2060042, "MaxDurability": 20, "class": 4, "subclass": 1, "InventoryType": 1,
+        "RequiredLevel": 13, "AllowableClass": -1, "AllowableRace": -1}
+SANGUINE = {"entry": 14372, "MaxDurability": 20, "class": 4, "subclass": 1, "InventoryType": 5,
+            "RequiredLevel": 23, "AllowableClass": -1, "AllowableRace": -1}
+ROCK = {"entry": 5000, "MaxDurability": 0, "class": 15, "subclass": 0, "InventoryType": 0}
+
+
+def placed(plan):
+    """character_inventory slot -> item entry."""
+    entry = {r["guid"]: r["itemEntry"] for r in plan.rows.get("item_instance", [])}
+    return {r["slot"]: entry[r["item"]] for r in plan.rows.get("character_inventory", [])}
+
+
+def mailed_entries(plan):
+    entry = {r["guid"]: r["itemEntry"] for r in plan.rows.get("item_instance", [])}
+    return [entry[r["item_guid"]] for r in plan.rows.get("mail_items", [])]
+
+
+class PlanItemsTests(unittest.TestCase):
+    """Gear the character cannot wear yet is carried, not left for the server to strip.
+
+    Left equipped, AzerothCore takes it off at login and mails it, and a CoA
+    realm's starter-kit repair then fills the emptied slot with starter gear --
+    what the live export's level-20 Chronomancer arrived wearing.
+    """
+
+    DEFAULT = object()
+
+    def plan(self, equipment, bags=(), wearer=DEFAULT):
+        if wearer is self.DEFAULT:
+            wearer = Wearer(level=20, race=1, class_id=22, team="Alliance", skills={415: 1})
+        conn = RoutedConn([("item_template", [HOOD, SANGUINE, ROCK])])
+        args = argparse.Namespace(world_db="world", synthesize=False)
+        plan = Plan(account_id=1, guid=7, name="Probe")
+        checkpoint = types.SimpleNamespace(
+            character={"equipment": list(equipment), "bags": list(bags)})
+        _plan_items(conn, args, plan, checkpoint, 100, wearer)
+        return plan
+
+    def test_wearable_gear_stays_in_its_slot(self):
+        plan = self.plan([equipped(2060042, "Renegade's Hood", 1)])
+        self.assertEqual(placed(plan), {0: 2060042})
+
+    def test_gear_above_the_level_goes_to_the_first_free_backpack_slot(self):
+        plan = self.plan([equipped(14372, "Sanguine Armor", 5)],
+                         bags=[carried(5000, "Rock", 1)])
+        self.assertEqual(placed(plan), {23: 5000, 24: 14372})
+        note = next(n for n in plan.notes if n.startswith("Not worn"))
+        self.assertIn("Sanguine Armor (14372) from the chest slot", note)
+        self.assertIn("requires level 23", note)
+        self.assertIn("backpack slot 2", note)
+
+    def test_with_a_full_backpack_it_is_mailed(self):
+        bags = [carried(5000, "Rock", n) for n in range(1, 17)]
+        plan = self.plan([equipped(14372, "Sanguine Armor", 5)], bags=bags)
+        self.assertEqual(mailed_entries(plan), [14372])
+        self.assertNotIn(4, placed(plan))
+        self.assertIn("goes in the mail", " ".join(plan.notes))
+
+    def test_it_takes_the_backpack_before_the_contents_of_a_lost_bag(self):
+        bags = [carried(5000, "Rock", n) for n in range(1, 16)]       # slot 16 free
+        orphan = carried(2060042, "Renegade's Hood", 1, bag_id=1)
+        plan = self.plan([equipped(14372, "Sanguine Armor", 5)], bags=bags + [orphan])
+        self.assertEqual(placed(plan)[38], 14372)
+        self.assertEqual(mailed_entries(plan), [2060042])
+
+    def test_without_a_wearer_nothing_is_checked(self):
+        plan = self.plan([equipped(14372, "Sanguine Armor", 5)], wearer=None)
+        self.assertEqual(placed(plan), {4: 14372})
+
+
+class SettingsTests(unittest.TestCase):
+    """mod-ascension-compat's per-character state, written as the server writes it."""
+
+    def settings(self, capture, class_id=22, **kwargs):
+        plan = Plan(guid=7)
+        _plan_settings(plan, capture, class_id, **kwargs)
+        return plan, {r["source"]: r["data"] for r in plan.rows.get("character_settings", [])}
+
+    def capture(self, spec=32):
+        return {"advancement": {"available": True, "activeSpecializationId": spec}}
+
+    def test_the_specialization_is_written_with_its_trailing_space(self):
+        _plan, rows = self.settings(self.capture())
+        self.assertEqual(rows["core.ascension_active_spec"], "32 ")
+
+    def test_the_starter_kit_is_marked_as_given(self):
+        _plan, rows = self.settings(self.capture())
+        self.assertEqual(rows["core.ascension_starter"], "1 ")
+
+    def test_starter_kit_leaves_the_marker_out(self):
+        _plan, rows = self.settings(self.capture(), starter_kit=True)
+        self.assertEqual(set(rows), {"core.ascension_active_spec"})
+
+    def test_a_stock_class_gets_nothing(self):
+        plan, rows = self.settings(self.capture(), class_id=8)
+        self.assertEqual(rows, {})
+
+    def test_no_specialization_writes_only_the_marker(self):
+        _plan, rows = self.settings({"advancement": {"available": True}})
+        self.assertEqual(set(rows), {"core.ascension_starter"})
+
+    def test_the_catalogue_refuses_a_specialization_the_class_does_not_have(self):
+        import bms_coa
+        cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
+            '[{"EntryId": 1, "ClassId": 22, "SpecId": 31, "SpellIds": [5]}]'))
+        plan, rows = self.settings(self.capture(32), catalogue=cat)
+        self.assertNotIn("core.ascension_active_spec", rows)
+        self.assertIn("specializations 31", " ".join(s.reason for s in plan.skips))
+
+    def test_a_catalogue_that_does_not_know_the_class_does_not_refuse(self):
+        import bms_coa
+        cat = bms_coa.Catalogue(entries=bms_coa.parse_json(
+            '[{"EntryId": 1, "ClassId": 12, "SpecId": 3, "SpellIds": [5]}]'))
+        _plan, rows = self.settings(self.capture(32), catalogue=cat)
+        self.assertEqual(rows["core.ascension_active_spec"], "32 ")
+
+    def test_the_rows_are_written(self):
+        self.assertIn("character_settings", WRITE_ORDER)
+
+
+class PlanResolvers(AdvancementResolvers):
+    def __init__(self):
+        super().__init__({}, {"chronomancer": 22})
+
+    def skill_by_name(self, name):
+        from bms_dbc import Resolution
+        if name == "Cloth":
+            return Resolution(True, 415)
+        return Resolution(False, reason="no skill named %r" % name)
+
+    def faction_by_name(self, name):
+        from bms_dbc import Resolution
+        return Resolution(False, reason="no faction named %r" % name)
+
+    def faction_base_rep(self, faction_id, race_id, class_id):
+        return 0
+
+
+class BuildPlanTests(unittest.TestCase):
+    """A whole Conquest of Azeroth character, planned against canned tables."""
+
+    CAPTURE = {
+        "name": "Probe", "level": 20, "raceToken": "Human", "classToken": "CHRONOMANCER",
+        "sexId": 2, "faction": "Alliance",
+        "skills": [{"name": "Cloth", "rank": 1, "maximum": 1}],
+        "equipment": [equipped(2060042, "Renegade's Hood", 1),
+                      equipped(14372, "Sanguine Armor", 5)],
+        "advancement": {"available": True, "activeSpecializationId": 32},
+    }
+
+    def build(self, **changes):
+        capture = copy.deepcopy(self.CAPTURE)
+        capture.update(changes)
+        conn = RoutedConn([
+            ("`auth`.account", [{"id": 1}]),
+            ("MAX(guid) FROM `chars`.characters", [{"m": 11}]),
+            ("MAX(guid) FROM `chars`.item_instance", [{"m": 500}]),
+            ("playercreateinfo", [{"map": 0, "zone": 12, "position_x": 1.0, "position_y": 2.0,
+                                   "position_z": 3.0, "orientation": 0.0}]),
+            ("item_template", [HOOD, SANGUINE]),
+        ])
+        args = argparse.Namespace(auth_db="auth", characters_db="chars", world_db="world",
+                                  account="JAMES", name=None, synthesize=False,
+                                  talents="auto", coa_catalogue=None, starter_kit=False)
+        return build_plan(conn, args, types.SimpleNamespace(character=capture), PlanResolvers())
+
+    def test_the_character_row_carries_what_creation_would_write(self):
+        row = self.build().rows["characters"][0]
+        self.assertEqual(row["restState"], 2)
+        self.assertEqual(row["watchedFaction"], 0xFFFFFFFF)
+
+    def test_equipment_is_checked_after_the_skills_are_planned(self):
+        plan = self.build()
+        self.assertEqual({s: e for s, e in placed(plan).items() if s < 19}, {0: 2060042})
+        self.assertEqual(placed(plan)[23], 14372)
+
+    def test_without_the_cloth_skill_no_cloth_is_worn(self):
+        plan = self.build(skills=[])
+        self.assertEqual({s for s in placed(plan) if s < 19}, set())
+
+    def test_a_custom_class_gets_its_settings(self):
+        rows = {r["source"]: r["data"] for r in self.build().rows["character_settings"]}
+        self.assertEqual(rows, {"core.ascension_active_spec": "32 ",
+                                "core.ascension_starter": "1 "})
 
 
 if __name__ == "__main__":

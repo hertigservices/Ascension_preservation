@@ -63,6 +63,13 @@ from bms_dbc import (  # noqa: E402
     DbcError,
     Resolvers,
 )
+from bms_equip import (  # noqa: E402
+    FIRST_CUSTOM_CLASS,
+    TEAM_BY_RACE,
+    Wearer,
+    equip_refusal,
+    slot_name,
+)
 from bms_parse import (  # noqa: E402
     extract_checkpoint_codes,
     load_savedvariables,
@@ -94,6 +101,20 @@ MAIL_EXPIRY_DAYS = 90
 # A value larger than any possible max is clamped on load
 # (PlayerStorage.cpp:5616), so this restores the character at full health.
 FULL_BAR = 100_000_000
+
+# Player::Create writes both of these, and loading copies both columns back
+# without validating them (PlayerStorage.cpp: SetByteValue(PLAYER_BYTES_2, 3,
+# restState); SetInt32Value(PLAYER_FIELD_WATCHED_FACTION_INDEX, watchedFaction)).
+# The schema default 0 is not a rest state at all; the client's MainMenuBar.lua
+# looks it up at first login and errors.
+REST_STATE_NOT_RAF_LINKED = 2       # Player.h: enum PlayerRestState
+WATCHED_FACTION_NONE = 0xFFFFFFFF   # uint32(-1): no reputation bar
+
+# mod-ascension-compat (AscensionCompat.cpp) keeps per-character state in
+# character_settings and reads it back in OnPlayerLogin.
+ASCENSION_ACTIVE_SPEC_SETTING = "core.ascension_active_spec"
+ASCENSION_STARTER_SETTING = "core.ascension_starter"
+ASCENSION_STARTER_REVISION = 1      # RepairStarterKit returns early once the value is >= 1
 
 
 # -- report primitives -----------------------------------------------------
@@ -537,6 +558,8 @@ def build_plan(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers)
         "leveltime": 0,
         "logout_time": int(time.time()),
         "at_login": M.at_login_flags(plan.renamed, customize=True),
+        "restState": REST_STATE_NOT_RAF_LINKED,
+        "watchedFaction": WATCHED_FACTION_NONE,
         "health": FULL_BAR,
         "power1": FULL_BAR,
         "power2": FULL_BAR,
@@ -583,17 +606,23 @@ def build_plan(conn, args: argparse.Namespace, checkpoint, resolvers: Resolvers)
                   "0 is truthy in Lua), so every index reads as known; restoring them would "
                   "grant titles the character never earned")
 
-    # -- items ------------------------------------------------------------
-    next_item_guid = _plan_items(conn, args, plan, checkpoint, next_item_guid)
-    # Must follow _plan_items: the cache is derived from the rows it created.
-    plan.rows["characters"][0]["equipmentCache"] = _equipment_cache(plan, cache_width)
-
     # -- spells, talents, skills -----------------------------------------
     _plan_spells(plan, char, resolvers)
     _plan_talents(plan, char, klass, resolvers, getattr(args, "talents", "auto"))
     _plan_advancement(plan, char, klass, resolvers, getattr(args, "coa_catalogue", None))
     _plan_skills(plan, char, resolvers)
     _plan_reputations(plan, char, race, klass, resolvers)
+    _plan_settings(plan, char, klass, getattr(args, "coa_catalogue", None),
+                   getattr(args, "starter_kit", False))
+
+    # -- items ------------------------------------------------------------
+    # After spells, skills and reputations: the server loads those before the
+    # inventory and checks every equipped item against them.
+    wearer = _wearer(plan, char, level, race, klass, resolvers)
+    next_item_guid = _plan_items(conn, args, plan, checkpoint, next_item_guid, wearer)
+    # Must follow _plan_items: the cache is derived from the rows it created.
+    plan.rows["characters"][0]["equipmentCache"] = _equipment_cache(plan, cache_width)
+
     _plan_action_bars(plan, char)
     _plan_quests(conn, args, plan, char)
     _plan_achievements(plan, char)
@@ -682,8 +711,15 @@ def _describe(value: Any) -> str:
     return str(value)[:60]
 
 
-def _plan_items(conn, args, plan: Plan, checkpoint, next_guid: int) -> int:
-    """Create item_instance + character_inventory rows, mailing what will not fit."""
+def _plan_items(conn, args, plan: Plan, checkpoint, next_guid: int,
+                wearer: Wearer | None = None) -> int:
+    """Create item_instance + character_inventory rows, mailing what will not fit.
+
+    With a `wearer`, each equipped item is first checked the way the server
+    checks it at login (bms_equip.equip_refusal). One the character cannot wear
+    yet goes in the backpack instead. Left equipped, the server would take it off
+    and mail it, and a Conquest of Azeroth realm would put starter gear in the gap.
+    """
     equipment, bags = _items_from(checkpoint)
 
     wanted: set[int] = set()
@@ -699,29 +735,38 @@ def _plan_items(conn, args, plan: Plan, checkpoint, next_guid: int) -> int:
 
     known: set[int] = set()
     max_durability: dict[int, int] = {}
+    templates: dict[int, dict[str, Any]] = {}
     if wanted:
         marks = ", ".join(["%s"] * len(wanted))
+        # Every column rather than the dozen the equip check reads: a fork that
+        # lacks one then falls back to its schema default instead of failing
+        # the whole query.
         for r in query(
             conn,
-            "SELECT entry, MaxDurability FROM `%s`.item_template WHERE entry IN (%s)"
+            "SELECT * FROM `%s`.item_template WHERE entry IN (%s)"
             % (args.world_db, marks),
             tuple(sorted(wanted)),
         ):
             known.add(r["entry"])
-            max_durability[r["entry"]] = max(0, int(r["MaxDurability"] or 0))
+            templates[r["entry"]] = r
+            max_durability[r["entry"]] = max(0, int(r.get("MaxDurability") or 0))
     missing = wanted - known
     if missing and args.synthesize:
         _plan_synthetic_items(conn, args, plan, parsed, missing)
         known |= missing
+        for row in plan.rows.get("item_template", []):
+            templates.setdefault(row["entry"], row)
         for record, fields in parsed:
             if fields.item_id in missing:
                 max_durability[fields.item_id] = _captured_durability(record, "maximum") or 0
 
-    # Placement pass. Backpack and keyring keep their captured slots; items that
-    # lived inside an equipped bag have no container (the addon never captures
-    # the bag itself) and are relocated into free backpack slots, then mailed.
+    # Placement pass. Backpack and keyring keep their captured slots. Two kinds of
+    # item are relocated into free backpack slots, then mailed: equipped items the
+    # character cannot wear yet, and items that lived inside an equipped bag (the
+    # addon never captures the bag itself, so they have no container).
     used_slots: set[int] = set()
     placements: list[tuple[dict, M.ItemFields, int | None]] = []
+    unwearable: list[tuple[dict, M.ItemFields, int, str]] = []
     homeless: list[tuple[dict, M.ItemFields]] = []
 
     for record, fields in parsed:
@@ -736,6 +781,11 @@ def _plan_items(conn, args, plan: Plan, checkpoint, next_guid: int) -> int:
                 slot = M.equipped_db_slot(record.get("slotId"))
             except M.MappingError as exc:
                 plan.skip("items", str(record.get("name") or "?"), str(exc))
+                continue
+            refusal = (equip_refusal(templates.get(fields.item_id, {}), slot, wearer)
+                       if wearer is not None else "")
+            if refusal:
+                unwearable.append((record, fields, slot, refusal))
                 continue
             used_slots.add(slot)
             placements.append((record, fields, slot))
@@ -756,21 +806,36 @@ def _plan_items(conn, args, plan: Plan, checkpoint, next_guid: int) -> int:
         if s not in used_slots
     ]
     mailed: list[tuple[dict, M.ItemFields]] = []
-    for record, fields in homeless:
+    landed: dict[int, int | None] = {}     # id(record) -> backpack slot, or None when mailed
+    # Unwearable gear first: it was on the character, so it gets the backpack
+    # before the contents of bags that no longer exist.
+    for record, fields in [(r, f) for r, f, _slot, _why in unwearable] + homeless:
         if free_backpack:
             slot = free_backpack.pop(0)
             used_slots.add(slot)
             placements.append((record, fields, slot))
         else:
+            slot = None
             mailed.append((record, fields))
             placements.append((record, fields, None))
+        landed[id(record)] = slot
 
+    for record, fields, slot, refusal in unwearable:
+        where = landed[id(record)]
+        plan.notes.append(
+            "Not worn: %s (%d) from the %s slot -- %s. The server would take it off at "
+            "login, so it goes %s instead; the player can equip it once they qualify."
+            % (record.get("name") or "?", fields.item_id, slot_name(slot), refusal,
+               "in the mail" if where is None
+               else "in backpack slot %d" % (where - M.INVENTORY_SLOT_ITEM_START + 1))
+        )
     if homeless:
+        spilled = any(landed[id(record)] is None for record, _fields in homeless)
         plan.notes.append(
             "%d item(s) were inside equipped bags. The addon never captures the bag "
             "containers themselves (Core.lua scans equipment slots 1..19 only), so they "
             "were moved into free backpack slots%s."
-            % (len(homeless), " and, where the backpack ran out, into mail" if mailed else "")
+            % (len(homeless), " and, where the backpack ran out, into mail" if spilled else "")
         )
 
     for record, fields, slot in placements:
@@ -883,9 +948,9 @@ def _plan_mail(plan: Plan, mailed: list[tuple[dict, Any]]) -> None:
             "sender": 0,
             "receiver": plan.guid,
             "subject": "Restored belongings",
-            "body": "These items were inside your bags when your character was preserved. "
-                    "The bags themselves could not be recovered, so their contents were "
-                    "sent to you instead.",
+            "body": "These items could not be placed on your character when it was "
+                    "restored: they were inside bags that could not be recovered, or they "
+                    "are gear your character cannot wear yet. They were sent to you instead.",
             "has_items": 1,
             "expire_time": expire,
             "deliver_time": now,
@@ -1166,10 +1231,7 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
     Luck and Anomaly Spikes each teach two -- so every id in the entry is taken,
     not just the first.
 
-    The specialization is deliberately not restored. The server keeps the active
-    spec in memory only and drops it at logout, so there is nothing to write that
-    would survive, and the player picks it again exactly as they would after any
-    logout.
+    The active specialization is restored separately, by _plan_settings.
     """
     advancement = char.get("advancement")
     if not isinstance(advancement, dict) or not advancement.get("available"):
@@ -1232,10 +1294,6 @@ def _plan_advancement(plan: Plan, char: dict, class_id: int, resolvers: Resolver
                 "teaching %d spell(s)" % (restored, taught))
         if added:
             note += (", %d of which the captured spellbook did not list" % added)
-        if spec_id:
-            note += (". The capture was in specialization %d; the server keeps the "
-                     "active specialization in memory only, so the player chooses "
-                     "it again at login" % spec_id)
         plan.notes.append(note + ".")
 
 
@@ -1371,6 +1429,91 @@ def _plan_achievements(plan: Plan, char: dict) -> None:
                   "credit progress this character may not own")
 
 
+def _wearer(plan: Plan, char: dict, level: int, race: int, class_id: int,
+            resolvers: Resolvers) -> Wearer:
+    """The character as the server sees it when it checks the equipment at login."""
+    skills = {int(row["skill"]): int(row["value"])
+              for row in plan.rows.get("character_skills", [])}
+    spells = {int(row["spell"]) for row in plan.rows.get("character_spell", [])}
+    relative = {int(row["faction"]): int(row["standing"])
+                for row in plan.rows.get("character_reputation", [])}
+
+    def standing(faction_id: int) -> int:
+        # character_reputation.standing is relative to the race/class base.
+        return (resolvers.faction_base_rep(faction_id, race, class_id)
+                + relative.get(int(faction_id), 0))
+
+    team = str(char.get("faction") or "")
+    if team not in ("Alliance", "Horde"):
+        team = TEAM_BY_RACE.get(race, "")
+    return Wearer(level=level, race=race, class_id=class_id, team=team,
+                  skills=skills, spells=spells, standing=standing)
+
+
+def _setting_data(*values: int) -> str:
+    """character_settings.data as Player::SerializeSettingsData writes it.
+
+    Every value is followed by a space -- "32 ", never "32".
+    """
+    return "".join("%d " % int(value) for value in values)
+
+
+def _plan_settings(plan: Plan, char: dict, class_id: int, catalogue: Any = None,
+                   starter_kit: bool = False) -> None:
+    """The per-character state mod-ascension-compat keeps in character_settings.
+
+    Only custom classes have any. At login the module reads the active
+    specialization back before it reconciles the character's spells, then runs a
+    one-time starter-kit repair unless the character is marked as already given
+    the kit (AscensionCompat.cpp: OnPlayerLogin, RepairStarterKit).
+    """
+    if class_id < FIRST_CUSTOM_CLASS:
+        return
+
+    advancement = char.get("advancement")
+    spec = advancement.get("activeSpecializationId") if isinstance(advancement, dict) else None
+    try:
+        spec_id = int(spec) if spec is not None else 0
+    except (TypeError, ValueError):
+        spec_id = 0
+    if spec_id > 0:
+        # An empty list means the catalogue does not know this class at all,
+        # which is not evidence against the specialization.
+        known = catalogue.specs(class_id) if catalogue is not None else []
+        if known and spec_id not in known:
+            plan.skip("specialization", "specialization %d" % spec_id,
+                      "the catalogue gives class %d only specializations %s; the player "
+                      "chooses one in game"
+                      % (class_id, ", ".join(str(s) for s in known)))
+        else:
+            plan.add("character_settings", {
+                "guid": plan.guid,
+                "source": ASCENSION_ACTIVE_SPEC_SETTING,
+                "data": _setting_data(spec_id),
+            })
+            plan.notes.append(
+                "Specialization %d restored as character_settings %s. The server reads it "
+                "at login, before it reconciles the character's spells."
+                % (spec_id, ASCENSION_ACTIVE_SPEC_SETTING))
+
+    if starter_kit:
+        plan.notes.append(
+            "--starter-kit: at first login the server will add its custom-class starter "
+            "kit, putting starter gear in each empty slot the kit covers and a hearthstone "
+            "in the bags if there is none.")
+        return
+    plan.add("character_settings", {
+        "guid": plan.guid,
+        "source": ASCENSION_STARTER_SETTING,
+        "data": _setting_data(ASCENSION_STARTER_REVISION),
+    })
+    plan.notes.append(
+        "Marked as already given the custom-class starter kit (%s = %d). Otherwise the "
+        "server's first-login repair puts starter gear in each empty slot the kit covers "
+        "and adds a hearthstone; pass --starter-kit to allow that."
+        % (ASCENSION_STARTER_SETTING, ASCENSION_STARTER_REVISION))
+
+
 # -- apply -----------------------------------------------------------------
 
 WRITE_ORDER = [
@@ -1389,6 +1532,7 @@ WRITE_ORDER = [
     "character_queststatus",
     "character_queststatus_rewarded",
     "character_achievement",
+    "character_settings",
 ]
 
 WORLD_TABLES = {"item_template"}
@@ -1641,6 +1785,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                              "in it resolves on this server, otherwise import none and leave "
                              "the points to respend; import: take whatever resolves, even a "
                              "partial build; rebuild: never import talents")
+    parser.add_argument("--starter-kit", action="store_true",
+                        help="Conquest of Azeroth custom classes only: let the server add "
+                             "its starter kit at first login. By default the character is "
+                             "marked as already having it, so starter gear does not land "
+                             "in the slots the capture left empty")
 
     parser.add_argument("--apply", action="store_true", help="actually write (default: dry run)")
     parser.add_argument("--rehearse", action="store_true",

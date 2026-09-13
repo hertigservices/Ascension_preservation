@@ -104,7 +104,7 @@ PyMySQL is pure Python, so no compiler and no MySQL client library are needed.
 | Restored | Notes |
 | --- | --- |
 | Character record | race, class, level, money, played time, position |
-| Equipment and bags | including per-item durability and enchantments |
+| Equipment and bags | including per-item durability and enchantments; gear the character cannot wear yet goes in the backpack — see [Equipment the character cannot wear yet](#equipment-the-character-cannot-wear-yet) |
 | Spells | filtered against the target's `Spell.dbc` |
 | Talents | resolved by name through `Talent.dbc` / `TalentTab.dbc`, all-or-nothing — see [Talents on a rebalanced realm](#talents-on-a-rebalanced-realm) |
 | Custom-class advancement | Ascension's purchased abilities and talents — see [Conquest of Azeroth custom classes](#conquest-of-azeroth-custom-classes) |
@@ -213,12 +213,18 @@ shipped inside this tool would be worse than none. An entry the catalogue has
 never heard of is still restored, because a catalogue older than the realm must
 not cost a player their build.
 
-**The specialization is not restored**, and cannot be. The server keeps the
-active specialization in memory only and drops it at logout
-(`_activeSpecializations` is erased in `OnPlayerLogout` and never loaded back),
-so there is nothing to write that would survive. The report says which
-specialization the capture was in; the player picks it again at login exactly as
-they would after any logout.
+**The active specialization is restored** as the `character_settings` row the
+realm itself keeps: `core.ascension_active_spec`, read back at login before the
+character's spells are reconciled. With `--coa-data`, a specialization the
+catalogue does not give the class is refused and reported instead.
+
+**The starter kit is not added on top of the restored gear.** At first login
+mod-ascension-compat gives every custom-class character its starter kit once,
+putting starter gear in each empty slot the kit covers plus a hearthstone. For a
+restored character that fills the slots the capture left empty with gear it never
+had, so the importer marks the kit as already given (`core.ascension_starter` =
+`1`, the value the server's own repair writes). Pass `--starter-kit` to let the
+server add it anyway.
 
 ## What it does not restore, and why
 
@@ -309,6 +315,34 @@ If the checkpoint references an item your `item_template` lacks, the item is
 skipped and reported. `--synthesize` instead creates placeholder
 `item_template` rows so the character keeps the item — useful when importing
 from a custom server onto a stock one, but the placeholders are approximations.
+
+### Equipment the character cannot wear yet
+
+AzerothCore re-checks every equipped item when it loads a character, and takes
+off and mails anything that fails. A realm whose items differ from the one the
+character came from will fail some: on the CoA repack, a level-20 capture wore
+two pieces that require levels 22 and 23. On a Conquest of Azeroth realm the
+starter kit then used to fill the gap.
+
+So the importer runs the server's checks first: inventory slot, faction, class
+(read through the realm's custom-class fallbacks, so a Priest item stays on a
+Chronomancer), race, required skill and spell, level, world event, weapon and
+armour proficiency, and reputation. Anything that fails goes into a free backpack
+slot, or the mail if the backpack is full, and the report says what and why:
+
+```
+- Not worn: Sanguine Armor (14372) from the chest slot -- it requires level 23;
+  the character is level 20. The server would take it off at login, so it goes
+  in backpack slot 9 instead; the player can equip it once they qualify.
+- Not worn: Emblazoned Cloak (4715) from the back slot -- it requires level 22;
+  the character is level 20. The server would take it off at login, so it goes
+  in the mail instead; the player can equip it once they qualify.
+```
+
+Dual wield, relic slots and heirloom level caps are not pre-checked, because the
+server works those out from state the character only has once it is in the
+world. The capture's layout is trusted there; if the server disagrees, it mails
+the item, so nothing is lost.
 
 ---
 
