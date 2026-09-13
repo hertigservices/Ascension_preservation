@@ -15,6 +15,11 @@ jobs:
           $env:ASC_RUNTIME_DIR = Join-Path $env:RUNNER_TEMP 'ascension-tests'
           python -B tools/test_world_offline.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the shared non-executing Lua parser for privacy tests
+        run: npm install --prefix tools/cache-upload/shared --no-save --package-lock=false luaparse@0.3.1
       - name: Cache tool regressions
         shell: pwsh
         run: |

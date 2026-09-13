@@ -68,3 +68,6 @@ live-*.png
 
 # Wrangler deployment state is private local tooling state.
 .wrangler/
+
+# Locally installed and CI-only JavaScript dependencies.
+**/node_modules/
