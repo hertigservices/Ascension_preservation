@@ -18,11 +18,12 @@ def describe(value):
     if summary:
         lines=[]
         if value.get('source'):lines.append('Source: '+value['source'])
-        lines += [f"{summary['documents']:,} preserved file versions · {summary['containers']:,} archives",
-                  f"{summary['record_occurrences']:,} record occurrences · {summary['parsed']:,} parsed files",
+        lines += [f"{summary['documents']:,} preserved file versions Â· {summary['containers']:,} archives",
+                  f"{summary['record_occurrences']:,} record occurrences Â· {summary['parsed']:,} parsed files",
                   f"{summary['stored_bytes']/1024**2:,.1f} MiB stored across the archive"]
         if summary['held']:lines.append(f"{summary['held']:,} files retained for review or a future reader.")
         else:lines.append('All listed files have been read successfully.')
+        for example in value.get('examples',[]):lines.append('Example: '+str(example.get('id') or 'row')+' — '+example['name'])
         for failure in value.get('copy_failures',[]):lines.append('Could not finish preserving '+Path(failure['file']).name+': '+failure['reason'])
         for held in value.get('needs_attention',[]):lines.append('Retained for review: '+str(held.get('detail') or held['status']))
         if value.get('public_export'):lines.append('Approved public records prepared in the export staging folder.')
@@ -84,7 +85,7 @@ class App:
         def work():
             result=[]
             for path in paths:
-                self.messages.put(('progress','Preserving '+Path(path).name+' …'))
+                self.messages.put(('progress','Preserving '+Path(path).name+' â€¦'))
                 with intake.Intake(self.root) as engine: result.append(engine.ingest(path,source))
             return result
         self.run(work)

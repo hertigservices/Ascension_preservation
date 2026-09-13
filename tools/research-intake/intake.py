@@ -17,6 +17,7 @@ import time
 import uuid
 import zipfile
 import readers
+import privacy
 
 CHUNK = 1024 * 1024
 DEFAULT_ROOT = Path(os.environ.get('LOCALAPPDATA',str(Path.home()))) / 'AscensionPreservation' / 'research-intake'
@@ -112,7 +113,9 @@ class Intake:
         if not re.fullmatch('[a-z0-9][a-z0-9-]{0,63}',source): raise ValueError('Source ID must be lowercase letters, digits and hyphens (max 64)')
         existing=self.db.execute('SELECT metadata FROM sources WHERE id=?',(source,)).fetchone()
         if existing and metadata is None: return json.loads(existing[0])
-        meta=metadata or {'title':source,'mode':'Unspecified','captured_at':None,'permission':'private; publication not granted'}
+        meta=metadata or {'title':source,'mode':'Unspecified','captured_at':None,'permission':'private; publication not granted','lane':'private','kind':'ad-hoc','trust':'unknown','known_caps':{}}
+        if meta.get('lane','private') not in ('private','public'): raise ValueError('Source lane must be private or public')
+        if not meta.get('title') or not meta.get('permission'): raise ValueError('Source metadata needs title and permission')
         self.db.execute('INSERT INTO sources VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET metadata=excluded.metadata',(source,readers.json_text(meta),now())); self.db.commit()
         return meta
     def preserve(self,f,expected=None,expanded=False):
@@ -254,13 +257,25 @@ class Intake:
         held=self.db.execute("SELECT count(DISTINCT d.id) FROM documents d JOIN receipts r ON r.document=d.id WHERE r.source=? AND d.status NOT IN ('parsed','container')",(source,)).fetchone()[0]
         status='needs-review' if failures or held else 'preserved'
         self.db.execute('UPDATE runs SET finished=?,status=?,detail=? WHERE id=?',(now(),status,readers.json_text(failures),run)); self.db.commit()
-        report={'run':run,'source':source,'status':status,'copy_failures':failures,'summary':self.summary(source)}
+        report={'run':run,'source':source,'status':status,'copy_failures':failures,'summary':self.summary(source),'examples':self.examples(source),'incorporation':{'received':'L0: originals hashed locally','read':'L1: parsed files only; holds remain explicit','published':'not established by this run'}}
         atomic_json(self.root/'reports'/(run+'.json'),report)
         return report
     def summary(self,source=None):
         clause=' WHERE r.source=?' if source else ''; args=(source,) if source else ()
         rows=self.db.execute('SELECT DISTINCT d.* FROM documents d JOIN receipts r ON r.document=d.id'+clause,args).fetchall()
         return {'documents':len(rows),'parsed':sum(r['status']=='parsed' for r in rows),'containers':sum(r['status']=='container' for r in rows),'held':sum(r['status'] not in ('parsed','container') for r in rows),'record_occurrences':sum(r['rows'] for r in rows),'unique_record_payloads':self.db.execute('SELECT count(*) FROM records').fetchone()[0],'stored_bytes':self.db.execute('SELECT coalesce(sum(bytes),0) FROM artifacts').fetchone()[0]}
+    def examples(self,source,limit=5):
+        result=[];seen=set()
+        rows=self.db.execute('SELECT r.locator,o.ordinal,x.collection,x.payload FROM receipts r JOIN occurrences o ON o.document=r.document JOIN records x ON x.hash=o.record WHERE r.source=? ORDER BY r.document,o.ordinal LIMIT 5000',(source,))
+        for row in rows:
+            value=json.loads(row['payload'])
+            if not isinstance(value,dict):continue
+            name=next((str(value[k]) for k in ('name','Name','title','Title','text','label','npcName','spellName') if value.get(k)),None)
+            if not name or name in seen:continue
+            seen.add(name)
+            result.append({'collection':row['collection'],'id':value.get('id',value.get('entry')),'name':name[:200],'locator':row['locator'],'ordinal':row['ordinal']})
+            if len(result)>=limit:break
+        return result
     def query(self,value,field=None,limit=100):
         args=[str(value)]; predicate='l.value=?'
         if field: predicate+=' AND l.field=?'; args.append(field)
@@ -285,6 +300,8 @@ def screen(value):
 
 def export(intake,source,policy_path,out):
     """Prepare immutable, reviewed-field data, never raw objects or auto-push."""
+    identity_guard=privacy.configured(intake.root)
+    source_meta=intake.source(source)
     policy=json.loads(Path(policy_path).read_text(encoding='utf-8-sig'))
     if policy.get('source')!=source or policy.get('publication')!='approved' or not policy.get('permission'):
         raise ValueError('Policy needs this source, publication=approved and recorded permission')
@@ -297,14 +314,14 @@ def export(intake,source,policy_path,out):
     screen([title,mode,policy['permission']])
     documents=[dict(r) for r in intake.db.execute('SELECT DISTINCT d.id,d.hash,d.format_name,d.status,d.rows FROM documents d JOIN receipts r ON r.document=d.id WHERE r.source=? ORDER BY d.id',(source,))]
     if not documents: raise ValueError('Source has no preserved inputs')
-    snapshot=digest(encoded({'policy':policy,'documents':documents,'reader':readers.VERSION}))
+    snapshot=digest(encoded({'policy':policy,'documents':documents,'reader':readers.VERSION,'source_trust':source_meta.get('trust','unknown'),'known_caps':source_meta.get('known_caps',{}),'identity_rules':identity_guard.revision if identity_guard else None}))
     base=Path(out).resolve()
     if base==intake.root or base in intake.root.parents or intake.root in base.parents: raise ValueError('Public output must be separate from private storage')
     for parent in [base,*base.parents]:
         if (parent/'.git').exists(): raise ValueError('Prepare exports outside Git; publish.py delivers a verified snapshot to a dedicated worktree')
     final=base/'supplemental'/'research-intake'/source/snapshot
     if final.exists():
-        verify_export(final); return final
+        verify_export(final,identity_guard); return final
     final.parent.mkdir(parents=True,exist_ok=True)
     stage=Path(tempfile.mkdtemp(prefix='.preparing-',dir=intake.root/'exports'))
     counts={}; excluded={}; hashes=[]; public_count=0; file=None; z=None; size=0; part=0; current=None
@@ -325,9 +342,10 @@ def export(intake,source,policy_path,out):
                 screen(selected)
                 key=str(selected.get('id',selected.get('entry','evidence:'+row['hash'])))
                 name=str(selected.get('name',selected.get('title',rule['kind']+' #'+key)))
-                item={'schema':'ascension-research-evidence-1','type':rule['kind'],'record':dict(selected,id=key,name=name),'_modes':mode,'source':title,'evidence':{'artifact_sha256':doc['hash'],'document':doc['id'],'ordinal':row['ordinal'],'original_record_sha256':row['hash'],'reader':readers.VERSION,'source_id':source,'captured_at':policy.get('captured_at'),'interpretation':'source claim; not verified server data','omitted_fields':sorted(set(raw)-set(rule['fields'].values()))}}
+                item={'schema':'ascension-research-evidence-1','type':rule['kind'],'record':dict(selected,id=key,name=name),'_modes':mode,'source':title,'evidence':{'artifact_sha256':doc['hash'],'document':doc['id'],'ordinal':row['ordinal'],'original_record_sha256':row['hash'],'reader':readers.VERSION,'source_id':source,'captured_at':policy.get('captured_at'),'interpretation':'source claim; not verified server data','trust':rule.get('trust',source_meta.get('trust','unknown')),'known_caps':rule.get('known_caps',source_meta.get('known_caps',{})),'observation_type':rule.get('observation_type','unknown'),'omitted_fields':sorted(set(raw)-set(rule['fields'].values()))}}
                 # Omitted key names themselves may reveal identities (dynamic account keys).
                 item['evidence']['omitted_fields_count']=len(item['evidence'].pop('omitted_fields'))
+                if identity_guard: identity_guard.check(item)
                 data=encoded(item)+b'\n'
                 if len(data)>readers.MAX_RECORD: raise ValueError('Public record too large')
                 kind=rule['kind']
@@ -343,20 +361,24 @@ def export(intake,source,policy_path,out):
             hashes.append({'path':path.name,'sha256':sha,'bytes':path.stat().st_size})
         if sum(x['bytes'] for x in hashes)>policy.get('max_compressed_bytes',128*CHUNK): raise ValueError('Public byte budget reached; narrow the policy or explicitly raise its limit')
         manifest={'schema':1,'source':source,'title':title,'snapshot':snapshot,'policy_sha256':digest(encoded(policy)),'permission':policy['permission'],'reader':readers.VERSION,'mode':mode,'public_records':public_count,'counts':counts,'unselected_collections':excluded,'artifacts':[{'sha256':d['hash'],'status':d['status'],'records':d['rows']} for d in documents],'files':hashes,'raw_storage':'Private originals retained locally; not included in public export','limits':'Observations and inferred relationships are not verified spawn, loot or vendor tables'}
+        manifest['identity_scan']='required-and-passed' if identity_guard else 'not-configured'
+        if identity_guard: identity_guard.check(manifest)
         screen(manifest)
         atomic_json(stage/'manifest.json',manifest)
-        verify_export(stage)
+        verify_export(stage,identity_guard)
         # Cross-volume safe: copy to an opaque sibling, validate, then rename.
         pending=final.with_name('.preparing-'+uuid.uuid4().hex)
-        shutil.copytree(stage,pending); verify_export(pending); os.replace(pending,final)
+        shutil.copytree(stage,pending); verify_export(pending,identity_guard); os.replace(pending,final)
         return final
     finally:
         close()
         if stage.resolve().is_relative_to(intake.root/'exports'): shutil.rmtree(stage)
 
 
-def verify_export(path):
+def verify_export(path,identity_guard=None):
     path=Path(path); manifest=json.loads((path/'manifest.json').read_text(encoding='utf-8')); count=0
+    if manifest.get('identity_scan')=='required-and-passed' and identity_guard is None: raise ValueError('This export requires the private identity scan; pass the configured intake root')
+    if identity_guard: identity_guard.check(manifest)
     expected={'manifest.json'}
     screen(manifest)
     for item in manifest['files']:
@@ -367,6 +389,7 @@ def verify_export(path):
         with gzip.open(p,'rt',encoding='utf-8') as f:
             for line in readers.bounded_lines(f):
                 value=readers.json_load(line); screen(value); count+=1
+                if identity_guard: identity_guard.check(value)
     if count!=manifest['public_records'] or {p.name for p in path.iterdir()}!=expected: raise ValueError('Export accounting mismatch')
     return manifest
 
@@ -378,11 +401,12 @@ def main():
     p=sub.add_parser('ingest'); p.add_argument('path',type=Path); p.add_argument('--source',default='unspecified'); p.add_argument('--reprocess',action='store_true')
     p.add_argument('--expanded-gib',type=float,default=32); p.add_argument('--reserve-gib',type=float,default=5); p.add_argument('--seconds',type=int,default=3600); p.add_argument('--max-records',type=int,default=10000000)
     sub.add_parser('status')
+    p=sub.add_parser('register');p.add_argument('--source',required=True);p.add_argument('--metadata',type=Path,required=True)
     p=sub.add_parser('find'); p.add_argument('value'); p.add_argument('--field'); p.add_argument('--limit',type=int,default=100)
     p=sub.add_parser('export'); p.add_argument('--source',required=True); p.add_argument('--policy',type=Path,required=True); p.add_argument('--out',type=Path,required=True)
     p=sub.add_parser('verify'); p.add_argument('path',type=Path)
     a=ap.parse_args()
-    if a.command=='verify': print(readers.json_text(verify_export(a.path))); return
+    if a.command=='verify': print(readers.json_text(verify_export(a.path,privacy.configured(a.root)))); return
     limits={}
     if a.command=='ingest':
         if min(a.expanded_gib,a.seconds,a.max_records)<=0 or a.reserve_gib<0: ap.error('Budgets must be positive')
@@ -390,6 +414,7 @@ def main():
     with Intake(a.root,**limits) as intake:
         if a.command=='ingest': result=intake.ingest(a.path,a.source,a.reprocess)
         elif a.command=='status': result=intake.summary()
+        elif a.command=='register': intake.source(a.source,json.loads(a.metadata.read_text(encoding='utf-8-sig')));result={'source':a.source,'status':'registered privately'}
         elif a.command=='find': result=intake.query(a.value,a.field,a.limit)
         else: result={'export':str(export(intake,a.source,a.policy,a.out)),'status':'prepared; not pushed'}
         print(json.dumps(result,ensure_ascii=False,indent=2))

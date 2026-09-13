@@ -62,7 +62,9 @@ comma-decimal strings are retained.
 JSONL, SQL COPY and tabular files stream. A MySQL extended INSERT exceeding 8 MiB
 on one line, non-UTF-8 text, dialect extensions and giant nested JSON objects need a
 specialized reader. An explicit hold is preferable to silently truncating them.
-SQLite must be a consistent backup; a live database with WAL state is not a backup.
+SQLite must be a consistent single-file backup in DELETE journal mode. WAL-mode
+files and sidecars are preserved but held, so missing WAL records cannot silently
+produce an incomplete catalog.
 Archive links, unsafe paths, encryption and resource limits hold the container.
 Previously parsed safe members remain separately accounted for.
 
@@ -114,7 +116,7 @@ does not pretend that the input folder changed).
 
 ```powershell
 python -B intake.py --root D:/AscensionResearch export --source coa-scrape --policy D:/AscensionResearch/policies/coa-scrape.json --out D:/ResearchPublicStaging
-python -B intake.py verify D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT
+python -B intake.py --root D:/AscensionResearch verify D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT
 ```
 
 Every export has deterministic, hashed compressed shards, source metadata, original
@@ -130,10 +132,10 @@ remote advance can require reconciling the dedicated branch before retrying; the
 snapshot remains intact.
 
 ```powershell
-python -B publish.py --checkout D:/research-data-publication --initialize-checkout
-python -B publish.py --checkout D:/research-data-publication --snapshot D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT
+python -B publish.py --root D:/AscensionResearch --checkout D:/research-data-publication --initialize-checkout
+python -B publish.py --root D:/AscensionResearch --checkout D:/research-data-publication --snapshot D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT
 # After reviewing the prepared result / granting standing publication authorization:
-python -B publish.py --checkout D:/research-data-publication --snapshot D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT --push
+python -B publish.py --root D:/AscensionResearch --checkout D:/research-data-publication --snapshot D:/ResearchPublicStaging/supplemental/research-intake/coa-scrape/SNAPSHOT --push
 ```
 
 The accompanying AscensionDB adapter displays each row's declared collection and
@@ -156,3 +158,31 @@ opt-in >2 GiB structured-file benchmark that cleans up its synthetic inputs.
 to plan/apply/verify source deployment; keep state and policies outside the installed
 tool directory. There is no realm restart, service change or public upload-service
 change in this deployment.
+
+
+## Source trust, named evidence and anonymity
+
+`register --source <id> --metadata <private-source.json>` records a source's title,
+permission, lane, capture mode/date, frozen/ad-hoc kind, trust and known caps in the
+private catalog. Public rules may specify `trust`, `known_caps` and
+`observation_type` for each collection; defaults stay unknown. Scraped or aggregated
+loot remains explicitly a claim. Future server-gap tooling can consume these fields
+without treating every ingested record as authoritative.
+
+Every ingestion report distinguishes local receipt (L0), parsing (L1) and public
+publication (not established by ingestion), and includes up to five readable named
+examples when available. Empty localisation strings are preserved; row counts do
+not claim that every row contains a translation. This implements the preservation
+part of Claude's 2026-09-12 handoff; its server snapshots, SQL packages, realm tests,
+PRs, history cleanup and backup proposals remain separate work.
+
+For sources requiring anonymity, configure a private `publication-config.json`
+under the intake root with `identity_patterns_file` pointing to an external UTF-8
+file containing one regular expression per line (`#` comments ignored). Patterns
+and matching identities are never logged or copied into source, exports or test
+fixtures. An invalid, missing or empty required file blocks publication. The
+maintainer installation is configured to use its existing private pattern file.
+Generic installations without this configuration report `identity_scan:
+not-configured`; this is not a clean anonymity verdict. `verify` and `publish.py`
+must receive the same `--root` for exports requiring this scan. Identity rules,
+source trust and policy revisions participate in snapshot identity.
