@@ -131,6 +131,16 @@ TEXT_PATCHES = [
     ("FrameXML/Util/MysticEnchantManagerUtil.lua",
      "\tif not issecure() then\n\t\treturn C_Logger.Error(\"Tried to write %s.wtf from insecure code!\", saveFile)\n\tend\n",
      "\t-- stock-client port: this file loads as addon code, so the issecure() guard is removed here\n"),
+    # On Ascension.exe this file has already run from the client's own SharedXML. Re-running the
+    # alias against the shared metatable points InternalSetCooldown at the Lua wrapper itself, and
+    # every SetCooldown recurses into "Cooldown.lua:34: stack overflow". The stock client has no
+    # built-in copy, so the field is nil there and the file runs as before.
+    ("SharedXML/TypeExtensions/Cooldown.lua",
+     "Cooldown.InternalSetCooldown = Cooldown.SetCooldown\n",
+     "-- pack: the genuine Ascension client already installed this extension from its own SharedXML\n"
+     "if Cooldown.InternalSetCooldown then return end\n"
+     "\n"
+     "Cooldown.InternalSetCooldown = Cooldown.SetCooldown\n"),
 ]
 HERE = os.path.dirname(os.path.abspath(__file__))
 GLUE = os.path.join(HERE, "..", "client", "Interface", "AddOns", "!AscensionShim", "compat", "zz_StockShim.lua")

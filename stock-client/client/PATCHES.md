@@ -25,3 +25,21 @@ preset save was refused with that message. The write itself goes through the shi
 `WriteCustomWTF`, which keeps the text in `AscensionShimDB.customWTF` (saved variables) because
 stock Lua cannot touch `WTF\*.wtf` files. The assembler aborts if the guard text is not found exactly
 once, so an upstream change to that function surfaces instead of silently shipping unpatched.
+
+## 2026-09-12: a load guard in a copied SharedXML file, applied at assembly time
+
+`SharedXML/TypeExtensions/Cooldown.lua` (loaded through `TypeExtensions/Region.xml`): `TEXT_PATCHES`
+inserts `if Cooldown.InternalSetCooldown then return end` before
+`Cooldown.InternalSetCooldown = Cooldown.SetCooldown`.
+
+The pack is also installed into the genuine Ascension client, where this file has already run from the
+client's own SharedXML before any addon loads. The copy in the pack then re-ran the alias against the
+shared Cooldown metatable, whose `SetCooldown` was by then Ascension's Lua wrapper, so
+`InternalSetCooldown` became the wrapper itself and every `SetCooldown` recursed until
+`SharedXML\TypeExtensions\Cooldown.lua:34: stack overflow`. Measured on 2026-09-12 (Ascension.exe on the
+coa-contrib realm): the error frame filled with repeats of it at login, the UI lagged until it was
+unplayable, and the character sheet's slot updates aborted part-way (red slot icons, Item Level 0.00).
+The stock 3.3.5a client has no built-in copy, the field is nil on first load, and the file runs exactly
+as before. The other TypeExtensions were checked for the same pattern: only `Cooldown.lua` stores an
+original in a field it later calls through `self:`. `Texture.SetColorTexture = Texture.SetTexture`
+aliases a C method and is harmless when run twice.
