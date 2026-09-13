@@ -61,6 +61,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('Test research',manifest['sources'])
         record_file=next(v for v in manifest['files'].values() if '/research-intake/' in v.get('path',''))
         self.assertEqual(record_file['records'],1)
+        baseline_packs=self.root/'baseline-downloads'/'packs';baseline_packs.mkdir(parents=True)
+        for pack in Path(result['package_dir']).glob('pack-*.tar'):shutil.copyfile(pack,baseline_packs/pack.name)
+        with intake.Intake(self.root,reserve=0) as e:
+            report=baseline.index(e,worktree)
+            self.assertEqual(report['indexed_occurrences'],1)
+            self.assertEqual(baseline.compare(e,'test')['exact_payloads_already_published'],1)
+
     def test_public_budget_and_private_raw_never_delivered(self):
         p=self.donor/'rows.json';p.write_text('[{"id":1},{"id":2}]')
         policy=self.base/'policy.json';policy.write_text(json.dumps({'source':'test','publication':'approved','permission':'Fixture','max_records':1,'collections':{'records':{'kind':'npc','fields':{'id':'id'}}}}))

@@ -66,6 +66,7 @@ class Segment(io.RawIOBase):
 
 def prepare(root, output, dataset, repository='hertigservices/ascension-data', prefix='', previous=None):
     root=Path(root).resolve();output=Path(output).resolve()
+    if (root/'.git').exists():raise ValueError('Pass an audited export directory, not an entire Git checkout')
     if output.is_relative_to(root): raise ValueError('Package staging must be outside the input tree')
     if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repository): raise ValueError('Invalid repository')
     if prefix: safe_path(prefix)
