@@ -32,3 +32,37 @@ class Gateway:
         if IfMatch:headers['If-Match']=IfMatch
         if IfNoneMatch:headers['If-None-Match']=IfNoneMatch
         with self.request('PUT',Key,Body,headers) as r:return json.load(r)
+
+    def upload_files(self,bucket,root,prefix,files,workers=4):
+        import hashlib,mimetypes,uuid
+        from concurrent.futures import ThreadPoolExecutor
+        groups=[];group=[];size=0
+        for name,e in files.items():
+            if group and (len(group)==8 or size+e['bytes']>4*1024*1024):groups.append(group);group=[];size=0
+            group.append((name,e));size+=e['bytes']
+        if group:groups.append(group)
+        def upload(group):
+            if len(group)==1 and group[0][1]['bytes']>4*1024*1024:
+                name,e=group[0];path=Path(root)/name
+                with path.open('rb') as source:actual=hashlib.file_digest(source,'sha256').hexdigest()
+                if path.stat().st_size!=e['bytes'] or actual!=e['sha256']:raise ValueError('Publication input changed')
+                with path.open('rb') as f:
+                    try:self.put_object(Bucket=bucket,Key=prefix+name,Body=f,ContentLength=e['bytes'],Metadata={'sha256':e['sha256']},IfNoneMatch='*',ContentType=mimetypes.guess_type(name)[0] or 'application/octet-stream')
+                    except RemoteError as err:
+                        if err.response['Error']['Code']!='412':raise
+                        existing=self.head_object(Bucket=bucket,Key=prefix+name)
+                        if existing['ContentLength']!=e['bytes'] or existing['Metadata']['sha256']!=e['sha256']:raise ValueError('Immutable object differs')
+                return
+            boundary='Ascension'+uuid.uuid4().hex;body=io.BytesIO();meta=[]
+            def field(name,value,filename=None):
+                body.write(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+name+'"'+('; filename="'+filename+'"' if filename else '')+'\r\n\r\n').encode());body.write(value);body.write(b'\r\n')
+            for i,(name,e) in enumerate(group):
+                data=(Path(root)/name).read_bytes()
+                if len(data)!=e['bytes'] or hashlib.sha256(data).hexdigest()!=e['sha256']:raise ValueError('Publication input changed')
+                field('file'+str(i),data,'object');meta.append({'key':prefix+name,**e,'contentType':'application/gzip' if name.endswith('.gz') else mimetypes.guess_type(name)[0] or 'application/octet-stream'})
+            field('metadata',json.dumps(meta).encode());body.write(('--'+boundary+'--\r\n').encode());payload=body.getvalue()
+            with self.request('POST','batch',payload,{'Content-Type':'multipart/form-data; boundary='+boundary,'Content-Length':str(len(payload))}) as r:verified=json.load(r)
+            if verified!=[{k:e[k] for k in ('key','sha256','bytes')} for e in meta]:raise ValueError('Batch verification differs')
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for i,_ in enumerate(pool.map(upload,groups),1):
+                if i%100==0 or i==len(groups):print(f'Uploaded/verified batches: {i}/{len(groups)}',flush=True)

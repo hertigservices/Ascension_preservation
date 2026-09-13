@@ -90,7 +90,9 @@ python tools/data-storage/r2_publish.py --input CatalogStaging --report StorageR
 No token is committed. The Worker has its own PUBLISH_TOKEN secret. The uploader
 supports this narrow HTTPS gateway (64 MiB/object) or the S3 API using boto3 and
 private AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY plus ASCENSION_R2_ENDPOINT. The
-existing build caps generated catalog objects below the gateway limit. Inventory
+existing build caps generated catalog objects below the gateway limit. Catalog
+uploads use batches of at most eight objects / 4 MiB, reducing Worker request
+overhead; large individual files use the single-object path. Inventory
 and full catalog validation happen before uploading; upload workers are bounded.
 
 `.github/workflows/ascension-db-r2.yml` is the reusable R2 workflow. Its caller must

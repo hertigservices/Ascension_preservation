@@ -17,6 +17,29 @@ export default {
       if (!await authorized(request,env))return new Response('Unauthorized',{status:401});
       key=key.slice(9);
     }
+    if (admin && key==='batch' && request.method==='POST') {
+      const size=Number(request.headers.get('Content-Length'));
+      if(!Number.isSafeInteger(size)||size<=0||size>5*1024*1024)return new Response('Invalid batch size',{status:400});
+      const form=await request.formData();let entries;
+      try{entries=JSON.parse(String(form.get('metadata')));}catch{return new Response('Invalid batch',{status:400});}
+      if(!Array.isArray(entries)||!entries.length||entries.length>8)return new Response('Invalid batch',{status:400});
+      // Validate the whole envelope before writing any member.
+      for(let i=0;i<entries.length;i++) {
+        const e=entries[i],file=form.get('file'+i);
+        if(!valid(e.key)||e.key.endsWith('/current.json')||!Number.isSafeInteger(e.bytes)||e.bytes<0||!file||file.size!==e.bytes||!/^[0-9a-f]{64}$/.test(e.sha256))return new Response('Invalid member',{status:400});
+      }
+      const result=[];
+      for(let i=0;i<entries.length;i++) {
+        const e=entries[i];
+        let object=await env.PUBLIC_DATA.put(e.key,await form.get('file'+i).arrayBuffer(),{sha256:e.sha256,onlyIf:new Headers({'If-None-Match':'*'}),httpMetadata:{contentType:e.contentType||'application/octet-stream',cacheControl:'public,max-age=31536000,immutable'},customMetadata:{sha256:e.sha256}});
+        if(!object) {
+          object=await env.PUBLIC_DATA.head(e.key);
+          if(!object||object.size!==e.bytes||object.customMetadata?.sha256!==e.sha256)return new Response('Immutable object differs',{status:409});
+        }
+        result.push({key:e.key,sha256:e.sha256,bytes:e.bytes});
+      }
+      return Response.json(result);
+    }
     const headers=admin?{'X-Content-Type-Options':'nosniff'}:publicHeaders;
     if (!(valid(key) || (!admin && safe(key) && /^images\/.+\.(png|jpe?g|webp|gif|avif|svg)$/i.test(key))))return new Response('Not found',{status:404,headers});
     if (admin && request.method==='PUT') {

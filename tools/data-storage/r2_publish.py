@@ -58,8 +58,10 @@ def publish(client,bucket,root,report,channel='catalog',workers=4):
             client.put_object(Bucket=bucket,Key=key,Body=f,ContentLength=meta['bytes'],ContentMD5=base64.b64encode(md5.digest()).decode(),ContentType=content_type,CacheControl='public,max-age=31536000,immutable',Metadata={'sha256':meta['sha256']},IfNoneMatch='*')
         checked=client.head_object(Bucket=bucket,Key=key)
         if checked['ContentLength']!=meta['bytes'] or checked.get('Metadata',{}).get('sha256')!=meta['sha256']:raise ValueError('Remote object verification failed')
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for _ in pool.map(put,report['files'].items()):pass
+    if hasattr(client,'upload_files'):client.upload_files(bucket,root,prefix,report['files'],workers)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for _ in pool.map(put,report['files'].items()):pass
     payload=canonical(report)
     try:
         client.put_object(Bucket=bucket,Key=prefix+'storage-manifest.json',Body=payload,ContentType='application/json',IfNoneMatch='*')
