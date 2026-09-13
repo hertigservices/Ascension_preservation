@@ -22,7 +22,7 @@ jobs:
   publish:
     if: github.repository == 'hertigservices/ascension-data'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +45,7 @@ jobs:
           restore-keys: |
             ascension-r2-${{ inputs.source_ref }}-
             ascension-r2-
+            ascension-db-
       - name: Test storage and catalog rules
         run: |
           python -B -m unittest discover -s source/tools/data-storage -v
