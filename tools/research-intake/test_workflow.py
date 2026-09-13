@@ -48,6 +48,10 @@ class WorkflowTests(unittest.TestCase):
         result=publish.deliver(snapshot,worktree);self.assertFalse(result['pushed']);self.assertEqual(self.git(worktree,'status','--porcelain'),'')
         self.assertEqual(publish.deliver(snapshot,worktree)['commit'],result['commit'])
         browser=Path(__file__).resolve().parent.parent/'ascension-db';dist=self.base/'site'
+        pack_cache=self.base/'cache'/'download-packs';pack_cache.mkdir(parents=True)
+        for pack in Path(result['package_dir']).glob('pack-*.tar'):shutil.copyfile(pack,pack_cache/pack.name)
+        self.assertFalse((worktree/'supplemental').exists())
+        self.assertEqual(len(list((worktree/'datasets').glob('*.json'))),1)
         r=subprocess.run([sys.executable,'-B',str(browser/'build.py'),'--data',str(worktree),'--out',str(dist),'--cache',str(self.base/'cache')],cwd=browser,capture_output=True,text=True)
         self.assertEqual(r.returncode,0,r.stderr+'\n'+r.stdout[-2000:])
         r=subprocess.run([sys.executable,'-B',str(browser/'validate.py'),str(dist)],cwd=browser,capture_output=True,text=True)

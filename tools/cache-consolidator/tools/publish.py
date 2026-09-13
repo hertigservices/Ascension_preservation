@@ -495,8 +495,12 @@ def _publish(push):
     # maintainer's half-finished file reads as "there is something to commit",
     # and the commit that follows either sweeps it in or fails outright with
     # nothing staged.
-    ours = ["cachedata"] + copied
-    status = status_paths("--", *ours)
+    import release_storage
+    release_mode=release_storage.enabled(REPO)
+    if release_mode:
+        release_storage.deliver(REPO,DATA,os.path.join(config.WORK,'release-packages','cache'),push)
+    ours = ([] if release_mode else ["cachedata"]) + copied
+    status = status_paths("--", *ours) if ours else []
     if not status:
         # "Nothing to commit" is not "nothing to push". A run that committed and
         # then failed to push -- dropped network, timeout, an interrupted run --
@@ -511,7 +515,7 @@ def _publish(push):
         # sync_data mirrors it including deletions. tools/ is shared with a
         # human editing the same checkout, so only the files sync_tools just
         # copied are ours to commit.
-        git("add", "-A", "cachedata")
+        if not release_mode:git("add", "-A", "cachedata")
         for rel in copied:
             git("add", "--", rel)
         msg = ("Consolidate submissions and republish\n\n"

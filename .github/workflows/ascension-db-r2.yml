@@ -1,0 +1,57 @@
+name: Publish Ascension database to R2
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+    secrets:
+      ASCENSION_PUBLICATION_TOKEN:
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ascension-database-r2
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'hertigservices/ascension-data'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: data
+      - uses: actions/checkout@v4
+        with:
+          repository: hertigservices/Ascension_preservation
+          ref: ${{ inputs.source_ref }}
+          path: source
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: source/tools/ascension-db/.build-cache
+          key: ascension-r2-${{ inputs.source_ref }}-${{ github.sha }}
+          restore-keys: |
+            ascension-r2-${{ inputs.source_ref }}-
+            ascension-r2-
+      - name: Test storage and catalog rules
+        run: |
+          python -B -m unittest discover -s source/tools/data-storage -v
+          python -B -m unittest discover -s source/tools/ascension-db -p 'test_*.py' -v
+      - name: Build complete catalog
+        run: python -u source/tools/ascension-db/build.py --data data --out public --hosting r2
+      - name: Verify, upload, and promote complete catalog
+        env:
+          ASCENSION_PUBLICATION_URL: https://ascension-public-data.ascension-archive.workers.dev
+          ASCENSION_PUBLICATION_TOKEN: ${{ secrets.ASCENSION_PUBLICATION_TOKEN }}
+        run: python -u source/tools/data-storage/r2_publish.py --input public --report catalog-storage-report.json --upload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-report
+          retention-days: 3
+          path: |
+            public/build-report.json
+            catalog-storage-report.json

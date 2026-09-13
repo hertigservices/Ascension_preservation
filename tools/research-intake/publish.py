@@ -7,6 +7,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import intake
+import sys
+# Source and installed deployments both place dataset.py in this lookup path.
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'data-storage'))
+import dataset
 
 
 def git(repo,*args):
@@ -28,18 +32,19 @@ def deliver(snapshot,checkout,push=False,branch='main',identity_guard=None):
         if push:
             git(checkout,'fetch','origin',branch)
             git(checkout,'merge','--ff-only','origin/'+branch)
-        rel=Path('supplemental/research-intake')/manifest['source']/manifest['snapshot']
+        prefix='supplemental/research-intake/'+manifest['source']+'/'+manifest['snapshot']
+        staging=gd/'research-packages'/manifest['snapshot']
+        package=dataset.prepare(snapshot,staging,'research-'+manifest['source'],prefix=prefix)
+        # Publish and verify bulk assets before a Git commit can advertise them remotely.
+        if push:dataset.publish(staging)
+        rel=Path('datasets')/('research-'+manifest['source']+'-'+manifest['snapshot']+'.json')
         target=checkout/rel
         if target.exists():
-            current=intake.verify_export(target,identity_guard)
-            if current!=manifest:raise ValueError('Existing snapshot differs')
+            if json.loads(target.read_text(encoding='utf-8'))!=package:raise ValueError('Existing dataset manifest differs')
         else:
-            pending=target.with_name('.preparing-'+manifest['snapshot'])
-            if pending.exists():raise ValueError('Interrupted publication staging exists; inspect it before retrying')
-            pending.parent.mkdir(parents=True,exist_ok=True);shutil.copytree(snapshot,pending)
-            intake.verify_export(pending,identity_guard);pending.rename(target)
+            intake.atomic_json(target,package)
             git(checkout,'add','--',rel.as_posix())
-            git(checkout,'commit','-m','Add preserved research evidence: '+manifest['source'])
+            git(checkout,'commit','-m','Catalog preserved research evidence: '+manifest['source'])
         commit=git(checkout,'rev-parse','HEAD')
         if push:
             # Non-fast-forward rejects safely if the cache publisher won the race.
@@ -47,7 +52,7 @@ def deliver(snapshot,checkout,push=False,branch='main',identity_guard=None):
             git(checkout,'push','origin','HEAD:refs/heads/'+branch)
             remote=git(checkout,'ls-remote','origin','refs/heads/'+branch).split()[0]
             if remote!=commit:raise RuntimeError('Remote advanced before receipt verification; publication status requires a fresh ancestry check')
-        return {'commit':commit,'snapshot':manifest['snapshot'],'records':manifest['public_records'],'pushed':push,'path':str(target)}
+        return {'commit':commit,'snapshot':manifest['snapshot'],'records':manifest['public_records'],'pushed':push,'path':str(target),'package_dir':str(staging),'storage':'github-releases'}
 
 
 def main():

@@ -41,6 +41,10 @@
     {
       "source": "tools/research-intake/privacy.py",
       "destination": "tools/privacy.py"
+    },
+    {
+      "source": "tools/data-storage/dataset.py",
+      "destination": "data-storage/dataset.py"
     }
   ]
 }

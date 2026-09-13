@@ -65,6 +65,17 @@ class PublishOwnershipTests(unittest.TestCase):
         self.assertEqual(self.git('status', '--porcelain'), '?? docs/')
         self.assertEqual(self.git('ls-files', 'docs'), '')
 
+    def test_release_mode_commits_only_manifest_after_audit(self):
+        import json
+        self.git('rm','--cached','cachedata/data.txt')
+        (self.repo/'.gitignore').write_text('cachedata/\n')
+        (self.repo/'.ascension-storage.json').write_text(json.dumps({'cache':'github-releases'}))
+        self.git('add','.gitignore','.ascension-storage.json');self.git('commit','-qm','fixture migration')
+        (self.repo/'cachedata/data.txt').write_text('after audit')
+        self.assertTrue(publish._publish(False));self.audit.assert_called_once()
+        self.assertEqual(self.git('show','--format=','--name-only','HEAD'),'datasets/cache.json')
+        self.assertEqual(self.git('ls-files','cachedata'),'')
+
     def test_tracked_edit_stops_before_consolidating(self):
         (self.repo / 'README.md').write_text('my unfinished edit\n')
         self.assertFalse(publish._publish(True))

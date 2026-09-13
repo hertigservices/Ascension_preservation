@@ -8,6 +8,9 @@ import json
 from pathlib import Path
 import subprocess
 import intake
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'data-storage'))
+import dataset
 import readers
 
 
@@ -20,9 +23,19 @@ def index(engine,data):
     CREATE TABLE IF NOT EXISTS baseline_files(path TEXT PRIMARY KEY,blob TEXT NOT NULL,rows INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS baseline_meta(revision TEXT NOT NULL);''')
     count=0;reused=0;held=[];present=[]
+    files={}
     for entry in run('ls-tree','-rz','HEAD').split(b'\0'):
         if not entry:continue
-        meta,path=entry.split(b'\t',1);path=path.decode('utf-8');blob=meta.split()[2].decode();present.append(path)
+        meta,path=entry.split(b'\t',1);path=path.decode('utf-8');blob=meta.split()[2].decode()
+        files[path]=(data/path,blob)
+    for path,(local,_) in list(files.items()):
+        if path.startswith('datasets/') and path.endswith('.json'):
+            manifest=dataset.validate(json.loads(local.read_text(encoding='utf-8-sig')))
+            root=engine.root/'baseline-downloads'/manifest['snapshot']
+            dataset.restore(manifest,root,engine.root/'baseline-downloads'/'packs')
+            for name,entry in manifest['files'].items():files[name]=(root/name,'sha256:'+entry['sha256'])
+    for path,(local,blob) in files.items():
+        present.append(path)
         if not path.endswith(('.jsonl.gz','.jsonl','.tsv.gz','.tsv')):continue
         cached=engine.db.execute('SELECT blob,rows FROM baseline_files WHERE path=?',(path,)).fetchone()
         if cached and cached[0]==blob:count+=cached[1];reused+=1;continue
@@ -30,7 +43,7 @@ def index(engine,data):
         engine.db.commit();engine.db.execute('SAVEPOINT baseline_file')
         try:
             open_file=gzip.open if path.endswith('.gz') else open
-            with open_file(data/path,'rt',encoding='utf-8',newline='') as f:
+            with open_file(local,'rt',encoding='utf-8',newline='') as f:
                 lines=readers.bounded_lines(f)
                 if '.tsv' in path:
                     csv.field_size_limit(readers.MAX_RECORD)
@@ -49,7 +62,7 @@ def index(engine,data):
         if row[0] not in present:
             engine.db.execute('DELETE FROM baseline WHERE path=?',(row[0],));engine.db.execute('DELETE FROM baseline_files WHERE path=?',(row[0],))
     engine.db.execute('DELETE FROM baseline_meta');engine.db.execute('INSERT INTO baseline_meta VALUES(?)',(revision,));engine.db.commit()
-    return {'revision':revision,'indexed_occurrences':count,'reused_files':reused,'held_files':held,'coverage':'Tracked TSV and JSONL only; unsupported published files are not claimed as compared'}
+    return {'revision':revision,'indexed_occurrences':count,'reused_files':reused,'held_files':held,'coverage':'Tracked and manifest-backed TSV and JSONL only; unsupported published files are not claimed as compared'}
 
 
 def compare(engine,source):

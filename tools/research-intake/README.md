@@ -126,10 +126,10 @@ compressed per snapshot; exceeding them holds the export without losing original
 
 Use a **dedicated secondary `ascension-data` Git worktree** for delivery. The active
 cache publisher checkout is never an export staging directory. `publish.py` stages
-only the verified snapshot path, refuses unrelated changes, commits locally, and
+only a small verified dataset manifest, refuses unrelated changes, commits locally, and
 pushes only when `--push` is explicitly requested. It never force-pushes. A concurrent
 remote advance can require reconciling the dedicated branch before retrying; the
-snapshot remains intact.
+snapshot remains intact. Bulk shards are packaged outside Git and uploaded to GitHub Releases before a pushed commit can advertise them. A run without --push prepares packages and commits the manifest locally for review; its release links are not live until publication. See ../data-storage/README.md for downloading and R2 hosting.
 
 ```powershell
 python -B publish.py --root D:/AscensionResearch --checkout D:/research-data-publication --initialize-checkout
@@ -141,8 +141,7 @@ python -B publish.py --root D:/AscensionResearch --checkout D:/research-data-pub
 The accompanying AscensionDB adapter displays each row's declared collection and
 source. Update the data workflow's two pinned source revisions to the reviewed
 preservation commit when publishing these tool changes. The existing data push
-workflow then rebuilds and validates the website. No separate frontend change or
-map inference is required. Public source-record counts remain distinct from unique
+workflow then rebuilds and validates the website. Use the R2 workflow for catalogs beyond Pages capacity; its source builder resolves release manifests. No map inference is performed. Public source-record counts remain distinct from unique
 entities. This version prepares automatic exports locally; it does not silently
 push donations or extend the public cache-upload endpoint to arbitrary files.
 

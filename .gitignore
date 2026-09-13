@@ -65,3 +65,6 @@ live-*.png
 *.bmsr.zip
 # Generated stock-client datasets are archived outside source.
 /stock-client/data/
+
+# Wrangler deployment state is private local tooling state.
+.wrangler/
