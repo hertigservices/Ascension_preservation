@@ -2,8 +2,21 @@
   "schema": 1,
   "component": "cache-release-storage",
   "files": [
-    {"source":"tools/cache-consolidator/tools/publish.py","destination":"tools/publish.py"},
-    {"source":"tools/cache-consolidator/tools/release_storage.py","destination":"tools/release_storage.py"},
-    {"source":"tools/data-storage/dataset.py","destination":"tools/dataset.py"}
+    {
+      "source": "tools/cache-consolidator/tools/publish.py",
+      "destination": "tools/publish.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/release_storage.py",
+      "destination": "tools/release_storage.py"
+    },
+    {
+      "source": "tools/data-storage/dataset.py",
+      "destination": "tools/dataset.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/publish_sync.py",
+      "destination": "tools/publish_sync.py"
+    }
   ]
 }

@@ -18,19 +18,19 @@ def synchronize(repo, branch):
         base=checked('merge-base','HEAD',remote)
         paths=[p for p in checked('diff','--name-only','-z',base,remote).split('\0') if p]
         # Concurrent generated output or a storage-mode cutover requires review.
-        protected=('cachedata/', 'data-packs/', '.ascension-data.json', '.gitattributes', '.lfsconfig')
+        protected=('cachedata/', 'datasets/', '.ascension-storage.json', 'data-packs/', '.ascension-data.json', '.gitattributes', '.lfsconfig')
         if any(p.startswith(protected) for p in paths):
             raise RuntimeError('Remote updates include generated data or storage configuration; review is required')
         local=set(p for p in checked('diff','--name-only','-z',base,'HEAD').split('\0') if p)
         if local.intersection(paths):raise RuntimeError('Local and remote changes overlap; review is required')
         print('Integrating independent GitHub updates; existing cache data is unchanged.',flush=True)
-        before=checked('rev-parse','HEAD:cachedata')
+        before=checked('ls-tree','HEAD','--','cachedata','datasets','.ascension-storage.json')
         merge=git('merge','--no-ff','--no-commit',remote)
         if merge.returncode:
             git('merge','--abort');raise RuntimeError(merge.stderr.strip())
         try:
             after=checked('write-tree')
-            if checked('rev-parse',after+':cachedata')!=before:raise RuntimeError('Integration changed cache data')
+            if checked('ls-tree',after,'--','cachedata','datasets','.ascension-storage.json')!=before:raise RuntimeError('Integration changed cache data')
             checked('commit','-m','Integrate independent published repository updates')
         except BaseException:
             git('merge','--abort');raise

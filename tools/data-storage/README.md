@@ -45,8 +45,10 @@ Commit only `dataset.json` as `datasets/<collection>.json`, after release upload
 succeeds. The research publisher does this automatically in its dedicated data
 worktree. The cache publisher supports `.ascension-storage.json` with
 `{"schema":1,"cache":"github-releases"}`; activate it only after the first verified
-release exists, its manifest is committed, `cachedata/` is ignored and its old
-files have been removed from the Git index. Its existing audit still runs before
+release exists, its manifest is committed, `cachedata/` bulk files are ignored and removed from the Git index. Small validated
+`cachedata/contributions/<hash>.json` receipts remain in Git so upload acknowledgments
+can verify published evidence without downloading bulk packs. The publisher commits
+these receipts and the manifest together, after verifying the Release. Its existing audit still runs before
 any upload. Installing code alone does not activate that migration. No history
 rewrite is part of this tool.
 
