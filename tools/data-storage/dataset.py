@@ -2,7 +2,7 @@
 Only pass audited public exports here. This module does not decide publication permission.
 No donor code is executed; no archive paths are extracted.
 """
-import argparse, hashlib, io, json, os, re, shutil, subprocess, tarfile, tempfile
+import argparse, hashlib, io, json, os, re, shutil, subprocess, tarfile, tempfile, time
 import urllib.request
 from pathlib import Path, PurePosixPath
 
@@ -196,17 +196,29 @@ def gh(*args):
     if p.returncode:raise RuntimeError(p.stderr.strip())
     return p.stdout
 
+def find_release(repo, tag):
+    """Find a release across every API page, including authenticated drafts."""
+    pages=json.loads(gh('api',f'repos/{repo}/releases?per_page=100','--paginate','--slurp'))
+    return next((release for page in pages for release in page if release['tag_name']==tag),None)
+
+def await_release(repo, tag, attempts=6):
+    """Allow GitHub's release-list API to catch up after draft creation."""
+    for attempt in range(attempts):
+        release=find_release(repo,tag)
+        if release is not None:return release
+        if attempt+1<attempts:time.sleep(min(2**attempt,8))
+    raise RuntimeError(f'Created Release {tag!r} is not visible through the GitHub API')
+
 def publish(staging):
     staging=Path(staging);m=validate(json.loads((staging/'dataset.json').read_text(encoding='utf-8-sig')))
     repo=m['repository'];tag=m['release'];own={n:v for n,v in m['packs'].items() if '/'+tag+'/' in v['url']}
     if len(own)+1>1000:raise ValueError('Release has too many assets; divide the dataset')
     for name,pack in own.items():
         if (staging/name).stat().st_size!=pack['bytes'] or digest(staging/name)!=pack['sha256']:raise ValueError('Corrupt staging package')
-    existing=json.loads(gh('api',f'repos/{repo}/releases?per_page=100'))
-    release=next((r for r in existing if r['tag_name']==tag),None)
+    release=find_release(repo,tag)
     if release is None:
         gh('release','create',tag,'--repo',repo,'--draft','--title',f"{m['dataset']} dataset {m['snapshot'][:12]}",'--notes','Verified public dataset. Download dataset.json and use tools/data-storage/dataset.py to retrieve selected files or the complete collection.')
-        release=next(r for r in json.loads(gh('api',f'repos/{repo}/releases?per_page=100')) if r['tag_name']==tag)
+        release=await_release(repo,tag)
     # --paginate --slurp handles releases larger than one API page.
     pages=json.loads(gh('api',f"repos/{repo}/releases/{release['id']}/assets?per_page=100",'--paginate','--slurp'))
     assets={a['name']:a for page in pages for a in page}

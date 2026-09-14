@@ -56,4 +56,12 @@ class StorageTests(unittest.TestCase):
         with patch('urllib.request.urlopen',return_value=Response(b'new')):
             dataset.download('https://example.invalid',target,hashlib.sha256(b'new').hexdigest(),3)
         self.assertEqual(target.read_bytes(),b'new')
+    def test_release_lookup_paginates_and_retries_eventual_consistency(self):
+        release={'id':7,'tag_name':'data-cache-new','draft':True}
+        responses=[json.dumps([[]]),json.dumps([[]]),json.dumps([[{'id':1,'tag_name':'old','draft':False}],[release]])]
+        with patch.object(dataset,'gh',side_effect=responses) as gh,patch.object(dataset.time,'sleep') as sleep:
+            self.assertEqual(dataset.await_release('owner/repo','data-cache-new',attempts=3),release)
+        self.assertEqual(gh.call_count,3)
+        self.assertEqual(sleep.call_count,2)
+        self.assertTrue(all('--paginate' in call.args and '--slurp' in call.args for call in gh.call_args_list))
 if __name__=='__main__':unittest.main()
