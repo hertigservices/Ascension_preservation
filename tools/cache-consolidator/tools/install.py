@@ -73,6 +73,8 @@ They only show anything if the addon is installed in `Interface/AddOns`.
 """
 import argparse
 import glob
+import json
+from pathlib import Path
 import gzip
 import io
 import os
@@ -96,8 +98,7 @@ import luaser
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-REPO_ZIP = ("https://github.com/hertigservices/ascension-data"
-            "/archive/refs/heads/main.zip")
+DATA_MANIFEST = "https://raw.githubusercontent.com/hertigservices/ascension-data/main/datasets/cache.json"
 import config
 DEFAULT_DATA = config.DATA
 
@@ -261,35 +262,40 @@ def modes_available(data):
                   if glob.glob(os.path.join(d, x, "*.wdb.gz")))
 
 
-def fetch_dataset(dest, zip_path=None):
-    """Download (or read) the repository zip and unpack cachedata/ into dest.
+def fetch_release_dataset(dest):
+    """Restore the client files from the current checksummed public Release."""
+    sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'data-storage'))
+    import dataset
+    request=urllib.request.Request(DATA_MANIFEST,headers={'User-Agent':'AscensionPreservation/1.0'})
+    with urllib.request.urlopen(request,timeout=60) as response:
+        raw=response.read(16*1024*1024+1)
+    if len(raw)>16*1024*1024:raise ValueError('Oversized dataset manifest')
+    manifest=dataset.validate(json.loads(raw))
+    destination=Path(dest).resolve();destination.mkdir(parents=True,exist_ok=True)
+    cache=destination.parent/'.ascension-downloads';count=0
+    with tempfile.TemporaryDirectory(prefix='ascension-client-data-') as temporary:
+        restored=Path(temporary)
+        for prefix in ('cachedata/wdb','cachedata/lua'):
+            if not any(p.startswith(prefix+'/') for p in manifest['files']):continue
+            dataset.restore(manifest,restored,cache,select=prefix)
+            for name in manifest['files']:
+                if not name.startswith(prefix+'/'):continue
+                target=destination/Path(name).relative_to('cachedata')
+                current=target
+                while current!=destination.parent:
+                    if current.is_symlink() or (hasattr(current,'is_junction') and current.is_junction()):raise ValueError('Download destination contains a link')
+                    current=current.parent
+                target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(restored/name,target);count+=1
+    print(f'  restored and verified {count} client data files into {dest}')
+    return count
 
-    Only cachedata/ is taken -- the tools are already here -- and only the
-    folders this script uses (wdb/ and lua/), which keeps the unpack to what a
-    client install needs.
-    """
+
+def fetch_dataset(dest, zip_path=None):
+    """Fetch verified Release data, or read an explicitly supplied legacy ZIP."""
+    if zip_path is None:return fetch_release_dataset(dest)
     os.makedirs(dest, exist_ok=True)
     tmp = None
-    if zip_path is None:
-        tmp = tempfile.NamedTemporaryFile(prefix="cachedata-", suffix=".zip",
-                                          delete=False)
-        tmp.close()
-        zip_path = tmp.name
-        print(f"downloading {REPO_ZIP}")
-        print("  (about 120 MB; the whole repository, of which cachedata/ is kept)")
-        t0 = time.time()
-        with urllib.request.urlopen(REPO_ZIP, timeout=60) as r, \
-                open(zip_path, "wb") as f:
-            got = 0
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-                got += len(chunk)
-                if got % (10 << 20) < (1 << 20):
-                    print(f"  {size(got)} ...", flush=True)
-        print(f"  {size(os.path.getsize(zip_path))} in {time.time() - t0:.0f}s")
     n = 0
     with zipfile.ZipFile(zip_path) as z:
         for info in z.infolist():
@@ -301,6 +307,8 @@ def fetch_dataset(dest, zip_path=None):
                 continue
             if parts[2] == "lua" and (len(parts) != 4 or not parts[3].endswith(".lua")):
                 continue
+            if any(p in (".","..") or "\\" in p or ":" in p for p in parts[2:]):
+                raise ValueError("Unsafe archive path")
             rel = os.path.join(*parts[2:])
             out = os.path.join(dest, rel)
             os.makedirs(os.path.dirname(out), exist_ok=True)

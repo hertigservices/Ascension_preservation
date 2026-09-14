@@ -17,6 +17,10 @@
     {
       "source": "tools/cache-consolidator/tools/publish_sync.py",
       "destination": "tools/publish_sync.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/install.py",
+      "destination": "tools/install.py"
     }
   ]
 }

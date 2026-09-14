@@ -1,6 +1,6 @@
 # Prompt for an AI agent: import the Ascension data into an AzerothCore realm
 
-Copy everything below the line into any coding agent (Claude, Grok, ChatGPT, Codex …)
+Copy everything below the line into any coding agent (Claude, Grok, ChatGPT, Codex â€¦)
 that has shell access to the server. Fill in the `<placeholders>`. The prompt references
 only the two public repositories, so it works on anyone's realm.
 
@@ -23,29 +23,30 @@ anything.
 - Report named rows, not counts (e.g. "item 134892 Worldforged Scroll: Edge of Fury now
   resolves"), because a wrong count looks exactly like a right one.
 
-## Step 1 – Get the tools and the dataset
+## Step 1 â€“ Get the tools and the dataset
 
 ```bash
 git clone https://github.com/hertigservices/Ascension_preservation
 git clone https://github.com/hertigservices/ascension-data
+python Ascension_preservation/tools/data-storage/dataset.py download ascension-data/datasets/cache.json --out AscensionData
 cd Ascension_preservation/tools/cache-consolidator
-python -B tools/import_world.py --data ../../../ascension-data/cachedata --list-sources
+python -B tools/import_world.py --data ../../../AscensionData/cachedata --list-sources
 ```
 
 The tools live in `Ascension_preservation/tools/cache-consolidator`; the data lives in
-`ascension-data/cachedata`. Pass `--data <path to ascension-data>/cachedata` on every
+`AscensionData/cachedata`. Pass `--data <path to AscensionData>/cachedata` on every
 command below, or set the `ASCENSION_CACHE_DATA` environment variable to that path once.
 Read `README.md` and `docs/USING-THE-DATA.md` in the tools folder before continuing.
-Python 3.10+ and a `mysql` client are required. If `mysql` / `mysqldump` are not on PATH,
+Python 3.12+ and a `mysql` client are required. If `mysql` / `mysqldump` are not on PATH,
 pass `--mysql` and `--mysqldump` with full paths.
 
-## Step 2 – Pick the source
+## Step 2 â€“ Pick the source
 
 The default `union` holds every record ever seen across all Ascension modes (the most recently
 seen version of each id wins). If the realm is meant to mirror ONE mode, pass
 `--source <mode>` (for example `--source conquest-of-azeroth`). Ask me which one if unclear.
 
-## Step 3 – Preview (no writes)
+## Step 3 â€“ Preview (no writes)
 
 ```bash
 python -B tools/import_world.py --data <cachedata> --db <world_db> --user <user> --ask-password [--source <mode>]
@@ -57,13 +58,13 @@ It stages into `_cachemerge_*` tables, runs an ADD pass (rows the DB lacks, guar
 
 1. rows to add per table,
 2. cells to fill per table,
-3. the **conflicts** section – cells where both sides hold real, different values. Those are
+3. the **conflicts** section â€“ cells where both sides hold real, different values. Those are
    NEVER overwritten,
-4. the refused-values list – values that did not fit a column's range.
+4. the refused-values list â€“ values that did not fit a column's range.
 
 If I want stock content left byte-for-byte untouched, add `--add-only`.
 
-## Step 4 – Apply
+## Step 4 â€“ Apply
 
 Only after I approve:
 
@@ -74,13 +75,13 @@ python -B tools/import_world.py --data <cachedata> --db <world_db> --user <user>
 It takes a `mysqldump` backup of the touched tables into `import-out/` first. Keep it. The
 run is idempotent; re-running is a no-op.
 
-## Step 5 – Cache-version handshake (important)
+## Step 5 â€“ Cache-version handshake (important)
 
 Note the value of `version.cache_id` in the world DB (a fresh AzerothCore is 16). The client
 deletes its cache files at login unless their 24-byte header carries this exact number. Either
 pass `--set-cache-version N` to `import_world.py`, or use the same `N` in step 7.
 
-## Step 6 – Restart and verify server side
+## Step 6 â€“ Restart and verify server side
 
 Ask me, then restart the worldserver. Ignore the startup line `>> Loaded NNNN Item Templates`:
 it counts only rows that match `Item.dbc`, while every row is in fact loaded. Verify from the
@@ -98,7 +99,7 @@ Each should resolve. Then mail one imported item to a test character and confirm
 .send items <char> "test" "test" 134892
 ```
 
-## Step 7 – Client caches
+## Step 7 â€“ Client caches
 
 On the player's machine, with the game closed:
 

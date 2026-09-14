@@ -33,21 +33,26 @@ git clone https://github.com/hertigservices/Ascension_preservation
 cd Ascension_preservation/tools/cache-consolidator
 ```
 
-No git? Use the green **Code → Download ZIP** button on that page, unzip
+No git? Use the green **Code â†’ Download ZIP** button on that page, unzip
 it, and open the `tools/cache-consolidator` folder inside.
 
-**Every command in this guide is run from that folder** — that is why they
+**Every command in this guide is run from that folder** â€” that is why they
 all start with `python -B tools/...`. If you get `can't open file` or
 `No such file or directory`, you are in the wrong folder; nothing is
 broken.
 
-You do **not** need to download this data repository by hand. `install.py --fetch`
-pulls it for you (about 120 MB). If you would rather have a checkout of it — and you need one for the server half, which cannot
-download — clone it too and remember the path to its `cachedata` folder:
+`install.py --fetch` retrieves verified client files from GitHub Releases. For
+server imports or a complete local dataset, download `datasets/cache.json` from
+[ascension-data](https://github.com/hertigservices/ascension-data), then run from
+this tools folder:
 
 ```
-git clone https://github.com/hertigservices/ascension-data
+python ../data-storage/dataset.py download /path/to/cache.json --out /path/to/AscensionData
 ```
+
+Pass `/path/to/AscensionData/cachedata` as `--data`. A Git clone or Code ZIP holds
+the manifest and small upload receipts; use the downloader to obtain bulk files.
+Downloads resume and verify SHA-256 without an account or API key.
 
 The tools no longer look for `cachedata` beside themselves. With no
 `--data`, they look in `%LOCALAPPDATA%\AscensionPreservation\cache\cachedata`
@@ -84,8 +89,8 @@ cacheable records. So:
   tooltip line for it is blank on a stock client and the proc does nothing on a
   stock server; the *Ascension* client has the spell in its DBCs and shows it
 
-The addon SavedVariables (`cachedata/lua/`) are a different kind of record —
-things players observed rather than things the server stated — and they show up
+The addon SavedVariables (`cachedata/lua/`) are a different kind of record â€”
+things players observed rather than things the server stated â€” and they show up
 only if the matching addon is installed: MobSpells, GatherMate2, Auctionator.
 
 ## Two setups
@@ -114,7 +119,7 @@ all show. Three things do not:
 Both setups start from the same two commands below. The difference is only what
 the client is able to draw.
 
-## Step 1 — client: `install.py`
+## Step 1 â€” client: `install.py`
 
 From `Ascension_preservation/tools/cache-consolidator`:
 
@@ -126,7 +131,7 @@ python -B tools/install.py --undo                # put the replaced files back
 
 `--fetch` downloads all 120 MB every time it is passed, and puts the result
 in `<your client folder>/cachedata-download`. So pass it once, then point
-later runs at what it left behind — or at your own checkout:
+later runs at what it left behind â€” or at your own checkout:
 
 ```
 python -B tools/install.py --data "C:/Games/Ascension/cachedata-download" --write
@@ -137,7 +142,7 @@ Or double-click `tools/Install Caches.cmd`, which runs the plan and then asks.
 
 What it does, in order:
 
-1. **Finds the client** — the usual install folders, or `--client PATH`. It knows
+1. **Finds the client** â€” the usual install folders, or `--client PATH`. It knows
    an Ascension client from a stock one by the executable, and reads the
    `Cache\WDB\<locale>\` tree it finds there.
 2. **Works out which mode each cache folder is.** An Ascension client keeps one
@@ -149,7 +154,7 @@ What it does, in order:
    required there. `--list-modes` prints the choices.
 3. **Merges, record by record.** For every cache file it reads yours, reads the
    published one for that mode, and writes the union. Where both hold the same
-   entry, **yours wins** — your cache is what *your* realm told *your* client,
+   entry, **yours wins** â€” your cache is what *your* realm told *your* client,
    and the published copy may be from a different patch. `--prefer archive`
    flips that. The plan prints, per file, how many records you have, how many
    the archive has, how many would be added and how many conflict, before
@@ -169,17 +174,17 @@ It **refuses to write while the game is running**, because the client rewrites
 every cache file on exit and would overwrite the install. `--ignore-running` is
 for people who know their client is not the one in the process list.
 
-Fetching the dataset without git: `--fetch` downloads the repository zip from
-GitHub and uses the `cachedata/` inside it (`--from-zip FILE` for a zip you
-already have). The repository's history is large; a shallow clone
-(`git clone --depth 1`) or the zip is the sane way to get it.
+Fetching the dataset without Git: `--fetch` reads the current manifest and restores
+its verified Release files. `--from-zip FILE` remains available for an older ZIP
+that already contains cachedata. New Code ZIPs contain download instructions and
+manifests rather than the bulk dataset. Existing Git history remains unchanged.
 
 ### The cache version, and why the client might throw your caches away
 
-Bytes 20–23 of every `.wdb` header hold a **cache version**. At login the server
+Bytes 20â€“23 of every `.wdb` header hold a **cache version**. At login the server
 sends its own number (`SMSG_CLIENTCACHE_VERSION`), and if the two differ the
 client deletes every cache file for that realm and starts over. This is the
-mechanism servers use to force a reset after a data patch — and it will
+mechanism servers use to force a reset after a data patch â€” and it will
 silently erase an install of these caches if the numbers do not line up.
 
 - AzerothCore sends `ClientCacheVersion` from `worldserver.conf`; at its default
@@ -206,7 +211,7 @@ or set `ClientCacheVersion = N` in `worldserver.conf`. `install.py` prints the
 an addon or launcher "clear cache" button after installing; that is the same
 deletion done by hand.
 
-## Step 2 — server: `import_world.py`
+## Step 2 â€” server: `import_world.py`
 
 Also from `Ascension_preservation/tools/cache-consolidator`. This half needs
 a real copy of this repository, and it has no `--fetch` of its own. What
@@ -237,10 +242,10 @@ should import that mode.
 `import-out/` (`--out DIR`), loads the data into `_cachemerge_*` staging tables
 next to your world database, and prints, per table:
 
-- `rows to ADD` — rows your database does not have at all
-- per column, `fill` — cells on rows you *do* have that still sit on their
+- `rows to ADD` â€” rows your database does not have at all
+- per column, `fill` â€” cells on rows you *do* have that still sit on their
   schema default and would receive the cached value
-- per column, `conflict` — cells where both sides hold a real value and they
+- per column, `conflict` â€” cells where both sides hold a real value and they
   disagree. The merge **never writes these**; they are listed for a human.
 
 `report.md` lists every value that was refused because it would not fit its
@@ -261,9 +266,9 @@ Tables touched, and where the cache's numbered columns go on a modern schema:
 | cache | table | notes |
 |---|---|---|
 | itemcache | `item_template` | `StatsCount` has no column and is dropped |
-| creaturecache | `creature_template` + `creature_template_model` | `modelid1..4` become one row per model, Idx 0–3; `movementId` is excluded (Ascension's sentinel 999) |
+| creaturecache | `creature_template` + `creature_template_model` | `modelid1..4` become one row per model, Idx 0â€“3; `movementId` is excluded (Ascension's sentinel 999) |
 | gameobjectcache | `gameobject_template` + `gameobject_questitem` | `questItem1..6` become one row per item |
-| questcache | `quest_template` | wire names mapped to AzerothCore's (`Title`→`LogTitle`, `Method`→`QuestType`, …) |
+| questcache | `quest_template` | wire names mapped to AzerothCore's (`Title`â†’`LogTitle`, `Method`â†’`QuestType`, â€¦) |
 | pagetextcache | `page_text` | |
 | npccache | `npc_text` | |
 

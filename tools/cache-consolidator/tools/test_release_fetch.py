@@ -1,0 +1,20 @@
+import io,json,subprocess,tempfile,unittest,sys
+from pathlib import Path
+from unittest.mock import patch
+import install
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'data-storage'))
+import dataset
+class FetchTests(unittest.TestCase):
+ def test_fetch_uses_release_manifest_and_only_client_files(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);source=root/'source';source.mkdir()
+   for name in ['wdb/mode/itemcache.wdb.gz','lua/addon.lua','union/items.tsv']:
+    p=source/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(name.encode())
+   manifest=dataset.prepare(source,root/'packs','cache',prefix='cachedata')
+   restore=dataset.restore
+   def local_restore(m,destination,cache,select):return restore(m,destination,cache,select,root/'packs')
+   with patch.object(install.urllib.request,'urlopen',return_value=io.BytesIO(dataset.canonical(manifest))),patch.object(dataset,'restore',side_effect=local_restore):
+    self.assertEqual(install.fetch_dataset(root/'download'),2)
+   self.assertEqual((root/'download/wdb/mode/itemcache.wdb.gz').read_bytes(),b'wdb/mode/itemcache.wdb.gz')
+   self.assertFalse((root/'download/union').exists())
+if __name__=='__main__':unittest.main()
