@@ -333,7 +333,7 @@ test("collector stream requires admin and exposes only status metadata", async()
   assert.equal((await call(env,"collector/status")).code,401);
   const response=await call(env,"collector/status","GET",null,"collector-secret");
   assert.equal(response.code,200);assert.equal(response.body.submissions.length,1);
-  assert.deepEqual(Object.keys(response.body.submissions[0]).sort(),["bytes","commit_sha","created","id","modes","status"].sort());
+  assert.deepEqual(Object.keys(response.body.submissions[0]).sort(),["bytes","commit_sha","created","id","modes","status","lease_until","attempts","message","review_kind"].sort());
   assert.deepEqual(response.body.submissions[0].modes,["unknown"]);
 });
 
@@ -383,4 +383,21 @@ test("incomplete expired finalization becomes visible review work without deleti
  env.db.prepare("UPDATE submissions SET status='finalizing',expires=0 WHERE id=?").run(s.id);
  await call(env,'collector/cleanup','POST',{},env.COLLECTOR_TOKEN);
  assert.equal(env.db.prepare('SELECT status FROM submissions WHERE id=?').get(s.id).status,'needs_review');
+});
+
+test('explicit recovery retries operational holds only and preserves live leases', async()=>{
+ const now=Math.floor(Date.now()/1000);const cases=[
+ ['needs_review','operational',null,0,true],['needs_review','validation',null,0,false],
+ ['needs_review','upload',null,0,false],['needs_review',null,null,0,false],
+ ['needs_review','operational','a'.repeat(40),0,false],['processing',null,null,now+500,false],
+ ['processing',null,null,now-1,true],['published',null,'a'.repeat(40),0,false],
+ ];
+ for(const [status,kind,commit,lease,expected] of cases){
+  const env=environment();const submission=await create(env);
+  env.db.prepare('UPDATE submissions SET status=?,review_kind=?,commit_sha=?,lease_until=?,attempts=5,lease=? WHERE id=?').run(status,kind,commit,lease,'lease-token',submission.id);
+  assert.equal((await call(env,'collector/retry','POST',{})).code,401);
+  const result=await call(env,'collector/retry','POST',{},'collector-secret');assert.equal(result.body.requeued,expected?1:0);
+  const row=env.db.prepare('SELECT * FROM submissions WHERE id=?').get(submission.id);assert.equal(row.status,expected?'received':status);if(!expected)assert.equal(row.lease,'lease-token');
+  assert.equal((await call(env,'collector/retry','POST',{},'collector-secret')).body.requeued,0);
+ }
 });

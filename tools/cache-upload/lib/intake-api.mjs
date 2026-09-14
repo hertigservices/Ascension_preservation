@@ -276,8 +276,15 @@ export async function handle(r, env, path) {
     if (path.startsWith("collector/")) {
       await admin(r, env);
       if (path === "collector/status" && r.method === "GET") {
-        const data=await query(env,"SELECT id,status,bytes,created,commit_sha,manifest FROM submissions ORDER BY created DESC LIMIT 200").all();
-        return json({submissions:data.results.map(({manifest,...row})=>({...row,modes:[...new Set(JSON.parse(manifest).files.map(file=>file.mode))]}))});
+        const data=await query(env,"SELECT id,status,bytes,created,commit_sha,manifest,lease_until,attempts,message,review_kind FROM submissions ORDER BY created DESC LIMIT 200").all();
+        return json({server_time:now(),submissions:data.results.map(({manifest,...row})=>({...row,modes:[...new Set(JSON.parse(manifest).files.map(file=>file.mode))]}))});
+      }
+      if (path === "collector/retry" && r.method === "POST") {
+        // Server-time lease checks; never release live owners, accepted review
+        // holds, incomplete uploads, or already-published contributions.
+        const result = await query(env,
+          "UPDATE submissions SET status='received',attempts=0,lease=NULL,lease_until=0,message='Maintainer requested another processing attempt.' WHERE commit_sha IS NULL AND ((status='needs_review' AND attempts>=5 AND review_kind='operational') OR (status='processing' AND lease_until<? AND attempts>=5))",now()).run();
+        return json({requeued:result.meta.changes});
       }
       if (path === "collector/claim" && r.method === "POST") {
         const lease = random(),
@@ -320,7 +327,7 @@ export async function handle(r, env, path) {
           if (key !== b.bundle) fail(400, "Publication proof does not match submission");
           if (row.status === b.status && row.commit_sha === b.commit) return json({saved:true});
           const saved = await query(env,
-            "UPDATE submissions SET status=?,commit_sha=?,message=?,lease=NULL,lease_until=0 WHERE id=? AND commit_sha IS NULL AND (status='received' OR (status='processing' AND lease_until<?) OR (status='needs_review' AND attempts>=5))",
+            "UPDATE submissions SET status=?,commit_sha=?,message=?,lease=NULL,lease_until=0 WHERE id=? AND commit_sha IS NULL AND (status='received' OR (status='processing' AND lease_until<?) OR (status='needs_review' AND attempts>=5 AND review_kind='operational'))",
             b.status,b.commit,b.status === "published" ? "Validated game data has been published." : "Accepted data was published; some files require maintainer review.",row.id,now()).run();
           if (saved.meta.changes !== 1) fail(409, "Submission is owned or held for review");
           return json({saved:true});
@@ -374,10 +381,11 @@ export async function handle(r, env, path) {
                 : "Processing will retry automatically.";
           const saved = await query(
             env,
-            "UPDATE submissions SET status=?,commit_sha=?,message=?,lease=NULL,lease_until=? WHERE id=? AND lease=? AND status='processing' AND lease_until>=?",
+            "UPDATE submissions SET status=?,commit_sha=?,message=?,review_kind=?,lease=NULL,lease_until=? WHERE id=? AND lease=? AND status='processing' AND lease_until>=?",
             b.status,
             b.commit || null,
             message,
+            b.status === "needs_review" ? "validation" : null,
             b.status === "received" ? now() + 300 : 0,
             row.id,
             row.lease,
@@ -422,7 +430,7 @@ export async function cleanup(env) {
     try { await finishUpload(env,row); }
     catch (error) {
       if (error instanceof HttpError && row.expires < now())
-        await query(env,"UPDATE submissions SET status='needs_review',message='Interrupted upload retained for recovery.' WHERE id=? AND status='finalizing' AND lease_until=0",row.id).run();
+        await query(env,"UPDATE submissions SET status='needs_review',review_kind='upload',message='Interrupted upload retained for recovery.' WHERE id=? AND status='finalizing' AND lease_until=0",row.id).run();
     }
   }
   // Transition first: completion and cleanup compete on this one atomic state
@@ -443,7 +451,7 @@ export async function cleanup(env) {
       await query(env, "UPDATE submissions SET objects_deleted=1 WHERE id=? AND status='published'", row.id).run();
     }
   }
-  await query(env, "UPDATE submissions SET status='needs_review',message='Processing requires maintainer attention.' WHERE attempts>=5 AND (status='received' OR (status='processing' AND lease_until<?))", now()).run();
+  await query(env, "UPDATE submissions SET status='needs_review',review_kind='operational',message='Processing requires maintainer attention.' WHERE attempts>=5 AND (status='received' OR (status='processing' AND lease_until<?))", now()).run();
   return {removed, released: rows.results.length};
 }
 

@@ -9,6 +9,7 @@ export function environment() {
     ).replaceAll("--> statement-breakpoint", ""),
   );
   db.exec(readFileSync(new URL("../drizzle/0001_safe_retention.sql", import.meta.url), "utf8"));
+  db.exec(readFileSync(new URL("../drizzle/0002_retry_classification.sql", import.meta.url), "utf8"));
   const objects = new Map();
   const DB = {
     prepare(sql) {

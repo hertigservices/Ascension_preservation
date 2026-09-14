@@ -14,6 +14,7 @@ export const submissions = sqliteTable(
     expires: integer("expires").notNull(),
     status: text("status").notNull().default("uploading"),
     lease: text("lease"),
+    reviewKind: text("review_kind"),
     leaseUntil: integer("lease_until").notNull().default(0),
     commit: text("commit_sha"),
     message: text("message"),

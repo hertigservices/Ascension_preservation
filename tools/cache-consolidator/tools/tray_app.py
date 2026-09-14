@@ -456,8 +456,9 @@ def tidy_inbox(log, processed=None):
 # --------------------------------------------------------------------- runner
 
 def mmss(sec):
+    sec=max(0,sec)
     sec = int(sec)
-    return "%d:%02d" % (sec // 60, sec % 60) if sec >= 60 else "%ds" % sec
+    return "%d:%02d" % (max(0, sec) // 60, max(0, sec) % 60) if sec >= 60 else "%ds" % sec
 
 
 class Runner(object):
@@ -487,10 +488,11 @@ class Runner(object):
         self.label = label
         self.started = time.time()
         self.on_change()
+        dispatch=None
         try:
             if intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('enabled'):
                 request=intake_jobs.enqueue(config.WORK,push=push,**(options or {}))
-                self.log('Queued for the background collector; online contributions finish first.')
+                self.log('Queued for the background collector; active work finishes before recovery.')
                 while True:
                     result=intake_jobs.read(request,{})
                     self.label=label+' - '+result.get('status','queued')
@@ -499,10 +501,13 @@ class Runner(object):
                         self.log(self.last_result+'; log: '+str(request.with_suffix('.log')))
                         return result.get('exit_code',1)
                     heartbeat=intake_jobs.read(os.path.join(config.WORK,'shared-collector.json'),{}).get('heartbeat',0)
-                    if time.time()-heartbeat>90:
+                    if not intake_jobs.collector_available(config.WORK):
                         self.last_ok=None;self.last_result='Request queued; collector unavailable'
                         self.log(self.last_result+' — it will resume automatically.');return 0
                     time.sleep(1)
+            dispatch=intake_jobs.DispatchLock(config.WORK).__enter__()
+            if not dispatch.held:
+                self.last_result='Background dispatcher is active';return BUSY_EXIT
             cmd = [console_python(), "-u", PUBLISH] + (["--push"] if push else [])
             self.log("")
             self.log("=" * 70)
@@ -522,6 +527,7 @@ class Runner(object):
                     encoding="utf-8", errors="replace", bufsize=1,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             except OSError as e:
+                item.update(status='queued',next_attempt=time.time()+60,exit_code=1);intake_jobs.write(request,item)
                 self.last_result = "could not start: %s" % e
                 self.last_ok = False
                 self.log("!! " + self.last_result)
@@ -529,7 +535,7 @@ class Runner(object):
             for line in self.proc.stdout:
                 self.log(line.rstrip("\r\n"))
             rc = self.proc.wait()
-            item.update(status='done' if rc==0 else 'failed',exit_code=rc);intake_jobs.write(request,item)
+            item.update(status='done' if rc==0 else 'queued' if rc==BUSY_EXIT else 'failed',exit_code=rc);intake_jobs.write(request,item)
             self.proc = None
             took = time.time() - self.started
             self.last_ok = None if rc == BUSY_EXIT else (rc == 0)
@@ -542,6 +548,7 @@ class Runner(object):
             self.log("-- " + self.last_result)
             return rc
         finally:
+            if dispatch:dispatch.__exit__()
             self.busy.clear()
             self.label = ""
             self.lock.release()
@@ -810,6 +817,8 @@ class App(object):
         self.refresh_soon()
 
     def start_run(self, push, label):
+        if push:
+            intake_jobs.request_recovery(config.WORK)
         def go():
             self.watcher.consolidate_and_settle_up(
                 [], inbox_fingerprint(), push=push, label=label)

@@ -394,6 +394,8 @@ def process_batch(client, first, config):
     """Claim up to eight waiting jobs before preparing any large upload."""
     leases=Leases(client);leases.add(first);leases.start()
     jobs=[];claims=[first];started=time.monotonic();failed=False
+    activity=Path(config['state'])/'active-submissions.json'
+    atomic_json(activity,{'pid':os.getpid(),'ids':[first['id']]})
     limit=max(1,min(8,int(config.get('batch_max_submissions',8))))
     window=max(0,min(300,int(config.get('batch_collect_seconds',60))))
     def retry(c):
@@ -411,6 +413,7 @@ def process_batch(client, first, config):
             if not claim:break
             if any(c['id']==claim['id'] for c in claims):raise RuntimeError('Server returned a duplicate exclusive claim')
             claims.append(claim);leases.add(claim)
+            atomic_json(activity,{'pid':os.getpid(),'ids':[c['id'] for c in claims]})
         # At most 8 x 512 MiB; each validator still has a 128 MiB heap.
         for claim in claims:
             logging.getLogger('ascension-upload-collector').info('Preparing submission %s for batch',claim['id'])
@@ -428,7 +431,28 @@ def process_batch(client, first, config):
                 for j in jobs:
                     if j['claim']['id'] in leases.claims:retry(j['claim'])
         return not failed
-    finally:leases.close()
+    finally:
+        leases.close()
+        atomic_json(activity,{'pid':os.getpid(),'ids':[]})
+
+
+def recover_requested(client, config):
+    import intake_jobs, publish
+    path=Path(config['work'])/'recovery-request.json'
+    request=intake_jobs.read(path,{})
+    if request.get('status') not in ('queued','processing'):return False
+    with intake_jobs.DispatchLock(config['work']) as owner:
+        if not owner.held:return False
+        with publish.Lock() as lock:
+            if not lock.held:return False
+            request['status']='processing';intake_jobs.write(path,request)
+            # Endpoint is idempotent: only exhausted operational holds are reset.
+            online=client.call('collector/retry',{})
+            manual=intake_jobs.recover_manual(config['work'])
+            request.update(status='done',finished=time.time(),online=online,manual=manual)
+            intake_jobs.write(path,request)
+            logging.getLogger('ascension-upload-collector').info('Recovery request completed: %s online, %s manual',online.get('requeued',0),len(manual))
+    return True
 
 
 def cleanup_local(state):
@@ -479,14 +503,18 @@ def main():
             import fcntl
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except OSError: p.error('Another collector is already running')
+    atomic_json(state/'active-submissions.json',{'pid':os.getpid(),'ids':[]})
     client=Client(config['url'],token)
     if not args.stage_only:
         sys.path.insert(0,str(Path(config['publisher']).parent))
         import intake_jobs
         intake_jobs.write(Path(config['work'])/'shared-collector.json',{'schema':1,'state':str(state),'enabled':True,'heartbeat':time.time()})
+    heartbeat_session=uuid.uuid4().hex
     def stream_status():
+        sequence=0
         while True:
-            intake_jobs.write(Path(config['work'])/'shared-collector.json',{'schema':1,'state':str(state),'enabled':True,'heartbeat':time.time()})
+            sequence+=1
+            intake_jobs.write(Path(config['work'])/'shared-collector.json',{'schema':1,'state':str(state),'enabled':True,'heartbeat':time.time(),'session':heartbeat_session,'sequence':sequence})
             try:atomic_json(state/'stream-status.json',{'checked':time.time(),**client.call('collector/status')})
             except Exception:logger.warning('Stream status unavailable; previous snapshot retained')
             time.sleep(30)
@@ -494,6 +522,8 @@ def main():
     while True:
         try:
             replay_pending_acks(client,state,config)
+            if not args.stage_only:
+                recover_requested(client,config)
             client.call('collector/cleanup',{})
             cleanup_local(state)
             claim=client.call('collector/claim',{})['submission']

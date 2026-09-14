@@ -100,6 +100,11 @@ def push_branch(branch):
               "with a self-contained pack (no consolidation rerun).", flush=True)
         rc, tail = stream(["git", "push", "--progress", "--no-thin", "origin", branch],
                           cwd=REPO)
+    rejected = any('non-fast-forward' in line or 'fetch first' in line for line in tail)
+    if rc and rejected:
+        from publish_sync import synchronize
+        if synchronize(REPO, branch) and audit():
+            rc, tail = stream(command, cwd=REPO)
     return rc, tail
 
 
@@ -478,6 +483,11 @@ def _publish(push):
         if intake_jobs.snapshot(config.INBOX)!=inputs:
             print('Inbox is still being copied; retrying after it settles.')
             return None
+    if push:
+        from publish_sync import synchronize
+        branch = git('branch', '--show-current').stdout.strip()
+        if not synchronize(REPO, branch): return False
+
     if not consolidate():
         print("\n!! the pipeline did not finish; nothing published")
         return False

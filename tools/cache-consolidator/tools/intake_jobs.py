@@ -19,6 +19,57 @@ def enqueue(work,push=True,tidy=True,rename=True,pristine=(),tidy_only=False):
     write(path,{'schema':1,'id':path.stem,'created':time.time(),'status':'queued','push':bool(push),'tidy':bool(tidy),'rename':bool(rename),'pristine':list(pristine),'tidy_only':bool(tidy_only)})
     return path
 
+class DispatchLock:
+    def __init__(self, work):self.path=Path(work)/'manual-dispatch.lock';self.held=False;self.file=None
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        self.file=self.path.open('a+b');self.file.seek(0);self.file.write(b'0');self.file.flush();self.file.seek(0)
+        try:
+            if os.name=='nt':
+                import msvcrt
+                msvcrt.locking(self.file.fileno(),msvcrt.LK_NBLCK,1)
+            else:
+                import fcntl
+                fcntl.flock(self.file,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            self.held=True
+        except OSError:self.file.close();self.file=None
+        return self
+    def __exit__(self,*args):
+        if self.file:self.file.close()
+        self.held=False
+
+_heartbeat_seen={}
+def collector_available(work):
+    row=read(Path(work)/'shared-collector.json',{})
+    if not row.get('enabled'):return False
+    if row.get('heartbeat',0)>time.time()+90:return False
+    token=(row.get('session'),row.get('sequence'),row.get('heartbeat'))
+    key=str(work);last=_heartbeat_seen.get(key);now=time.monotonic()
+    if last is None or last[0]!=token:
+        if last is None and not -90 <= time.time()-row.get('heartbeat',0) <= 90:return False
+        _heartbeat_seen[key]=(token,now);return True
+    return now-last[1]<=90
+
+def request_recovery(work):
+    path=Path(work)/'recovery-request.json'
+    current=read(path,{})
+    if current.get('status') in ('queued','processing'):return path
+    write(path,{'id':str(uuid.uuid4()),'created':time.time(),'status':'queued'})
+    return path
+
+def recover_manual(work):
+    # Called by the collector between jobs while holding the publisher lock.
+    recovered=[]
+    for path in (Path(work)/'manual-queue').glob('*.json'):
+        item=read(path,{})
+        if item.get('status') not in ('failed','processing','queued'):continue
+        if item.get('status')=='queued' and not item.get('next_attempt'):continue
+        previous={k:item.get(k) for k in ('status','attempts','next_attempt','finished','exit_code')}
+        item.setdefault('recovery_history',[]).append({'at':time.time(),**previous})
+        item.update(status='queued',attempts=0,next_attempt=0)
+        write(path,item);recovered.append(item.get('id',path.stem))
+    return recovered
+
 def tree(path):
     path=Path(path)
     if path.is_symlink() or path.is_junction():raise ValueError('Linked input')
@@ -91,16 +142,25 @@ def archive_completed(work):
     return moved
 
 def process_manual(config):
+    with DispatchLock(config['work']) as owner:
+        if not owner.held:return False
+        return _process_manual(config)
+
+def _process_manual(config):
     work=Path(config['work']);folder=work/'manual-queue'
     pending=[(p,read(p,{})) for p in folder.glob('*.json')]
-    pending=sorted(((p,r) for p,r in pending if r.get('status') in ('queued','processing') and r.get('next_attempt',0)<=time.time()),key=lambda pair:pair[1].get('created',0))
+    pending=sorted(((p,r) for p,r in pending if r.get('status') in ('queued','processing') and (r.get('next_attempt',0)<=time.time() or r.get('next_attempt',0)>time.time()+3600)),key=lambda pair:pair[1].get('created',0))
     if not pending:return False
     path,item=pending[0];item.update(status='processing',started=time.time());write(path,item)
     env=os.environ.copy();env.pop('ASCENSION_BATCH_PLAN',None)
     env.update(ASCENSION_MANUAL_REQUEST=str(path),ASCENSION_CACHE_WORK=str(work),ASCENSION_CACHE_OUT=config['out'],CONSOLIDATOR_REPO=config['publish_repo'])
     log=path.with_suffix('.log')
-    with log.open('ab') as f:
-        result=subprocess.run([config.get('python',__import__('sys').executable),'-u','-B',config['publisher']]+(['--push'] if item['push'] else []),env=env,stdin=subprocess.DEVNULL,stdout=f,stderr=subprocess.STDOUT,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    try:
+        with log.open('ab') as f:
+            result=subprocess.run([config.get('python',__import__('sys').executable),'-u','-B',config['publisher']]+(['--push'] if item['push'] else []),env=env,stdin=subprocess.DEVNULL,stdout=f,stderr=subprocess.STDOUT,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    except OSError as exc:
+        with log.open('a',encoding='utf-8') as f:f.write('Could not start publisher: '+type(exc).__name__+'\n')
+        result=subprocess.CompletedProcess([],1)
     attempts=item.get('attempts',0)+(1 if result.returncode not in (0,75) else 0)
     status='done' if result.returncode==0 else 'queued' if attempts<5 else 'failed'
     item.update(status=status,attempts=attempts,next_attempt=time.time()+(20 if result.returncode==75 else [60,300,900,1800,3600][min(attempts,4)]),finished=time.time(),exit_code=result.returncode)

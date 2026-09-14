@@ -15,6 +15,7 @@ def rows(work):
     config=intake_jobs.read(Path(work)/'shared-collector.json',{})
     state=Path(config.get('state',Path(work).parent/'upload-private'))
     snapshot=intake_jobs.read(state/'stream-status.json',{})
+    active=intake_jobs.read(state/'active-submissions.json',None)
     result=[]
     entries=snapshot.get('submissions',[])
     if not entries:
@@ -32,7 +33,10 @@ def rows(work):
         log=state/leader/'publisher.log';stage=entry['status'];text=tail(log) if stage=='processing' else ''
         markers=[('pushing ','Pushing to GitHub'),('publish audit','Privacy audit'),('== export','Exporting'),('== lua','Merging Account data'),('== merge','Merging caches'),('== intake','Reading inputs'),('== consolidating','Consolidating')]
         found=[(text.rfind(marker),label) for marker,label in markers if marker in text]
-        if found:stage=max(found)[1]
+        if entry.get('status')=='processing' and active is not None and sid not in active.get('ids',[]):stage='Waiting for collector / lease recovery'
+        elif entry.get('status')=='processing' and entry.get('lease_until',0) and entry['lease_until'] < snapshot.get('server_time',time.time()):stage='Awaiting interrupted-run recovery'
+        elif found:stage=max(found)[1]
+        elif stage=='needs_review':stage={'operational':'Retry limit reached; safe to retry','validation':'Data held for review','upload':'Incomplete upload retained'}.get(entry.get('review_kind'),'Review reason needs inspection')
         elif stage=='processing':stage='Validating / preparing'
         result.append({**entry,'stage':stage,'log':str(log if log.exists() else job/'validation.log')})
     for p in (Path(work)/'manual-queue').glob('*.json'):
@@ -54,7 +58,7 @@ class ContributionsView(ttk.Frame):
         actions=ttk.Frame(self);actions.pack(fill='x',pady=(8,0))
         ttk.Button(actions,text='Open selected log',command=self.log).pack(side='left')
         ttk.Button(actions,text='View GitHub commit',command=self.commit).pack(side='left',padx=8)
-        ttk.Button(actions,text='Retry failed manual run',command=self.retry).pack(side='left',padx=8)
+        ttk.Button(actions,text='Retry recoverable work',command=self.retry).pack(side='left',padx=8)
         ttk.Label(actions,text='Online work continues when this window is closed.').pack(side='left',padx=8)
         self.refresh()
     def selected(self):
@@ -66,11 +70,8 @@ class ContributionsView(ttk.Frame):
         sha=self.selected().get('commit_sha','') or ''
         if re.fullmatch('[a-f0-9]{40}',sha):webbrowser.open('https://github.com/hertigservices/ascension-data/commit/'+sha)
     def retry(self):
-        sid=self.selected().get('id','')
-        if not sid.startswith('manual-'):return
-        path=Path(self.work)/'manual-queue'/(sid[7:]+'.json');item=intake_jobs.read(path,{})
-        if item.get('status')=='failed':
-            item.update(status='queued',attempts=0,next_attempt=0);intake_jobs.write(path,item)
+        intake_jobs.request_recovery(self.work)
+        self.note.set('Recovery queued; active work and review safeguards are preserved.')
     def refresh(self):
         entries,snapshot=rows(self.work);selection=self.table.selection();self.entries={e['id']:e for e in entries}
         for item in self.table.get_children():
