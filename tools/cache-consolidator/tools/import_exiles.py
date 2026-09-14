@@ -55,11 +55,14 @@ PRESERVED_TYPES = ('tree', 'class')
 BASELINES = {'item': ('itemcache', 'name'), 'npc': ('creaturecache', 'name'),
              'gameobject': ('gameobjectcache', 'name'), 'quest': ('questcache', 'Title')}
 
-# The upstream API specification carries a contact email in `info.contact`. The
-# field map it documents is worth preserving; a named person's address is not, so
-# the address is replaced in place and the unmodified file's hash is recorded.
+# The upstream API specification carries a contact in `info.contact`. The field map it
+# documents is worth preserving; a named person's address is not, and the contact
+# organisation identifies the site's operator, who asked to remain anonymous. Both are
+# replaced in place and the unmodified file's hash is recorded.
 REDACT_EMAIL = re.compile(rb'[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}')
 REDACTION = b'<redacted: contact address>'
+REDACT_CONTACT_NAME = re.compile(rb'("contact"\s*:\s*\{[^{}]*?"name"\s*:\s*)"(?:[^"\\]|\\.)*"')
+CONTACT_REDACTION = b'"<redacted: operator>"'
 
 # A named row rather than a bare tuple: the column order is also the SQLite
 # insert order, and every time it changed by hand a positional index elsewhere
@@ -426,8 +429,11 @@ def ingest(mirror, site_db, output, expected_sha256, archive, cache_dir, baselin
     require(spec.exists(), 'API specification missing from the mirror')
     spec_raw = spec.read_bytes()
     spec_published, redactions = REDACT_EMAIL.subn(REDACTION, spec_raw)
+    spec_published, contact_names = REDACT_CONTACT_NAME.subn(lambda m: m.group(1) + CONTACT_REDACTION,
+                                                             spec_published)
     gz_write(output / 'openapi.json.gz', spec_published)
     spec_meta = dict(sha256=sha(spec_raw), bytes=len(spec_raw), redacted_addresses=redactions,
+                     redacted_contact_names=contact_names,
                      declared_license=(parse(spec_raw).get('info', {})
                                        .get('license', {}).get('name')))
 
@@ -480,8 +486,12 @@ def ingest(mirror, site_db, output, expected_sha256, archive, cache_dir, baselin
                         values='display strings as rendered, plus the raw tooltip marker codes; '
                                'no numeric field is reconstructed from prose',
                         drop_rates='the site\'s own stated percentages, not independently observed',
-                        completeness='the crawl recorded 39,858 asset fetch failures, so the '
-                                     'mirrored icon set is incomplete',
+                        completeness='39,858 fetches failed during the crawl, but they are not missing '
+                                     'icons: 22,151 requested a /coa/static/icons/ path the site never '
+                                     'served, 16,702 were creature renders that were never made, and 498 '
+                                     "were icons-clean files. The operator's complete icon set is published "
+                                     'separately at '
+                                     'https://ascension-public-data.ascension-archive.workers.dev/images/icons/',
                         original_bytes='talent tree and class pages only; the remaining mirrored '
                                        'bytes are identified by SHA-256 in mirror.index.tsv.gz'),
                     artifacts={})
@@ -556,6 +566,10 @@ def verify(folder):
 
     report = parse(gzip.decompress((folder / 'comparison.json.gz').read_bytes()))
     require(report['counts'] == manifest['counts']['comparison'], 'Comparison count mismatch')
+    # An organisation name matches no personal-data pattern, so the contact is checked by position.
+    contact = parse(gzip.decompress((folder / 'openapi.json.gz').read_bytes())).get('info', {}).get('contact', {})
+    require(contact.get('name') in (None, CONTACT_REDACTION.decode().strip('"')),
+            'The API specification still names its contact')
     # Screen every artifact, not a chosen few. The API specification arrived with
     # a contact address in it, and an artifact nobody thought to list is exactly
     # the one that carries the thing you were screening for.

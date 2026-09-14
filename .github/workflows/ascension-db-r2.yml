@@ -5,6 +5,11 @@ on:
       source_ref:
         required: true
         type: string
+      icon_base:
+        description: URL prefix of published icon files (<base><name>.png); empty disables search icons
+        required: false
+        type: string
+        default: ''
     secrets:
       ASCENSION_PUBLICATION_TOKEN:
         required: true
@@ -17,7 +22,7 @@ jobs:
   publish:
     if: github.repository == 'hertigservices/ascension-data'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,6 +35,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - uses: actions/cache@v4
         with:
           path: source/tools/ascension-db/.build-cache
@@ -37,11 +45,19 @@ jobs:
           restore-keys: |
             ascension-r2-${{ inputs.source_ref }}-
             ascension-r2-
+            ascension-db-
       - name: Test storage and catalog rules
         run: |
           python -B -m unittest discover -s source/tools/data-storage -v
           python -B -m unittest discover -s source/tools/ascension-db -p 'test_*.py' -v
+      - name: Test browser rules
+        working-directory: source/tools/ascension-db
+        run: |
+          node --test test_search_worker.cjs test_coverage_controls.cjs test_atlas_roles.cjs test_collections.cjs test_search_icons.cjs
+          for file in web/*.js; do node --input-type=module --check < "$file"; done
       - name: Build complete catalog
+        env:
+          ASCENSIONDB_ICON_BASE: ${{ inputs.icon_base }}
         run: python -u source/tools/ascension-db/build.py --data data --out public --hosting r2
       - name: Verify, upload, and promote complete catalog
         env:

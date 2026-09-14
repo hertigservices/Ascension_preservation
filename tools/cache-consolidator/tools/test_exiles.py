@@ -202,7 +202,7 @@ class ExilesTests(unittest.TestCase):
         # The real specification carries a contact address and an AGPL declaration.
         (base / 'api' / 'openapi.json').write_text(
             '{"openapi":"3.1.0","info":{"title":"coa-db API","contact":'
-            '{"name":"Sub-Net e.U.","email":"someone@example.at"},'
+            '{"name":"Example Hosting e.U.","email":"someone@example.at"},'
             '"license":{"name":"AGPL-3.0-or-later"},"version":"0.4.0"}}', encoding='utf-8')
         data = self.mirror / 'data'
         data.mkdir(parents=True, exist_ok=True)
@@ -423,9 +423,11 @@ class ExilesTests(unittest.TestCase):
         published = gzip.decompress((self.out / 'openapi.json.gz').read_bytes()).decode()
         self.assertNotIn('someone@example.at', published)
         self.assertIn('<redacted: contact address>', published)
-        self.assertIn('Sub-Net e.U.', published)
+        self.assertNotIn('Example Hosting e.U.', published)
+        self.assertIn('<redacted: operator>', published)
         spec = manifest['source']['api_specification']
         self.assertEqual(spec['redacted_addresses'], 1)
+        self.assertEqual(spec['redacted_contact_names'], 1)
         self.assertEqual(spec['declared_license'], 'AGPL-3.0-or-later')
         original = (self.mirror / 'mirror' / 'db.exil.es' / 'api' / 'openapi.json').read_bytes()
         self.assertEqual(spec['sha256'], importer.sha(original))

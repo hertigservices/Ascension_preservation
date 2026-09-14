@@ -11,6 +11,16 @@ function options(items, selected, empty) {
   return `<option value="">${escapeHtml(empty)}</option>` + items.map(([value, label]) =>
     `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
 }
+// Optional seventh row field: a published icon name. The base comes from the build, never from a record.
+export function iconMarkup(row, manifest) {
+  const base = manifest.icons?.base;
+  // An https URL, or a plain relative path. Other schemes and protocol-relative (//host/) bases are refused.
+  if (typeof base !== 'string' || !(/^https:\/\//i.test(base) || (!base.includes(':') && !base.startsWith('//') && /^[\w./-]+$/.test(base)))) return '';
+  const name = row[6];
+  if (typeof name !== 'string' || !name) return '<span class="result-icon is-empty" aria-hidden="true"></span>';
+  const src = base + encodeURIComponent(name) + (manifest.icons.extension || '.png');
+  return `<img class="result-icon" src="${escapeHtml(src)}" alt="" width="28" height="28" loading="lazy" decoding="async">`;
+}
 export function searchTable(rows, params, manifest) {
   const state = searchColumnState(params);
   const select = (key, items, empty) => `<select data-column-filter="${key}" aria-label="Filter ${key === 'kind' ? 'collection' : key === 'mode' ? 'game mode' : key}">${options(items, params.get(key) || '', empty)}</select>`;
@@ -26,9 +36,22 @@ export function searchTable(rows, params, manifest) {
       <th>${select('kind', collectionOptions, 'All collections')}</th>
       <th>${select('source', Object.keys(manifest.sources).sort().map(value => [value, value]), 'All sources')}</th>
       <th>${select('mode', manifest.modes.map(value => [value, value]), 'All modes')}</th>
-    </tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td><a href="#record=${escapeHtml(r[0])}">${escapeHtml(r[1])}</a></td><td class="record-id">${escapeHtml(r[5])}</td><td>${escapeHtml(manifest.kinds[r[2]]?.label || r[2])}</td><td>${escapeHtml(r[4])}</td><td><span class="badge">${escapeHtml(r[3])}</span></td></tr>`).join('') : '<tr><td colspan="5" class="empty-search">No matching records. Try fewer words or clear a column filter.</td></tr>'}</tbody></table></div><div class="column-filter-actions"><span class="muted">Name uses word prefixes · ID matches exactly</span><button type="button" data-apply-columns>Apply column filters</button></div>`;
+    </tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td><span class="result-name">${iconMarkup(r, manifest)}<a href="#record=${escapeHtml(r[0])}">${escapeHtml(r[1])}</a></span></td><td class="record-id">${escapeHtml(r[5])}</td><td>${escapeHtml(manifest.kinds[r[2]]?.label || r[2])}</td><td>${escapeHtml(r[4])}</td><td><span class="badge">${escapeHtml(r[3])}</span></td></tr>`).join('') : '<tr><td colspan="5" class="empty-search">No matching records. Try fewer words or clear a column filter.</td></tr>'}</tbody></table></div><div class="column-filter-actions"><span class="muted">Name uses word prefixes · ID matches exactly</span><button type="button" data-apply-columns>Apply column filters</button></div>`;
 }
 export function bindSearchColumns(container, params) {
+  // An icon that fails to load (host outage, stale snapshot) becomes an empty slot instead of a broken image.
+  // Inline onerror handlers are not allowed by the site's script policy, so one capturing listener handles all.
+  if (!container.dataset.iconGuard) {
+    container.dataset.iconGuard = '1';
+    container.addEventListener('error', event => {
+      const image = event.target;
+      if (!(image instanceof HTMLImageElement) || !image.classList.contains('result-icon')) return;
+      const empty = document.createElement('span');
+      empty.className = 'result-icon is-empty';
+      empty.setAttribute('aria-hidden', 'true');
+      image.replaceWith(empty);
+    }, true);
+  }
   const navigate = p => { p.delete('page'); location.hash = 'search?' + p; };
   const applied = () => {
     const p = new URLSearchParams(params);
