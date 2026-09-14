@@ -7,6 +7,7 @@ from atlas import build_atlas
 from datasets import resolve as resolve_datasets
 BASE=Path(__file__).resolve().parent
 SCHEMA='ascensiondb-1'
+DISPLAY_ICON_PATH='cachedata/dbc/item_display_icons.tsv.gz'
 KIND={'itemcache':'item','creaturecache':'npc','gameobjectcache':'gameobject','questcache':'quest','npccache':'gossip','pagetextcache':'page','itemnamecache':'item-name','creatures':'world-creature','gameobjects':'world-object','advancement':'advancement','vendors':'vendor','gossips':'gossip-observation','item_display_icons':'display-icon'}
 LABELS={'route-npc':'Instance reference NPCs','instance-floor':'Instance floor maps','item':'Items','npc':'Creatures','gameobject':'World objects','quest':'Quests','spell':'Spells','achievement':'Achievements','talent':'Talent trees','guide':'Guides','raw-variant':'Captured variants'}
 def dump(v): return json.dumps(v,ensure_ascii=False,separators=(',',':'))
@@ -72,6 +73,10 @@ def identify(path,r,i):
     name=next((str(inner[k]) for k in ('name','Name','title','Title','page_title','text','Text','label','spellName','npcName') if inner.get(k)),None)
     if not name:
         v=r.get('value');name=next((str(v[k]) for k in ('name','Name','title') if isinstance(v,dict) and v.get(k)),None)
+    if path==DISPLAY_ICON_PATH:
+        if inner.get('displayid') not in (None,''):
+            identifier=str(inner['displayid'])
+        name=icon_name(inner.get('icon')) or name
     name=name or f'{LABELS.get(kind,kind.replace("-"," ").title())} #{identifier}'
     if path.endswith('/lootcollector/pins.tsv'):
         identifier=str(r.get('item',''));name=str(r.get('type','Loot'))+' item #'+identifier;kind='loot-pin'
@@ -173,12 +178,12 @@ def main():
     if a.reuse_manifest:
         previous=json.loads(a.reuse_manifest.read_text(encoding='utf-8'))
         if previous.get('schema')!=SCHEMA or previous.get('sample'):raise ValueError('Cache reuse requires a complete compatible catalog')
-        legacy={(v['path'],v.get('blob')):(k,v['records']) for k,v in previous['files'].items() if '/catalogue/' not in v['path'] and '/lootcollector/' not in v['path']}
+        legacy={(v['path'],v.get('blob')):(k,v['records']) for k,v in previous['files'].items() if '/catalogue/' not in v['path'] and '/lootcollector/' not in v['path'] and v['path']!=DISPLAY_ICON_PATH}
     parsed=0;reused=0
     try:
         for path,blob in entries:
             src=resolved[path];ak,reason=adapter(path)
-            parser_version='coa-json-literal-escapes-1' if '/coa-databank/' in path else 'research-evidence-1' if '/research-intake/' in path else 'atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
+            parser_version='display-icon-identity-1' if path==DISPLAY_ICON_PATH else 'coa-json-literal-escapes-1' if '/coa-databank/' in path else 'research-evidence-1' if '/research-intake/' in path else 'atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
             fid=hashlib.sha256((path+'\0'+blob+parser_version+str(a.sample)).encode()).hexdigest()[:20]
             prior=legacy.get((path,blob))
             if prior and (a.cache/prior[0]/'meta.json').exists() and (a.cache/prior[0]/'index.jsonl.gz').exists():

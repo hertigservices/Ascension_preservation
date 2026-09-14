@@ -1,5 +1,6 @@
 import gzip,json,subprocess,sys,tempfile,unittest
 from pathlib import Path
+from unittest.mock import patch
 import build
 class CatalogTests(unittest.TestCase):
     def test_large_ids_and_provenance(self):
@@ -41,6 +42,41 @@ class CatalogTests(unittest.TestCase):
     def test_html_stays_data(self):
         r={'entry':'1','name':'<img src=x onerror=alert(1)>','description':'<script>alert(1)</script>'}
         self.assertEqual(build.identify('cachedata/union/itemcache.tsv.gz',r,0)[5],r)
+    def test_display_icon_identity_preserves_capture(self):
+        for identifier in ('7',0,'9007199254740993123'):
+            r={'displayid':identifier,'icon':r'Interface\Icons\INV_Spear_01.blp','stock_displayid':'999'}
+            x=build.identify(build.DISPLAY_ICON_PATH,r,42)
+            self.assertEqual(x[:3],(str(identifier),'inv_spear_01','display-icon'))
+            self.assertIs(x[5],r)
+        self.assertEqual(build.identify(build.DISPLAY_ICON_PATH,{'stock_displayid':'999'},42)[0],'row:42')
+        self.assertEqual(build.identify('cachedata/union/itemcache.tsv.gz',{'entry':'5','displayid':'7'},42)[0],'5')
+
+    def test_display_icon_rebuild_ignores_legacy_identity_cache(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);data=root/'data';data.mkdir();out=root/'out';cache=root/'cache'
+            p=data/build.DISPLAY_ICON_PATH;p.parent.mkdir(parents=True)
+            with gzip.open(p,'wt',encoding='utf-8') as f:f.write('displayid\ticon\tstock_displayid\n7\tINV_A\t99\n')
+            asset=data/'supplemental/exiles-db/assets/icons/inv_a.png';asset.parent.mkdir(parents=True);asset.write_bytes(b'fixture')
+            for args in [('init',),('add','.'),('-c','user.name=Test','-c','user.email=test@example.invalid','commit','-m','Fixture')]:
+                subprocess.run(['git','-C',str(data),*args],check=True,capture_output=True)
+            blob=build.git(data,'rev-parse','HEAD:'+build.DISPLAY_ICON_PATH).decode().strip()
+            old='obsolete-display-cache';stale=cache/old;stale.mkdir(parents=True)
+            (stale/'meta.json').write_text('{"records":1,"parts":1}')
+            with gzip.open(stale/'index.jsonl.gz','wt') as f:f.write(json.dumps([old+'/0/0','Display Icon #row:0','display-icon','Unspecified','Client captures','row:0'])+'\n')
+            build.zipped(stale/'0.json.gz',[['row:0','Display Icon #row:0','display-icon','Unspecified','Client captures',{}]])
+            previous=root/'previous.json';previous.write_text(json.dumps({'schema':build.SCHEMA,'files':{old:{'path':build.DISPLAY_ICON_PATH,'blob':blob,'records':1}}}))
+            args=['build','--data',str(data),'--out',str(out),'--cache',str(cache),'--reuse-manifest',str(previous),'--icon-base','https://example.invalid/icons/','--hosting','r2']
+            with patch.object(sys,'argv',args):build.main()
+            manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
+            self.assertNotIn(old,manifest['files'])
+            row=manifest['browse']['display-icon'][0]
+            self.assertEqual(row[1],'inv_a');self.assertEqual(row[5:],[ '7','inv_a'])
+            self.assertIn('id:7',manifest['search'])
+            with patch.object(sys,'argv',args):build.main()
+            again=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
+            self.assertEqual(again['parsed_files'],0)
+            self.assertEqual(again['browse']['display-icon'],manifest['browse']['display-icon'])
+
     def test_icon_names_are_normalised(self):
         self.assertEqual(build.icon_name('Interface\\Icons\\INV_Chest_Fur.TGA'),'inv_chest_fur')
         self.assertEqual(build.icon_name('interface/icons/leywalk'),'leywalk')
@@ -70,4 +106,7 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(icons.lookup('currency','9'),'inv_b')
             self.assertEqual(icons.lookup('planner-item','100'),'')   # planner IDs are not item IDs
             self.assertEqual(icons.lookup('npc','100'),'')
+            for r in build.rows(root/build.DISPLAY_ICON_PATH,'tsv'):
+                eid,_,kind,*_=build.identify(build.DISPLAY_ICON_PATH,r,0)
+                self.assertEqual(icons.lookup(kind,eid),'inv_a' if eid=='7' else '')
 if __name__=='__main__':unittest.main()
