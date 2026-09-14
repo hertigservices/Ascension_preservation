@@ -86,6 +86,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 import zipfile
 import zlib
 
@@ -267,8 +268,18 @@ def fetch_release_dataset(dest):
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'data-storage'))
     import dataset
     request=urllib.request.Request(DATA_MANIFEST,headers={'User-Agent':'AscensionPreservation/1.0'})
-    with urllib.request.urlopen(request,timeout=60) as response:
-        raw=response.read(16*1024*1024+1)
+    try:
+        with urllib.request.urlopen(request,timeout=60) as response:
+            raw=response.read(16*1024*1024+1)
+    except urllib.error.HTTPError as error:
+        if error.code!=404:raise
+        # During rollout older data revisions still contain the bulk cache tree.
+        with tempfile.TemporaryDirectory(prefix='ascension-legacy-cache-') as temporary:
+            archive=Path(temporary)/'data.zip'
+            url='https://github.com/hertigservices/ascension-data/archive/refs/heads/main.zip'
+            with urllib.request.urlopen(url,timeout=60) as response,archive.open('wb') as output:
+                shutil.copyfileobj(response,output,1024*1024)
+            return fetch_dataset(dest,archive)
     if len(raw)>16*1024*1024:raise ValueError('Oversized dataset manifest')
     manifest=dataset.validate(json.loads(raw))
     destination=Path(dest).resolve();destination.mkdir(parents=True,exist_ok=True)
