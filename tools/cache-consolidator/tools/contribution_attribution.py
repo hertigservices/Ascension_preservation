@@ -38,21 +38,23 @@ def _auctionator(path, modified, size, expected_hash):
 
 def summarize(entry, state):
     """Keep unknown for any unattributed file; never label adjacent WDBs from Lua."""
+    if not re.fullmatch(r'[a-f0-9-]{36}',str(entry.get('id',''))): return {}
     original=entry.get('modes',[])
     job=Path(state)/entry['id']
     try:
         provenance=json.loads((job/'provenance.json').read_text())
         if provenance.get('submission')!=entry['id']: return {}
         descriptors=provenance['manifest']['files']
+        if not isinstance(descriptors,list) or not all(isinstance(x,dict) for x in descriptors): return {}
         accepted={x['index']:x for x in provenance['validation']['accepted']}
-    except (OSError,ValueError,KeyError,TypeError): return {}
+    except (OSError,ValueError,KeyError,TypeError,AttributeError): return {}
     known={x for x in original if x!='unknown'};realms=set();unknown=False;observed=False
     for descriptor in descriptors:
         mode=descriptor.get('mode','unknown')
         if mode!='unknown': known.add(mode)
         resolved=False
         record=accepted.get(descriptor.get('index'),{})
-        if descriptor.get('name')=='auctionator_price_database.lua' and re.fullmatch(r'accepted/part-\d+/enUS/auctionator_price_database\.lua',record.get('path','')) and record.get('sha256')==descriptor.get('sha256'):
+        if descriptor.get('name')=='auctionator_price_database.lua' and isinstance(descriptor.get('size'),int) and re.fullmatch(r'accepted/part-\d+/enUS/auctionator_price_database\.lua',str(record.get('path',''))) and record.get('sha256')==descriptor.get('sha256'):
             for folder in sorted(job.glob('validated-*'),reverse=True):
                 p=folder/record['path']
                 try:

@@ -42,3 +42,11 @@ class ContributionAttributionTests(unittest.TestCase):
         self.assertEqual(a.size_text(0),'0 B')
         self.assertEqual(a.size_text(None),'—')
         self.assertEqual(a.size_text(2048),'2.0 KiB')
+
+    def test_damaged_provenance_keeps_original_display(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);entry,_=self.fixture(root)
+            p=root/entry['id']/'provenance.json';data=json.loads(p.read_text())
+            del data['manifest']['files'][0]['size'];p.write_text(json.dumps(data))
+            self.assertEqual(a.summarize(entry,root),{})
+            p.write_text('[]');self.assertEqual(a.summarize(entry,root),{})
