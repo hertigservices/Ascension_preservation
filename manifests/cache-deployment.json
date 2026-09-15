@@ -257,6 +257,10 @@
     {
       "source": "tools/cache-consolidator/tools/test_compare_replay.py",
       "destination": "tools/test_compare_replay.py"
+    },
+    {
+      "source": "tools/cache-consolidator/tools/contribution_attribution.py",
+      "destination": "tools/contribution_attribution.py"
     }
   ]
 }

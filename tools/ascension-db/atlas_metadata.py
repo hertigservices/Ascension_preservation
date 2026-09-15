@@ -99,7 +99,7 @@ def enrich_atlas(root, manifest, atlas_result):
                 target['name_source'] = 'Published map inventory'
 
     for record, row in _records(root, manifest):
-        identifier, title, kind, _mode, _source, payload = row
+        identifier, title, kind, _mode, _source, payload = row[:6]
         identifier = str(identifier)
         if not identifier:
             continue

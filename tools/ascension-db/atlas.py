@@ -86,7 +86,7 @@ def build_atlas(root,manifest,data_root):
   for path in sorted((root/'records'/fid).glob('*.json.gz'),key=lambda p:int(p.name.split('.')[0])):
    with gzip.open(path,'rt',encoding='utf8') as reader:rows=json.load(reader)
    for offset,r in enumerate(rows):
-    eid,title,kind,mode,source,payload=r;record=f'{fid}/{path.name.split(".")[0]}/{offset}'
+    eid,title,kind,mode,source,payload=r[:6];record=f'{fid}/{path.name.split(".")[0]}/{offset}'
     if '/catalogue/' in f['path']:
      xy=percent(payload.get('example_map_x'),payload.get('example_map_y'))
      if not xy or xy==(0,0):skipped['Catalogue: missing or invalid map coordinates']+=1;continue

@@ -5,6 +5,7 @@ import argparse, collections, csv, gzip, hashlib, html, json, os, re, shutil, su
 from pathlib import Path
 from atlas import build_atlas
 from datasets import resolve as resolve_datasets
+import attribution
 BASE=Path(__file__).resolve().parent
 SCHEMA='ascensiondb-1'
 DISPLAY_ICON_PATH='cachedata/dbc/item_display_icons.tsv.gz'
@@ -81,6 +82,8 @@ def identify(path,r,i):
     if path.endswith('/lootcollector/pins.tsv'):
         identifier=str(r.get('item',''));name=str(r.get('type','Loot'))+' item #'+identifier;kind='loot-pin'
     mode=path.split('/')[2] if path.startswith('cachedata/by-mode/') else str(r.get('_modes',r.get('modes','Unspecified')))
+    attributed=attribution.resolve(path,r)
+    if attributed is not None: mode=attribution.mode_text(attributed)
     return identifier,name[:500],kind,mode,source,r
 
 # Search-row icons: collection -> the ID namespace its icon is keyed by. BisBeard planner IDs are deliberately
@@ -178,12 +181,13 @@ def main():
     if a.reuse_manifest:
         previous=json.loads(a.reuse_manifest.read_text(encoding='utf-8'))
         if previous.get('schema')!=SCHEMA or previous.get('sample'):raise ValueError('Cache reuse requires a complete compatible catalog')
-        legacy={(v['path'],v.get('blob')):(k,v['records']) for k,v in previous['files'].items() if '/catalogue/' not in v['path'] and '/lootcollector/' not in v['path'] and v['path']!=DISPLAY_ICON_PATH}
+        legacy={(v['path'],v.get('blob')):(k,v['records']) for k,v in previous['files'].items() if '/catalogue/' not in v['path'] and '/lootcollector/' not in v['path'] and v['path']!=DISPLAY_ICON_PATH and not attribution.affected(v['path'])}
     parsed=0;reused=0
     try:
         for path,blob in entries:
             src=resolved[path];ak,reason=adapter(path)
             parser_version='display-icon-identity-1' if path==DISPLAY_ICON_PATH else 'coa-json-literal-escapes-1' if '/coa-databank/' in path else 'research-evidence-1' if '/research-intake/' in path else 'atlas-location-parser-1' if '/catalogue/' in path or '/lootcollector/' in path else version
+            if attribution.affected(path): parser_version='record-attribution-1'
             fid=hashlib.sha256((path+'\0'+blob+parser_version+str(a.sample)).encode()).hexdigest()[:20]
             prior=legacy.get((path,blob))
             if prior and (a.cache/prior[0]/'meta.json').exists() and (a.cache/prior[0]/'index.jsonl.gz').exists():
@@ -200,6 +204,8 @@ def main():
                         if a.sample and i>=a.sample: break
                         eid,title,kind,mode,source,payload=identify(path,r,i)
                         packed=[eid,title,kind,mode,source,payload]
+                        attributed=attribution.resolve(path,payload)
+                        if attributed is not None: packed.append(attributed)
                         size=len(dump(packed).encode())
                         if chunk and (len(chunk)>=500 or chunk_bytes+size>8000000):
                             zipped(cache/f'{part}.json.gz',chunk);part+=1;chunk=[];chunk_bytes=0

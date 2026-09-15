@@ -18,7 +18,11 @@ def validate(root,allow_sample=False):
             rows=json.load(gzip.open(p,'rt',encoding='utf-8'))
             part_counts[(fid,p.name.split('.')[0])]=len(rows)
             for r in rows:
-                if len(r)!=6 or not all(isinstance(x,str) for x in r[:5]) or not isinstance(r[5],dict): raise ValueError(f'Invalid record in {p}')
+                if len(r) not in (6,7) or not all(isinstance(x,str) for x in r[:5]) or not isinstance(r[5],dict): raise ValueError(f'Invalid record in {p}')
+                if len(r)==7:
+                    import attribution
+                    expected=attribution.resolve(info['path'],r[5])
+                    if expected is None or r[6]!=expected or r[3]!=attribution.mode_text(expected): raise ValueError(f'Attribution does not match preserved evidence in {p}')
             count+=len(rows)
         if count!=info['records']: raise ValueError(f'Records missing for {info["path"]}: {count} != {info["records"]}')
         total+=count

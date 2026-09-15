@@ -4,6 +4,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 import intake_jobs
+import contribution_attribution
 
 def tail(path):
     try:
@@ -38,7 +39,8 @@ def rows(work):
         elif found:stage=max(found)[1]
         elif stage=='needs_review':stage={'operational':'Retry limit reached; safe to retry','validation':'Data held for review','upload':'Incomplete upload retained'}.get(entry.get('review_kind'),'Review reason needs inspection')
         elif stage=='processing':stage='Validating / preparing'
-        result.append({**entry,'stage':stage,'log':str(log if log.exists() else job/'validation.log')})
+        attributed=contribution_attribution.summarize(entry,state) if entry.get('status')=='published' else {}
+        result.append({**entry,**attributed,'stage':stage,'log':str(log if log.exists() else job/'validation.log')})
     for p in (Path(work)/'manual-queue').glob('*.json'):
         entry=intake_jobs.read(p,{})
         result.append({**entry,'id':'manual-'+p.stem,'bytes':None,'modes':['Manual inbox'],'stage':entry.get('status','queued'),'log':str(p.with_suffix('.log'))})
@@ -49,9 +51,9 @@ class ContributionsView(ttk.Frame):
         super().__init__(parent,padding=12);self.work=work;self.open_path=open_path;self.entries={}
         self.note=tk.StringVar(value='Reading collector status...')
         ttk.Label(self,textvariable=self.note,wraplength=900).pack(fill='x',pady=(0,8))
-        columns=('received','size','mode','status','stage','commit')
+        columns=('received','size','mode','realm','status','stage','commit')
         self.table=ttk.Treeview(self,columns=columns,show='headings',selectmode='browse')
-        for key,label,width in zip(columns,['Received','Size','Mode / realm','Status','Current stage','Commit'],[138,72,150,100,190,85]):
+        for key,label,width in zip(columns,['Received','Size','Game modes','Realms in data','Status','Current stage','Commit'],[120,80,165,150,100,175,85]):
             self.table.heading(key,text=label);self.table.column(key,width=width,minwidth=65)
         scroll=ttk.Scrollbar(self,orient='vertical',command=self.table.yview);self.table.configure(yscrollcommand=scroll.set)
         scroll.pack(side='right',fill='y');self.table.pack(fill='both',expand=True)
@@ -77,10 +79,10 @@ class ContributionsView(ttk.Frame):
         for item in self.table.get_children():
             if item not in self.entries:self.table.delete(item)
         for index,e in enumerate(entries):
-            timestamp=e.get('created',0);size=e.get('bytes');values=(time.strftime('%m/%d %H:%M',time.localtime(timestamp)) if timestamp else 'Earlier upload',f'{size/1048576:.1f} MiB' if size else '—',', '.join(e.get('modes',[])) or 'Unknown realm',e.get('status','unknown'),e.get('stage',''),(e.get('commit_sha') or '')[:8])
+            timestamp=e.get('created',0);size=e.get('bytes');values=(time.strftime('%m/%d %H:%M',time.localtime(timestamp)) if timestamp else 'Earlier upload',contribution_attribution.size_text(size),', '.join(e.get('modes',[])) or 'Unknown mode',', '.join(e.get('realms',[])) or 'Not recorded',e.get('status','unknown'),e.get('stage',''),(e.get('commit_sha') or '')[:8])
             if self.table.exists(e['id']):self.table.item(e['id'],values=values)
             else:self.table.insert('','end',iid=e['id'],values=values)
             self.table.move(e['id'],'',index)
         stamp=snapshot.get('checked',0);age=time.time()-stamp
-        self.note.set(('Collector status updated '+time.strftime('%H:%M:%S',time.localtime(stamp)) if stamp else 'Collector status not yet available.')+(' — status is stale; collector may be paused or offline.' if age>90 else '')+' Realm names are not collected; detected game modes are shown.')
+        self.note.set(('Collector status updated '+time.strftime('%H:%M:%S',time.localtime(stamp)) if stamp else 'Collector status not yet available.')+(' — status is stale; collector may be paused or offline.' if age>90 else '')+' Modes use upload metadata and verified file contents. Realms are shown only where the data records them; unknown files stay unknown.')
         self.after(5000,self.refresh)
