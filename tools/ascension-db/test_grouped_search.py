@@ -80,4 +80,12 @@ class GroupTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'more than one'):validator.row('browse:item',search_row(gid,rows[:1]))
         finally:validator.close()
 
+    def test_compressed_buckets_reopen_without_losing_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            buckets=Buckets(Path(tmp))
+            buckets.add('browse:item',['first']);buckets.close()
+            buckets.add('browse:item',['second']);buckets.close()
+            with gzip.open(Path(tmp)/buckets.keys['browse:item'],'rt') as stream:
+                self.assertEqual([json.loads(line) for line in stream],[['first'],['second']])
+
 if __name__=='__main__':unittest.main()

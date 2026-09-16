@@ -147,11 +147,11 @@ class Buckets:
     def __init__(self,root): self.root=root;self.handles=collections.OrderedDict();self.keys={}
     def add(self,key,row,line=None):
         filename=self.keys.get(key)
-        if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16];self.keys[key]=filename
+        if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16]+'.jsonl.gz';self.keys[key]=filename
         if key in self.handles: f=self.handles.pop(key)
         else:
             if len(self.handles)>=4096: self.handles.popitem(last=False)[1].close()
-            f=(self.root/filename).open('a',encoding='utf-8',buffering=65536)
+            f=gzip.open(self.root/filename,'at',encoding='utf-8',compresslevel=1)
         self.handles[key]=f;f.write(line if line is not None else dump(row)+'\n')
     def close(self):
         for f in self.handles.values(): f.close()
@@ -258,7 +258,7 @@ def main():
                 if not chunk:return
                 content=dump(chunk).encode();h=hashlib.sha256(content).hexdigest()[:20];rel=f'search/{h}.json.gz';zipped(a.out/rel,chunk);parts.append(rel);chunk=[];size=0
             for name in files:
-                with (stage/name).open(encoding='utf-8') as f:
+                with textopen(stage/name) as f:
                     for line in f:
                         if len(chunk)>=12000 or size+len(line)>4000000: flush()
                         row=json.loads(line);chunk.append(row);count+=1;size+=len(line)
