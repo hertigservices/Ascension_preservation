@@ -25,7 +25,7 @@ export function searchTable(rows, params, manifest) {
   const state = searchColumnState(params);
   const select = (key, items, empty) => `<select data-column-filter="${key}" aria-label="Filter ${key === 'kind' ? 'collection' : key === 'mode' ? 'game mode' : key}">${options(items, params.get(key) || '', empty)}</select>`;
   const collectionOptions = Object.entries(manifest.kinds).map(([key, value]) => [key, value.label]).sort((a, b) => a[1].localeCompare(b[1]));
-  return `<div class="search-column-tools"><p class="muted" id="column-help">Select a heading to sort all matching records. Combine column filters to narrow your search.</p><button type="button" class="quiet-button" data-clear-columns>Clear column filters</button></div>
+  return `<div class="search-column-tools"><p class="muted" id="column-help">Select a heading to sort all matching records. Combine column filters to narrow your search.</p>${params.get("kind") === "quest" ? '<button type="button" class="quiet-button" data-export-quests>Convert to SQL</button>' : ''}<button type="button" class="quiet-button" data-clear-columns>Clear column filters</button></div>${params.get("kind") === "quest" ? '<p class="muted sql-export-status" data-export-status role="status" aria-live="polite">Exports all matching source records with rewards. <a href="quest-sql.html">Full SQL report and downloads</a></p>' : ''}
     <div class="table-wrap"><table class="search-results" aria-describedby="column-help"><thead><tr>${columns.map(([key, label]) => {
       const active = state.sort === key;
       const direction = active && state.dir === 'asc' ? 'descending' : 'ascending';

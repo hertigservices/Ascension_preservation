@@ -61,3 +61,7 @@
   .search-column-tools,
   .column-filter-actions { align-items: flex-start; flex-direction: column; gap: 9px; }
 }
+
+.search-column-tools { flex-wrap: wrap; }
+.search-column-tools p { flex: 1 1 320px; }
+.sql-export-status { overflow-wrap: anywhere; }

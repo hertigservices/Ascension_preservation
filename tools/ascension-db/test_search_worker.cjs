@@ -26,7 +26,7 @@ function harness(rows, partitionSize) {
   let fetches = 0, id = 0;
   const pending = new Map(), messages = [];
   const context = vm.createContext({
-    importScripts: name=>{assert.equal(name,'search-aliases.js');vm.runInContext(fs.readFileSync(path.join(__dirname,'web',name),'utf8'),context);},
+    importScripts: (...names)=>{for (const name of names) vm.runInContext(fs.readFileSync(path.join(__dirname,'web',name),'utf8'),context);},
     AbortController, DOMException, Response, Blob, DecompressionStream, TextDecoder, Uint8Array, setTimeout,
     fetch: async (url) => { fetches++; if (!assets.has(url)) return new Response('', { status: 404 }); return new Response(JSON.stringify(assets.get(url))); },
     postMessage: message => { messages.push(message); if (!message.progress) { const resolve = pending.get(message.id); pending.delete(message.id); resolve?.(JSON.parse(JSON.stringify(message))); } },

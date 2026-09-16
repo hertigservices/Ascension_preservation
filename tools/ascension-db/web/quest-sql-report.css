@@ -1,0 +1,4 @@
+.download-links { display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin:28px 0; }
+main > h2 { margin-top:36px; }
+main > p, main > ul { max-width:1050px; line-height:1.7; }
+pre { overflow-x:auto; }

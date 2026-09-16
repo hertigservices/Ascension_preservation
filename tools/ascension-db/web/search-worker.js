@@ -1,4 +1,4 @@
-importScripts('search-aliases.js');
+importScripts('search-aliases.js', 'search-query.js');
 /* Search runs in a worker: filter and order the entire candidate set before paging. */
 const cache = new Map();
 let latest = 0;
@@ -79,29 +79,7 @@ async function load(path, signal) {
   return value;
 }
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
-function candidates(d) {
-  const m=d.manifest,q=String(d.q || '').trim(),identifier=String(d.recordId || '').trim(),numeric=/^-?\d+$/.test(q);
-  const queryVariants=numeric?[[]]:AscensionSearchAliases.variants(q).map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
-  const nameVariants=AscensionSearchAliases.variants(d.name || '').map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
-  const alternatives=queryVariants.flatMap(query=>nameVariants.map(name=>[...query,...name]));
-  let keys;
-  if(identifier)keys=['id:'+identifier.slice(0,2)];
-  else if(numeric)keys=['id:'+q.slice(0,2)];
-  else if(alternatives.some(ts=>ts.some(t=>t.length>=2)))keys=alternatives.filter(ts=>ts.some(t=>t.length>=2)).map(ts=>ts.filter(t=>t.length>=2).map(t=>'name:'+t.slice(0,2)).sort((a,b)=>(m.search[a]?.count||0)-(m.search[b]?.count||0))[0]);
-  else keys=d.kind?['browse:'+d.kind]:Object.keys(m.search).filter(k=>k.startsWith('browse:'));
-  keys=[...new Set(keys)];
-  const parts=[...new Set(keys.flatMap(k=>m.search[k]?.parts||[]))],partsByKey=new Map(keys.map(k=>[k,new Set(m.search[k]?.parts||[])]));
-  const match=(r,part)=>{
-    if((d.kind&&r[2]!==d.kind)||(d.source&&r[4]!==d.source)||(d.mode&&!r[3].split(/[,|]/).map(s=>s.trim()).includes(d.mode))||(identifier&&r[5]!==identifier)||(numeric&&r[5]!==q))return false;
-    const tokens=words(r[1]);
-    if(!alternatives.some(ts=>ts.every(t=>tokens.some(w=>/^\d+$/.test(t)?w===t:w.startsWith(t)))))return false;
-    // An alias may read several name buckets. Assign each row one owning bucket,
-    // preserving distinct record keys without an unbounded deduplication cache.
-    if(keys.length>1){const owner=keys.find(k=>k.startsWith('browse:')?k==='browse:'+r[2]:k.startsWith('id:')?r[5].startsWith(k.slice(3)):tokens.some(t=>t.startsWith(k.slice(5))));if(!partsByKey.get(owner)?.has(part))return false;}
-    return true;
-  };
-  return {parts,match};
-}
+
 onmessage = async ({ data: d }) => {
   const job = ++latest;
   activeController?.abort();
@@ -122,7 +100,7 @@ onmessage = async ({ data: d }) => {
     if (saved && (start >= saved.total || (start >= saved.offset && end <= saved.offset + saved.rows.length) || (start >= saved.offset && saved.offset + saved.rows.length === saved.total))) {
       postMessage({ id: d.id, rows: saved.rows.slice(Math.max(0, start - saved.offset), end - saved.offset), total: saved.total }); return;
     }
-    const { parts, match } = candidates(d);
+    const { parts, match } = AscensionSearchQuery.candidates(d);
     let offset = 0, anchor = null;
     if (saved && start >= saved.offset + saved.rows.length && saved.rows.length) {
       offset = saved.offset + saved.rows.length; anchor = saved.rows.at(-1);

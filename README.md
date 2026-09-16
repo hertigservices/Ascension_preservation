@@ -13,6 +13,7 @@ Tools and protocol research for reconstructing Ascension locally with a user-sup
 | [AuthGate](contrib/AscensionAuthGate/) | Default original-client authentication, adapted from FirstOni |
 | [Server](server/) | AzerothCore bridge, legacy auth shim, and separate Python protocol testbed |
 | [Cache tools](tools/cache-consolidator/) | Intake, lossless variants, cache installation, world import |
+| [Quest SQL converter](tools/ascension-sql/) | Filtered quest/reward/currency export and guarded server import |
 | [Character importer](tools/character-importer/) | Standalone offline Bind My Soul importer |
 | [Stock-client work](stock-client/) | Experimental generators and authored compatibility shim |
 | [Protocol reference](docs/WIRE-SPEC.md) | Auth and world wire research |

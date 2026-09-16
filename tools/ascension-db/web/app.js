@@ -1,3 +1,4 @@
+import {bindQuestExport, cancelQuestExport} from './quest-export-ui.js';
 import {collectionDirectory, collectionLabel} from './collections.js';
 import {renderCoverage} from "./coverage-controls.js";
 import {searchColumnState, searchTable, bindSearchColumns} from './search-controls.js';
@@ -107,6 +108,8 @@ function startSearch() {
   else location.hash = next;
 }
 function runSearch(p) {
+  const previousExport = $("[data-export-quests]");
+  if (previousExport) previousExport.disabled = true;
   $("#query").value = p.get("q") || "";
   $("#kind").value = p.get("kind") || "";
   $("#source").value = p.get("source") || "";
@@ -141,6 +144,7 @@ worker.onmessage = ({ data: d }) => {
   $("#content").innerHTML =
     `<div class="result-head"><h2>Search results</h2><p class="muted">${num(d.total)} source records · page ${page + 1} of ${Math.max(1, Math.ceil(d.total / 50))}</p></div><p class="muted">A shared ID may have several captures or sources. Open a record to inspect its exact fields.</p>${searchTable(d.rows, params(), manifest)}<div class="pagination"><button id="prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="next" ${(page + 1) * 50 >= d.total ? "disabled" : ""}>Next</button></div>`;
   bindSearchColumns($("#content"), params());
+  bindQuestExport($("#content"), params(), manifest, dataBase);
   for (const [s, delta] of [
     ["#prev", -1],
     ["#next", 1],
@@ -252,6 +256,7 @@ async function guides() {
     `${heading("Recovered AscensionDB pages")}<p>Historical pages recovered from the Internet Archive. Downloaded scripts are not run on this site, and linked pages are not counted as recovered unless their content was retrieved.</p><div class="banner">${num(recovery.results?.length || 0)} retrieval attempts · ${num(recovery.records?.length || 0)} readable pages · ${num(recovery.inventory?.length || 0)} indexed archive URLs. This is a bounded recovery inventory, not a complete mirror.</div><div class="guide-grid">${rows.map((r) => `<a class="collection" href="#record=${r[0]}"><h3>${esc(r[1])}</h3><p>Read preserved text and inspect its source</p></a>`).join("")}</div>${heading("Recovery results")}<div class="table-wrap"><table><thead><tr><th>Original resource</th><th>Result</th><th>Evidence</th></tr></thead><tbody>${(recovery.results || []).map((r) => `<tr><td>${esc(r.source)}</td><td>${esc(r.status)}</td><td>${r.status === "recovered" ? `<a href="${safeUrl(r.snapshot)}">Archive capture ↗</a><small>${num(r.bytes)} bytes · SHA-256 ${esc(r.sha256)}</small>` : esc(r.error)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 async function route() {
+  cancelQuestExport();
   if (!manifest) return;
   request++;
   closeAtlas();
