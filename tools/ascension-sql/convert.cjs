@@ -21,6 +21,8 @@ async function main() {
   if (!options.out) throw Error('--out is required');
   const out = path.resolve(options.out), cache = path.resolve(options.cache || path.join(out, 'download-cache'));
   fs.mkdirSync(out, {recursive: false}); fs.mkdirSync(cache, {recursive: true});
+  const implementationHashes = () => Object.fromEntries(['quest-sql.js','quest-server-sql.js','quest-export.js','search-query.js','search-aliases.js','quest-item-evidence.json.gz'].map(name => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(web, name))).digest('hex')]));
+  const implementation = implementationHashes();
   const load = async relative => {
     if (!/^[a-zA-Z0-9_./-]+$/.test(relative) || relative.split('/').includes('..') || relative.startsWith('/')) throw Error('Invalid catalog path');
     const url = new URL(relative, base).href;
@@ -54,6 +56,7 @@ async function main() {
     },
   });
   compressed.end(); await finished; if (streamError) throw streamError;
+  if (JSON.stringify(implementation) !== JSON.stringify(implementationHashes())) throw Error('Converter source changed during export; partial output withheld. Retry from a stable checkout.');
   fs.renameSync(partial, path.join(out, 'quests.sql.gz'));
   const report = {schema: AscensionQuestSQL.VERSION, revision: manifest.revision, catalog: base.href, filters: request.filters, ...result,
     notes: ['Counts are source records, not unique quests. Published overlapping views stay separate.',
@@ -62,7 +65,7 @@ async function main() {
       'The export includes a guarded server reward importer. Importing the file alone does not apply world changes; run its explicit dry-run/apply procedure.']};
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify({revision: manifest.revision, catalog: base.href,
-    converter: AscensionQuestSQL.VERSION, implementation_sha256: Object.fromEntries(['quest-sql.js','quest-server-sql.js','quest-export.js','search-query.js','search-aliases.js','quest-item-evidence.json.gz'].map(name => [name, crypto.createHash('sha256').update(fs.readFileSync(path.join(web,name))).digest('hex')])), files: Object.fromEntries(['quests.sql.gz', 'report.json'].map(name => {
+    converter: AscensionQuestSQL.VERSION, implementation_sha256: implementation, files: Object.fromEntries(['quests.sql.gz', 'report.json'].map(name => {
       const b = fs.readFileSync(path.join(out, name)); return [name, {bytes: b.length, sha256: crypto.createHash('sha256').update(b).digest('hex')}];
     }))}, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));

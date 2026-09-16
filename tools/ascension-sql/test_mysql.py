@@ -87,6 +87,11 @@ out+=q.footer(stats)+s.generate();process.stdout.write(out);
     checks.append('target triggers are refused before any application')
     assert 'explicit mode-specific' in mysql("CALL ascension_apply_quest_rewards('cachedata/union/questcache.tsv.gz','conquest-of-azeroth',TRUE);", good=False)
     checks.append('union/implicit source application is refused')
+    assert 'explicit mode-specific' in mysql("CALL ascension_apply_quest_rewards('cachedata/by-mode/unknown/questcache.tsv.gz','unknown',TRUE);", good=False)
+    mysql('ALTER TABLE quest_template MODIFY RewardAmount1 BIGINT UNSIGNED NOT NULL DEFAULT 0; UPDATE quest_template SET RewardAmount1=18446744073709551615 WHERE ID=1;')
+    assert 'Existing reward exceeds rollback integer range' in mysql(call.format('TRUE'))
+    mysql('UPDATE quest_template SET RewardAmount1=1 WHERE ID=1; CALL ascension_rollback_quest_rewards();')
+    checks.append('unknown modes and unrepresentable before-images are refused')
     assert mysql('SELECT COUNT(*) FROM item_template;').strip() == '2'
     text_hex = mysql("SELECT HEX(JSON_UNQUOTE(JSON_EXTRACT(raw_json,'$.Details'))) FROM ascension_quest_export LIMIT 1;").strip()
     assert bytes.fromhex(text_hex).decode() == "'; DROP TABLE item_template; --\\\0雪"

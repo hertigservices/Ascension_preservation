@@ -21,6 +21,7 @@
     const after = `JSON_OBJECT(${writable.map(f => `'${f}',COALESCE(r.\`${f}\`,q.\`${f}\`)`).join(',')})`;
     const heldDiff = ['RewardKillHonor', ...held].map(f => `(r.\`${f}\` IS NOT NULL AND NOT(r.\`${f}\` <=> q.\`${f}\`))`).join(' OR ');
     const rewardDiff = writable.map(f => `(r.\`${f}\` IS NOT NULL AND NOT(r.\`${f}\` <=> q.\`${f}\`))`).join(' OR ');
+    const unsafeBefore = writable.map(f => `q.\`${f}\` > 9223372036854775807`).join(' OR ');
     return `
 -- SERVER IMPORT: load this export into a disposable copy of your world database.
 -- Stop its worldserver first. Choose ONE exact mode-specific source_path:
@@ -72,6 +73,7 @@ main: BEGIN
  WHEN j.quest_id IS NOT NULL AND (NOT(${equalImage('q','j.after_json')}) OR NOT(CAST(q.LogTitle AS BINARY)<=>CAST(j.quest_title AS BINARY))) THEN 'Previously applied reward edited; refusing overwrite'
  WHEN j.quest_id IS NOT NULL AND j.record_key<>e.record_key THEN 'Another source owns the applied reward; rollback first'
  WHEN j.quest_id IS NOT NULL THEN 'already-applied'
+ WHEN ${unsafeBefore} THEN 'Existing reward exceeds rollback integer range'
  WHEN EXISTS(SELECT 1 FROM ascension_quest_export_issues problem WHERE problem.record_key=e.record_key) THEN 'Source conversion issue; inspect ascension_quest_export_issues'
  WHEN EXISTS(SELECT 1 FROM ascension_quest_reward_items i LEFT JOIN item_template it ON it.entry=i.item_id WHERE i.record_key=e.record_key AND it.entry IS NULL) THEN 'Missing target reward item/currency definition'
  WHEN EXISTS(SELECT 1 FROM ascension_quest_reward_items i LEFT JOIN ascension_quest_item_evidence ie ON ie.record_key=i.record_key AND ie.item_id=i.item_id WHERE i.record_key=e.record_key AND ie.item_id IS NULL) THEN 'Missing mode-specific item identity evidence'
@@ -103,7 +105,7 @@ BEGIN
  ${checks}
  SET lock_ok=GET_LOCK(CONCAT(DATABASE(),':ascension-reward-import'),10);
  IF lock_ok<>1 OR lock_ok IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Reward rollback lock unavailable'; END IF;
- IF (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('quest_template','ascension_reward_import_journal') AND engine='InnoDB')<>2 OR EXISTS(SELECT 1 FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND event_object_table='quest_template') THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Unsafe rollback engine or trigger'; END IF;
+ IF (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('quest_template','ascension_reward_import_journal') AND engine='InnoDB')<>2 OR EXISTS(SELECT 1 FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND event_object_table='quest_template') OR EXISTS(SELECT 1 FROM information_schema.key_column_usage WHERE (referenced_table_schema=DATABASE() AND referenced_table_name='quest_template') OR (table_schema=DATABASE() AND table_name='quest_template' AND referenced_table_name IS NOT NULL)) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Unsafe rollback engine, trigger or foreign key'; END IF;
  START TRANSACTION;
  SELECT COUNT(*) INTO locked_rows FROM quest_template FOR UPDATE;
  SELECT COUNT(*) INTO locked_rows FROM ascension_reward_import_journal FOR UPDATE;

@@ -53,7 +53,7 @@ jobs:
       - name: Test browser rules
         working-directory: source/tools/ascension-db
         run: |
-          node --test test_search_worker.cjs test_coverage_controls.cjs test_atlas_roles.cjs test_collections.cjs test_search_icons.cjs
+          node --test ../ascension-sql/test_quest_sql.cjs test_search_worker.cjs test_coverage_controls.cjs test_atlas_roles.cjs test_collections.cjs test_search_icons.cjs
           for file in web/*.js; do node --input-type=module --check < "$file"; done
       - name: Build complete catalog
         env:
