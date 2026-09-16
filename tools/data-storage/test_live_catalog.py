@@ -10,6 +10,7 @@ from unittest.mock import patch
 from dataset import canonical
 import live_catalog as live
 from live_backup import ArchiveIndex,archive_objects
+from restore_catalog import restore
 
 
 class Error(Exception):
@@ -110,6 +111,13 @@ class LiveTests(unittest.TestCase):
     def test_same_layout_retry_is_noop(self):
         self.backup();live.promote(self.store,self.archive,self.budget,self.old);count=len(self.store.puts)
         self.assertTrue(live.promote(self.store,self.archive,self.budget,self.old)['unchanged']);self.assertEqual(len(self.store.puts),count)
+    def test_restore_deleted_history_without_network(self):
+        self.backup();self.store.data.clear()
+        output=self.root/'restored';receipt=restore(self.archive,self.index,self.old['snapshot'],output)
+        self.assertTrue(receipt['all_hashes_matched'])
+        for name,body in self.files.items():self.assertEqual((output/name).read_bytes(),body)
+        (output/'manifest.json').write_bytes(b'edited restored copy')
+        self.assertEqual(self.archive.path(self.old['files']['manifest.json']['sha256']).read_bytes(),b'old')
     def test_wrong_volume_stops(self):
         with patch.object(live.subprocess,'check_output',return_value='other-disk'):
             with self.assertRaisesRegex(ValueError,'Wrong backup'):live.Archive(self.root/'absent','expected')

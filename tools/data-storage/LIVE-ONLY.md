@@ -89,7 +89,9 @@ per-run receipts. The initial migration additionally retains all historical and
 partial remote objects, not just complete catalogs. Original HWI-013 archives remain
 preserved in the WD legacy archive.
 
-To reconstruct a saved complete catalog, read its storage manifest, copy each named
+Restore without a network connection using `restore_catalog.py --archive BACKUP_ROOT --snapshot HASH --out NEW_DIRECTORY`. The command verifies every copied byte and saves a restore receipt.
+
+To reconstruct a saved complete catalog manually, read its storage manifest, copy each named
 file from the matching SHA-256 blob, and check every size/hash. Run the catalog
 validator. Publish through the same controller functions with current-pointer CAS
 and budgets; do not copy an old current pointer whose objects are absent. Keep source
