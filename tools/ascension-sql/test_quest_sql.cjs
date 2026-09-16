@@ -63,9 +63,9 @@ test('export respects mode/source filters across every page and records its exac
   const exact = await AscensionQuestExport.run({...request, recordId: '100'}, {load: async p => assets.get(p), write: async () => {}});
   assert.equal(exact.records, 1);
 });
-test('unsupported Zone constraints, empty matches, cancellation and corrupt details never finish an export', async () => {
+test('unavailable Zone constraints, empty matches, cancellation and corrupt details never finish an export', async () => {
   const {assets, request} = fixture(), run = d => AscensionQuestExport.run(d, {load: async p => assets.get(p), write: async () => {}});
-  await assert.rejects(run({...request, zone: '12'}), /Zone/);
+  await assert.rejects(run({...request, zone: 'area:missing'}), /zone is unavailable/);
   await assert.rejects(run({...request, mode: 'absent'}), /No quests/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(AscensionQuestExport.run(request, {load: async p => assets.get(p), write: async () => {}, signal: controller.signal}), /cancelled/);
@@ -77,4 +77,15 @@ test('the quest button precedes clear filters and is absent in other collections
   const h = searchTable([], new URLSearchParams('kind=quest'), m);
   assert.ok(h.indexOf('data-export-quests') < h.indexOf('data-clear-columns'));
   assert.equal(searchTable([], new URLSearchParams('kind=item'), m).includes('data-export-quests'), false);
+});
+
+test('zone export uses the exact browse facet and composes with mode and later pages', async () => {
+  const {assets, request} = fixture();
+  assets.set('zone-elwynn', assets.get('browse').slice(0, 120));
+  request.manifest.search['zone:area:12'] = {parts: ['zone-elwynn'], count: 120};
+  const counts = await AscensionQuestExport.run({...request, zone: 'area:12', mode: 'conquest-of-azeroth'}, {load: async p => assets.get(p), write: async () => {}});
+  assert.equal(counts.records, 60);
+  const single = await AscensionQuestExport.run({...request, zone: 'area:12', mode: 'conquest-of-azeroth', recordId: '100', name: 'Quest'}, {load: async p => assets.get(p), write: async () => {}});
+  assert.equal(single.records, 1);
+  await assert.rejects(AscensionQuestExport.run({...request, zone: 'area:12', recordId: '130'}, {load: async p => assets.get(p), write: async () => {}}), /No quests/);
 });

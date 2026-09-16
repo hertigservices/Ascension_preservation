@@ -4,6 +4,7 @@ Only changed source blobs are parsed again. No private inbox or runtime input is
 import argparse, collections, csv, gzip, hashlib, html, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
 from pathlib import Path
 from atlas import build_atlas
+from zone_filter import build_zone_filter
 from datasets import resolve as resolve_datasets
 import attribution
 BASE=Path(__file__).resolve().parent
@@ -247,6 +248,8 @@ def main():
             kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1;browsing[kind].append(row)
             buckets.add('browse:'+kind,row);buckets.add('id:'+str(i)[:2],row)
             for t in {t[:2] for t in tokens(r['name']) if len(t)>=2}: buckets.add('name:'+t,row)
+        atlas = build_atlas(a.out,manifest,data_view)
+        build_zone_filter(a.out,manifest,atlas,buckets,icons)
         buckets.close()
         # Fold exact-ID buckets into first-two-digit buckets to keep the asset count bounded.
         # Prefix keys remain available for selecting candidate chunks; exact match is checked in browser.
@@ -274,7 +277,6 @@ def main():
         manifest['recovery']={'pages':len(recovery.get('records',[])),'attempted':len(recovery.get('results',[])),'inventory':len(recovery.get('inventory',[])),'complete_mirror':False}
         zipped(a.out/'coverage.json.gz',coverage);zipped(a.out/'recovery.json.gz',recovery)
         manifest['parsed_files']=parsed;manifest['reused_files']=reused
-        build_atlas(a.out,manifest,data_view)
         (a.out/'manifest.json').write_text(dump(manifest),encoding='utf-8')
         for f in (BASE/'web').iterdir():
             if f.is_file(): shutil.copyfile(f,a.out/f.name)

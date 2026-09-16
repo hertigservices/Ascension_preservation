@@ -7,7 +7,8 @@ function candidates(d) {
   const nameVariants=AscensionSearchAliases.variants(d.name || '').map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
   const alternatives=queryVariants.flatMap(query=>nameVariants.map(name=>[...query,...name]));
   let keys;
-  if(identifier)keys=['id:'+identifier.slice(0,2)];
+  if(d.zone)keys=['zone:'+d.zone];
+  else if(identifier)keys=['id:'+identifier.slice(0,2)];
   else if(numeric)keys=['id:'+q.slice(0,2)];
   else if(alternatives.some(ts=>ts.some(t=>t.length>=2)))keys=alternatives.filter(ts=>ts.some(t=>t.length>=2)).map(ts=>ts.filter(t=>t.length>=2).map(t=>'name:'+t.slice(0,2)).sort((a,b)=>(m.search[a]?.count||0)-(m.search[b]?.count||0))[0]);
   else keys=d.kind?['browse:'+d.kind]:Object.keys(m.search).filter(k=>k.startsWith('browse:'));
@@ -25,9 +26,7 @@ function candidates(d) {
   return {parts,match};
 }
 function validate(d) {
-  // Zone UI is being developed separately. Refuse it until its predicate is wired
-  // here, so no SQL export can silently omit a newly introduced zone constraint.
-  if (d.zone || d.filters?.zone) throw Error('Zone filtering is not yet available in this converter version.');
+  if (d.zone && !Object.hasOwn(d.manifest.search, 'zone:' + d.zone)) throw Error('This zone is unavailable in this snapshot. Clear the zone filter or choose another zone.');
   const q = String(d.q || '').trim();
   if (q && !/^-?\d+$/.test(q) && !AscensionSearchAliases.variants(q).some(ts => ts.some(t => t.length >= 2))) throw Error('Enter at least two letters, or an exact numeric ID.');
   if (String(d.name || '').trim() && !AscensionSearchAliases.variants(d.name).some(ts => ts.some(t => t.length >= 2))) throw Error('Enter at least two letters in the Name column filter.');

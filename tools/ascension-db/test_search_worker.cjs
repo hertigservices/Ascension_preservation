@@ -172,3 +172,35 @@ test('two alias buckets sharing one physical part still emit each record once',a
  w.manifest.search['name:de'].parts=['shared'];w.manifest.search['name:di'].parts=['shared'];
  const result=await w.query({q:'DM'});assert.equal(result.total,1);assert.equal(result.rows[0][0],'a');assert.equal(w.fetches,1);
 });
+
+test('zone facets filter all pages and compose with name, ID, mode and source without cache leakage', async () => {
+  const rows = Array.from({length: 125}, (_, i) => row('quest/' + i, 'Elwynn task ' + i, i, 'quest', 'Client captures', i % 2 ? 'Draft' : 'CoA'));
+  const w = harness(rows);
+  w.assets.set('zone-elwynn', rows);
+  w.assets.set('zone-westfall', [row('other', 'Westfall task', 999, 'quest')]);
+  w.manifest.search['zone:area:12'] = {parts: ['zone-elwynn'], count: rows.length};
+  w.manifest.search['zone:area:40'] = {parts: ['zone-westfall'], count: 1};
+  let result = await w.query({zone: 'area:12', sort: 'id', page: 2});
+  assert.equal(result.total, 125); assert.equal(result.rows[0][5], '100');
+  result = await w.query({zone: 'area:12', kind: 'quest', name: 'Elwynn', recordId: '100', mode: 'CoA', source: 'Client captures'});
+  assert.equal(result.total, 1); assert.equal(result.rows[0][0], 'quest/100');
+  assert.equal((await w.query({zone: 'area:40', sort: 'id'})).rows[0][0], 'other');
+  assert.equal((await w.query({zone: 'area:12', kind: 'item'})).total, 0);
+  assert.equal((await w.query({zone: 'area:12', q: 'Westfall'})).total, 0);
+  assert.match((await w.query({zone: 'missing'})).error, /zone is unavailable/);
+  assert.equal((await w.query()).total, 125);
+});
+
+test('zone choices search names and IDs and only include relevant collections', async () => {
+  const {pathToFileURL} = require('node:url');
+  const {zoneOptions} = await import(pathToFileURL(path.join(__dirname, 'web/zone-filter.js')).href);
+  const facets = {zones: [
+    {key: 'area:12', label: 'Elwynn Forest', kinds: {quest: 4, npc: 2}},
+    {key: 'area:40', label: 'Westfall', kinds: {'world-object': 1}},
+    {key: 'unknown', label: 'Unknown zone', kinds: {quest: 2}},
+  ]};
+  assert.deepEqual(zoneOptions(facets, 'quest').map(z => z.key), ['area:12', 'unknown']);
+  assert.deepEqual(zoneOptions(facets, '', 'ELW for').map(z => z.key), ['area:12']);
+  assert.deepEqual(zoneOptions(facets, '', '40').map(z => z.key), ['area:40']);
+  assert.deepEqual(zoneOptions(facets, 'item'), []);
+});

@@ -72,7 +72,7 @@ export function bindSearchColumns(container, params) {
   container.querySelector('[data-apply-columns]').onclick = () => navigate(applied());
   container.querySelector('[data-clear-columns]').onclick = () => {
     const p = new URLSearchParams(params);
-    for (const [key] of columns) p.delete(key);
+    for (const key of [...columns.map(([key]) => key), 'zone']) p.delete(key);
     navigate(p);
   };
 }

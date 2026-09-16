@@ -4,8 +4,8 @@
 has **Convert to SQL** immediately before **Clear column filters**.
 It converts every matching source record, including later pages, and downloads
 `ascension-quests-<revision>.sql.gz`. Search text, source, game mode, name and exact
-ID constraints all apply. A separate Zone-filter feature can extend the shared
-predicate; until integrated, a supplied Zone constraint is refused rather than ignored.
+ID and Zone constraints all apply. Browsing and export use the same Zone facet
+and matching predicate; a zone absent from the pinned snapshot is refused.
 
 [Full SQL report and download](https://ascension-db.ascension-archive.workers.dev/quest-sql.html).
 
