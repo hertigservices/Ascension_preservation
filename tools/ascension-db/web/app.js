@@ -82,7 +82,7 @@ function home() {
       .filter(([k]) => manifest.kinds[k])
       .map(
         ([k, [desc, glyph]]) =>
-          `<a class="collection" href="#search?kind=${k}"><h3>${esc(label(k))}</h3><p>${desc}</p><span class="count">${num(manifest.kinds[k].records)} source records</span><span class="glyph" aria-hidden="true">${glyph}</span></a>`,
+          `<a class="collection" href="#search?kind=${k}"><h3>${esc(label(k))}</h3><p>${desc}</p><span class="count">${num(manifest.grouping?.kinds[k] ?? manifest.kinds[k].records)} ${manifest.grouping ? "results" : "source records"}</span><span class="glyph" aria-hidden="true">${glyph}</span></a>`,
       )
       .join(
         "",
@@ -104,7 +104,7 @@ function startSearch() {
   const p = location.hash.startsWith("#search?") ? params() : new URLSearchParams();
   p.delete("page");
   zoneFilter?.update(kind, kind && !manifest.zoneFilter?.kinds[kind] ? '' : zoneFilter.value);
-  for (const [k, v] of Object.entries({ q, kind, source, mode, zone: zoneFilter?.value || '' }))
+  for (const [k, v] of Object.entries({ q, kind, source, mode, locale: $("#locale").value, zone: zoneFilter?.value || '' }))
     if (v) p.set(k, v); else p.delete(k);
   const next = "#search?" + p;
   if (location.hash === next) route();
@@ -117,6 +117,7 @@ function runSearch(p) {
   $("#kind").value = p.get("kind") || "";
   $("#source").value = p.get("source") || "";
   $("#mode").value = p.get("mode") || "";
+  $("#locale").value = p.get("locale") || "";
   zoneFilter?.update($("#kind").value, p.get('zone') || '');
   page = Number(p.get("page") || 0);
   if (!Number.isSafeInteger(page) || page < 0 || page > Math.floor(Number.MAX_SAFE_INTEGER / 50)) page = 0;
@@ -131,6 +132,7 @@ function runSearch(p) {
     source: $("#source").value,
     mode: $("#mode").value,
     zone: p.get('zone') || '',
+    locale: p.get('locale') || '',
     page,
     ...searchColumnState(p),
   });
@@ -147,8 +149,8 @@ worker.onmessage = ({ data: d }) => {
   }
   notice("");
   $("#content").innerHTML =
-    `<div class="result-head"><h2>Search results</h2><p class="muted">${num(d.total)} source records · page ${page + 1} of ${Math.max(1, Math.ceil(d.total / 50))}</p></div><p class="muted">A shared ID may have several captures or sources. Open a record to inspect its exact fields.</p>${searchTable(d.rows, params(), manifest)}<div class="pagination"><button id="prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="next" ${(page + 1) * 50 >= d.total ? "disabled" : ""}>Next</button></div>`;
-  bindSearchColumns($("#content"), params());
+    `<div class="result-head"><h2>Search results</h2><p class="muted">${num(d.total)} ${manifest.grouping ? `results · ${num(d.sourceTotal)} matching source records` : "source records"} · page ${page + 1} of ${Math.max(1, Math.ceil(d.total / 50))}</p></div><p class="muted">${manifest.grouping ? "Identical content is grouped. Expand a result to see its matching source records; different preserved versions remain separate." : "A shared ID may have several captures or sources. Open a record to inspect its exact fields."}</p>${searchTable(d.rows, params(), manifest)}<div class="pagination"><button id="prev" ${page === 0 ? "disabled" : ""}>Previous</button><button id="next" ${(page + 1) * 50 >= d.total ? "disabled" : ""}>Next</button></div>`;
+  bindSearchColumns($("#content"), params(), d.rows, manifest);
   bindQuestExport($("#content"), params(), manifest, dataBase);
   for (const [s, delta] of [
     ["#prev", -1],
@@ -324,11 +326,14 @@ try {
   for (const [k, v] of Object.entries(manifest.kinds).sort((a, b) =>
     a[1].label.localeCompare(b[1].label),
   )) {
-    const o = new Option(v.label + " (" + num(v.records) + ")", k);
+    const o = new Option(v.label + " (" + num(manifest.grouping?.kinds[k] ?? v.records) + ")", k);
     $("#kind").add(o);
   }
   $("#source").replaceChildren(new Option("All sources", ""));
   for (const k of Object.keys(manifest.sources).sort()) $("#source").add(new Option(k,k));
+  $("#locale-filter").hidden = !manifest.grouping;
+  for (const language of manifest.locales || []) $("#locale").add(new Option(language, language));
+  $("#locale").onchange = startSearch;
   for (const k of manifest.modes) $("#mode").add(new Option(k, k));
   $("#snapshot").innerHTML =
     `Data snapshot <a href="https://github.com/hertigservices/ascension-data/commit/${manifest.revision}">${manifest.revision.slice(0, 8)}</a><br>Built ${esc(new Date(manifest.built_at).toLocaleString())}<br><a href="https://github.com/hertigservices/Ascension_preservation/tree/main/tools/ascension-db">Inspect how this archive works ↗</a>`;

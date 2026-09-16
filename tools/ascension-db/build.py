@@ -4,7 +4,7 @@ Only changed source blobs are parsed again. No private inbox or runtime input is
 import argparse, collections, csv, gzip, hashlib, html, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
 from pathlib import Path
 from atlas import build_atlas
-from zone_filter import build_zone_filter
+from grouped_search import build_grouped_search
 from datasets import resolve as resolve_datasets
 import attribution
 BASE=Path(__file__).resolve().parent
@@ -230,11 +230,7 @@ def main():
                     if icon: row.append(icon);line=dump(row)+'\n';icon_rows+=1
                     kinds[kind]+=1;modes.update(x.strip() for x in mode.split(',') if x.strip())
                     manifest['sources'][source]=manifest['sources'].get(source,0)+1
-                    if len(browsing[kind])<100: browsing[kind].append(row)
-                    # Exact IDs and word prefixes use separate namespaces. IDs stay strings.
-                    prefixes={'id:'+eid[:2], 'browse:'+kind}
-                    prefixes.update('name:'+t[:2] for t in tokens(title) if len(t)>=2)
-                    for prefix in prefixes: buckets.add(prefix,row,line)
+
             coverage.append(info)
             print(f'Indexed {path}: {fm["records"]:,}',flush=True)
         # Recovered historical pages are extracted as inert text, not executable archived HTML.
@@ -245,11 +241,9 @@ def main():
             kind=r.get('type','recovered-page');packed=[str(i),r['name'],kind,'Unspecified','Wayback recovery',r]
             zipped(a.out/'records'/fid/'0.json.gz',[packed]);manifest['files'][fid]={'path':'recovered/report.json','archive_url':r.get('archive_url'),'records':1}
             row=[f'{fid}/0/0',r['name'],kind,'Unspecified','Wayback recovery',str(i)]
-            kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1;browsing[kind].append(row)
-            buckets.add('browse:'+kind,row);buckets.add('id:'+str(i)[:2],row)
-            for t in {t[:2] for t in tokens(r['name']) if len(t)>=2}: buckets.add('name:'+t,row)
+            kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1
         atlas = build_atlas(a.out,manifest,data_view)
-        build_zone_filter(a.out,manifest,atlas,buckets,icons)
+        build_grouped_search(a.out,manifest,atlas,buckets,icons,stage)
         buckets.close()
         # Fold exact-ID buckets into first-two-digit buckets to keep the asset count bounded.
         # Prefix keys remain available for selecting candidate chunks; exact match is checked in browser.
@@ -272,7 +266,6 @@ def main():
         if icons:
             manifest['icons']={'base':a.icon_base,'extension':'.png','available':len(icons.available),'rows':icon_rows}
             print(f'Search icons: {icon_rows:,} rows reference one of {len(icons.available):,} published icons',flush=True)
-        for k,r in browsing.items(): manifest['browse'][k]=r
         manifest['kinds']={k:{'label':LABELS.get(k,k.replace('-',' ').title()),'records':n} for k,n in kinds.items()};manifest['modes']=sorted(modes)
         manifest['recovery']={'pages':len(recovery.get('records',[])),'attempted':len(recovery.get('results',[])),'inventory':len(recovery.get('inventory',[])),'complete_mirror':False}
         zipped(a.out/'coverage.json.gz',coverage);zipped(a.out/'recovery.json.gz',recovery)

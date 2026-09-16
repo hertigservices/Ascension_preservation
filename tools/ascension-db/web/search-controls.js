@@ -21,6 +21,17 @@ export function iconMarkup(row, manifest) {
   const src = base + encodeURIComponent(name) + (manifest.icons.extension || '.png');
   return `<img class="result-icon" src="${escapeHtml(src)}" alt="" width="28" height="28" loading="lazy" decoding="async">`;
 }
+function evidence(row, manifest) {
+  const members = row[7]?.members;
+  if (!members) return '';
+  const languages = [...new Set(members.map(m => m[3]))].sort().join(', ');
+  const memberHtml = m => {
+    const path = manifest.files?.[m[0].split('/')[0]]?.path || 'Original source record';
+    return `<li><a href="#record=${escapeHtml(m[0])}">${escapeHtml(m[2])} · ${escapeHtml(m[1])} · ${escapeHtml(m[3])}</a><small>${escapeHtml(path)}</small></li>`;
+  };
+  // Render a bounded initial list; additional exact records are revealed on demand.
+  return `<small class="result-languages">Language: ${escapeHtml(languages)}</small><details class="result-evidence"><summary>${members.length.toLocaleString()} matching source record${members.length === 1 ? '' : 's'}</summary><ol>${members.slice(0, 20).map(memberHtml).join('')}</ol>${members.length > 20 ? '<button type="button" data-more-members>Show more source records</button>' : ''}</details>`;
+}
 export function searchTable(rows, params, manifest) {
   const state = searchColumnState(params);
   const select = (key, items, empty) => `<select data-column-filter="${key}" aria-label="Filter ${key === 'kind' ? 'collection' : key === 'mode' ? 'game mode' : key}">${options(items, params.get(key) || '', empty)}</select>`;
@@ -36,9 +47,24 @@ export function searchTable(rows, params, manifest) {
       <th>${select('kind', collectionOptions, 'All collections')}</th>
       <th>${select('source', Object.keys(manifest.sources).sort().map(value => [value, value]), 'All sources')}</th>
       <th>${select('mode', manifest.modes.map(value => [value, value]), 'All modes')}</th>
-    </tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td><span class="result-name">${iconMarkup(r, manifest)}<a href="#record=${escapeHtml(r[0])}">${escapeHtml(r[1])}</a></span></td><td class="record-id">${escapeHtml(r[5])}</td><td>${escapeHtml(manifest.kinds[r[2]]?.label || r[2])}</td><td>${escapeHtml(r[4])}</td><td><span class="badge">${escapeHtml(r[3])}</span></td></tr>`).join('') : '<tr><td colspan="5" class="empty-search">No matching records. Try fewer words or clear a column filter.</td></tr>'}</tbody></table></div><div class="column-filter-actions"><span class="muted">Name uses word prefixes · ID matches exactly</span><button type="button" data-apply-columns>Apply column filters</button></div>`;
+    </tr></thead><tbody>${rows.length ? rows.map(r => `<tr><td><span class="result-name">${iconMarkup(r, manifest)}<a href="#record=${escapeHtml(r[0])}">${escapeHtml(r[1])}</a></span>${evidence(r, manifest)}</td><td class="record-id">${escapeHtml(r[5])}</td><td>${escapeHtml(manifest.kinds[r[2]]?.label || r[2])}</td><td>${escapeHtml(r[4])}</td><td><span class="badge">${escapeHtml(r[3])}</span></td></tr>`).join('') : '<tr><td colspan="5" class="empty-search">No matching records. Try fewer words or clear a column filter.</td></tr>'}</tbody></table></div><div class="column-filter-actions"><span class="muted">Name uses word prefixes · ID matches exactly</span><button type="button" data-apply-columns>Apply column filters</button></div>`;
 }
-export function bindSearchColumns(container, params) {
+export function bindSearchColumns(container, params, rows = [], manifest = {}) {
+  for (const [index, tr] of [...container.querySelectorAll('.search-results tbody > tr')].entries()) {
+    const button = tr.querySelector('[data-more-members]');
+    if (!button) continue;
+    let shown = 20;
+    button.onclick = () => {
+      const members = rows[index][7].members;
+      for (const m of members.slice(shown, shown + 20)) {
+        const li = document.createElement('li'), link = document.createElement('a'), path = document.createElement('small');
+        link.href = '#record=' + m[0]; link.textContent = `${m[2]} · ${m[1]} · ${m[3]}`;
+        path.textContent = manifest.files?.[m[0].split('/')[0]]?.path || 'Original source record';
+        li.append(link, path); tr.querySelector('.result-evidence ol').append(li);
+      }
+      shown += 20; if (shown >= members.length) button.remove();
+    };
+  }
   // An icon that fails to load (host outage, stale snapshot) becomes an empty slot instead of a broken image.
   // Inline onerror handlers are not allowed by the site's script policy, so one capturing listener handles all.
   if (!container.dataset.iconGuard) {
@@ -72,7 +98,7 @@ export function bindSearchColumns(container, params) {
   container.querySelector('[data-apply-columns]').onclick = () => navigate(applied());
   container.querySelector('[data-clear-columns]').onclick = () => {
     const p = new URLSearchParams(params);
-    for (const key of [...columns.map(([key]) => key), 'zone']) p.delete(key);
+    for (const key of [...columns.map(([key]) => key), 'zone', 'locale']) p.delete(key);
     navigate(p);
   };
 }

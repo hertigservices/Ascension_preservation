@@ -70,7 +70,7 @@ class CatalogTests(unittest.TestCase):
             manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
             self.assertNotIn(old,manifest['files'])
             row=manifest['browse']['display-icon'][0]
-            self.assertEqual(row[1],'inv_a');self.assertEqual(row[5:],[ '7','inv_a'])
+            self.assertEqual(row[1],'inv_a');self.assertEqual(row[5:7],[ '7','inv_a'])
             self.assertIn('id:7',manifest['search'])
             with patch.object(sys,'argv',args):build.main()
             again=json.loads((out/'manifest.json').read_text(encoding='utf-8'))

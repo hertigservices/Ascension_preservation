@@ -204,3 +204,58 @@ test('zone choices search names and IDs and only include relevant collections', 
   assert.deepEqual(zoneOptions(facets, '', '40').map(z => z.key), ['area:40']);
   assert.deepEqual(zoneOptions(facets, 'item'), []);
 });
+
+const grouped = (id, name, members, kind = 'item') => [members[0][0], name, kind,
+  [...new Set(members.flatMap(m=>m[1].split(',')))].sort().join(','), [...new Set(members.map(m=>m[2]))].sort().join(', '),
+  String(id), '', {id: 'content-' + id, members}];
+test('content groups filter the same member across source, mode and locale', async () => {
+  const w=harness([grouped(375250,'Rune',[
+    ['english/0/0','CoA','Client captures','enUS'],
+    ['french/0/0','Draft','Client captures','frFR'],
+    ['web/0/0','CoA','Exiles DB','frFR'],
+  ])]);
+  let r=await w.query({q:'375250'});
+  assert.equal(r.total,1);assert.equal(r.sourceTotal,3);
+  r=await w.query({mode:'CoA',source:'Client captures',locale:'frFR'});
+  assert.equal(r.total,0,'facets from different members must not cross-match');
+  r=await w.query({mode:'Draft',source:'Client captures',locale:'frFR'});
+  assert.equal(r.total,1);assert.equal(r.sourceTotal,1);assert.equal(r.rows[0][0],'french/0/0');
+  assert.deepEqual(r.rows[0][7].members,[['french/0/0','Draft','Client captures','frFR']]);
+  assert.equal(r.rows[0][3],'Draft');
+  assert.equal((await w.query({locale:'enUS'})).sourceTotal,1);
+  assert.equal((await w.query({locale:'frFR'})).sourceTotal,2);
+  assert.equal((await w.query()).sourceTotal,3,'cached filter changes must not lose evidence');
+});
+test('group pagination, aliases and sorting retain variants and count matching records',async()=>{
+  const rows=Array.from({length:1105},(_,i)=>grouped(i,'Blackwing Lair BWL',[
+    ['a/'+i+'/0','CoA','Client captures','enUS'], ['b/'+i+'/0','Draft','Client captures','frFR'],
+  ]));
+  const w=harness(rows,101);
+  const first=await w.query({q:'bwl',sort:'id'});
+  assert.equal(first.total,1105);assert.equal(first.sourceTotal,2210);
+  const after=await w.query({q:'bwl',sort:'id',page:20,locale:'frFR'});
+  assert.equal(after.rows[0][5],'1000');assert.equal(after.sourceTotal,1105);
+  assert(after.rows.every(r=>r[0].startsWith('b/')));
+  const cached=await w.query({q:'bwl',sort:'id',page:21,locale:'frFR'});
+  assert.equal(cached.sourceTotal,1105);assert.equal(cached.rows[0][5],'1050');
+  const reverse=await w.query({q:'bwl',sort:'id',dir:'desc'});
+  assert.equal(reverse.rows[0][5],'1104');
+});
+test('zone subsets never acquire the modes or languages of siblings outside the zone',async()=>{
+  const all=grouped(1,'Task', [['a/0/0','CoA','A','enUS'],['b/0/0','Draft','B','frFR']],'quest');
+  const w=harness([all]);
+  w.assets.set('zone',[grouped(1,'Task',[all[7].members[0]],'quest')]);
+  w.manifest.search['zone:area:12']={parts:['zone'],count:1};
+  assert.equal((await w.query({zone:'area:12',locale:'frFR'})).total,0);
+  assert.equal((await w.query({zone:'area:12',mode:'Draft'})).total,0);
+  assert.equal((await w.query({zone:'area:12',locale:'enUS'})).sourceTotal,1);
+});
+test('expanded group evidence escapes original file paths and all facet text',async()=>{
+  const {pathToFileURL}=require('node:url');
+  const {searchTable}=await import(pathToFileURL(path.join(__dirname,'web/search-controls.js')).href);
+  const evil='<script>evil()</script>';
+  const r=grouped(1,'Name',[['a/0/0',evil,evil,evil]]);
+  const html=searchTable([r],new URLSearchParams(),{kinds:{item:{label:'Items'}},sources:{},modes:[],files:{a:{path:evil}}});
+  assert(!html.includes('<script>'));assert(html.includes('matching source record'));
+  assert(html.includes('#record=a/0/0'));assert(html.includes('&lt;script&gt;'));
+});

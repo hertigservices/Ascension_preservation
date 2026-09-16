@@ -11,21 +11,28 @@
       check();
       const rows = await load(parts[i]);
       if (!Array.isArray(rows)) throw Error('Invalid search partition');
-      for (const row of rows) if (match(row, parts[i]) && !seen.has(row[0])) {
-        if (!/^[a-z0-9]+\/\d+\/\d+$/.test(row[0])) throw Error('Invalid catalog record key');
-        seen.add(row[0]);
-        const [fid, part, offset] = row[0].split('/');
-        if (!request.manifest.files[fid]) throw Error('Missing source identity');
-        const path = `records/${fid}/${part}.json.gz`;
-        if (!groups.has(path)) groups.set(path, []);
-        groups.get(path).push({row, fid, offset: Number(offset)});
+      for (const candidate of rows) {
+        const matched = match(candidate, parts[i]);
+        if (!matched) continue;
+        const members = matched[7]?.members || [[matched[0], matched[3], matched[4]]];
+        for (const member of members) {
+          const row = [member[0], matched[1], matched[2], member[1], member[2], matched[5]];
+          if (seen.has(row[0])) continue;
+          if (!/^[a-z0-9]+\/\d+\/\d+$/.test(row[0])) throw Error('Invalid catalog record key');
+          seen.add(row[0]);
+          const [fid, part, offset] = row[0].split('/');
+          if (!request.manifest.files[fid]) throw Error('Missing source identity');
+          const path = `records/${fid}/${part}.json.gz`;
+          if (!groups.has(path)) groups.set(path, []);
+          groups.get(path).push({row, fid, offset: Number(offset)});
+        }
       }
       progress({phase: 'Finding matching quests', done: i + 1, total: parts.length, records: seen.size});
     }
     if (!seen.size) throw Error('No quests match these filters.');
     const sql = AscensionQuestSQL, result = sql.summary();
     await write(sql.header({revision: request.manifest.revision, catalog: request.dataBase,
-      filters: request.filters || {q: request.q || '', kind: request.kind, source: request.source || '', mode: request.mode || '', name: request.name || '', id: request.recordId || ''},
+      filters: request.filters || {q: request.q || '', kind: request.kind, source: request.source || '', mode: request.mode || '', locale: request.locale || '', zone: request.zone || '', name: request.name || '', id: request.recordId || ''},
       item_evidence_snapshot: request.itemEvidence?.cache_snapshot || null, expected_records: seen.size}));
     let done = 0;
     for (const [path, entries] of groups) {
