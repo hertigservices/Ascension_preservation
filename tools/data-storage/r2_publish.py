@@ -77,14 +77,5 @@ def main():
     ap=argparse.ArgumentParser();ap.add_argument('--input',type=Path,required=True);ap.add_argument('--report',type=Path,required=True);ap.add_argument('--kind',choices=['catalog','media'],default='catalog');ap.add_argument('--channel',default='catalog');ap.add_argument('--bucket',default='ascension-public-data');ap.add_argument('--upload',action='store_true');a=ap.parse_args()
     report=inventory(a.input,a.kind);atomic(a.report,report)
     if not a.upload:print(json.dumps({'snapshot':report['snapshot'],'objects':len(report['files']),'bytes':sum(v['bytes'] for v in report['files'].values()),'uploaded':False}));return
-    gateway=os.environ.get('ASCENSION_PUBLICATION_URL')
-    if gateway:
-        from gateway import Gateway
-        client=Gateway(gateway,os.environ['ASCENSION_PUBLICATION_TOKEN'])
-        print(json.dumps(publish(client,a.bucket,a.input,report,a.channel)));return
-    import boto3
-    endpoint=os.environ.get('ASCENSION_R2_ENDPOINT')
-    if not endpoint or not re.fullmatch(r'https://[a-f0-9]+\.r2\.cloudflarestorage\.com',endpoint):raise ValueError('Set ASCENSION_R2_ENDPOINT to the account S3 endpoint')
-    client=boto3.client('s3',endpoint_url=endpoint,region_name='auto')
-    print(json.dumps(publish(client,a.bucket,a.input,report,a.channel)))
+    raise SystemExit('Full-snapshot uploads are retired. Use the WD-backed live_runner.py controller; it enforces backup, reuse, retention and budgets.')
 if __name__=='__main__':main()

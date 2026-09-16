@@ -3,6 +3,36 @@ const safe = s => /^[a-zA-Z0-9_./-]+$/.test(s) && !s.split('/').some(p => p === 
 const imageKey = s => typeof s==='string' && !s.includes('\\') && !/[\u0000-\u001f\u007f]/.test(s) && !s.split('/').some(p=>!p||p==='.'||p==='..') && /^images\/.+\.(png|jpe?g|webp|gif|avif|svg)$/i.test(s);
 const valid = s => safe(s) && /^(catalog|media)\/(current\.json|snapshots\/[0-9a-f]{64}\/.+)$/.test(s);
 const publicHeaders = {'Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff'};
+const readCache = new WeakMap();
+async function cachedJson(bucket,key) {
+  let cache=readCache.get(bucket);if(!cache){cache=new Map();readCache.set(bucket,cache);}
+  const hit=cache.get(key);if(hit&&hit.until>Date.now())return hit.value;
+  const object=await bucket.get(key);
+  if(object&&object.size>1024*1024)throw Error('Catalog index exceeds the read limit');
+  const value=object?await object.json():null;
+  // Small immutable shards, never a whole multi-megabyte manifest. Bound isolate memory.
+  if(cache.size>=128)cache.delete(cache.keys().next().value);
+  cache.set(key,{value,until:Date.now()+(value?60000:1000)});return value;
+}
+const hex=bytes=>Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join('');
+const physical=s=>typeof s==='string'&&safe(s)&&(/^catalog\/objects\/[a-f0-9]{64}$/.test(s)||/^catalog\/snapshots\/[a-f0-9]{64}\/.+/.test(s));
+const logicalType=key=>key.endsWith('.gz')?'application/gzip':key.endsWith('.json')?'application/json':key.endsWith('.js')?'text/javascript':key.endsWith('.css')?'text/css':key.endsWith('.html')?'text/html':'application/octet-stream';
+async function publicObject(bucket,key,head) {
+  const match=/^catalog\/snapshots\/([a-f0-9]{64})\/(.+)$/.exec(key);
+  if(!match)return {object:await (head?bucket.head(key):bucket.get(key))};
+  const base=`catalog/snapshots/${match[1]}/`,name=match[2];
+  const layout=await cachedJson(bucket,base+'layout.json');
+  if(!layout)return {object:await (head?bucket.head(key):bucket.get(key))}; // Legacy during migration.
+  if(layout.schema!=='ascension-live-layout-1'||layout.snapshot!==match[1])throw Error('Invalid catalog layout');
+  if(name==='storage-manifest.json')return {object:await (head?bucket.head(key):bucket.get(key))};
+  const shard=hex(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(name))).slice(0,2);
+  if(!layout.shards?.[shard])return {object:null};
+  const index=await cachedJson(bucket,base+'_index/'+shard+'.json'),entry=index?.[name];
+  if(!entry||!physical(entry.key))return {object:null};
+  const object=await (head?bucket.head(entry.key):bucket.get(entry.key));
+  if(object&&(object.size!==entry.bytes||(object.customMetadata?.sha256&&object.customMetadata.sha256!==entry.sha256)))throw Error('Catalog object differs');
+  return {object,type:logicalType(name),sha:entry.sha256};
+}
 async function authorized(request, env) {
   if (!env.PUBLISH_TOKEN) return false;
   const hash = async s => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
@@ -14,6 +44,8 @@ export default {
     const url=new URL(request.url);let key;
     try {key=decodeURIComponent(url.pathname.slice(1));} catch {return new Response('Invalid path',{status:400});}
     const admin=key.startsWith('_publish/');
+    // Production is read-only. The WD-backed controller is the sole S3 writer.
+    if(admin&&env.LEGACY_PUBLICATION_ENABLED!=='true')return new Response('Publication is managed by the local backup controller',{status:405});
     if (admin) {
       if (!await authorized(request,env))return new Response('Unauthorized',{status:401});
       key=key.slice(9);
@@ -62,9 +94,14 @@ export default {
       return Response.json({ETag:object.httpEtag});
     }
     if(!['GET','HEAD'].includes(request.method))return new Response('Read only',{status:405,headers:{...headers,Allow:'GET, HEAD'}});
-    const object=await (request.method==='HEAD'?env.PUBLIC_DATA.head(key):env.PUBLIC_DATA.get(key));
-    if(!object)return new Response('Not found',{status:404,headers});
+    let resolved;
+    try {resolved=await publicObject(env.PUBLIC_DATA,key,request.method==='HEAD');}
+    catch{return new Response('Catalog unavailable; please refresh',{status:503,headers});}
+    const object=resolved.object;
+    if(!object)return new Response('This catalog has been replaced. Refresh to load the current catalog.',{status:key.startsWith('catalog/snapshots/')?410:404,headers});
     const h=new Headers(headers);object.writeHttpMetadata(h);h.set('ETag',object.httpEtag);h.set('X-Object-Sha256',object.customMetadata?.sha256||'');
+    if(resolved.type)h.set('Content-Type',resolved.type);
+    if(resolved.sha)h.set('X-Object-Sha256',resolved.sha);
     if(key.toLowerCase().endsWith('.svg'))h.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; sandbox");
     h.delete('Content-Encoding'); // AscensionDB decompresses .gz itself.
     h.set('Cache-Control',admin||key.endsWith('/current.json')?'no-store':'public, max-age=31536000, immutable');

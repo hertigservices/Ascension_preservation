@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "component": "live-catalog-publisher",
+  "files": [
+    {
+      "source": "tools/data-storage/dataset.py",
+      "destination": "tools/data-storage/dataset.py"
+    },
+    {
+      "source": "tools/data-storage/gateway.py",
+      "destination": "tools/data-storage/gateway.py"
+    },
+    {
+      "source": "tools/data-storage/live_backup.py",
+      "destination": "tools/data-storage/live_backup.py"
+    },
+    {
+      "source": "tools/data-storage/live_catalog.py",
+      "destination": "tools/data-storage/live_catalog.py"
+    },
+    {
+      "source": "tools/data-storage/live_runner.py",
+      "destination": "tools/data-storage/live_runner.py"
+    },
+    {
+      "source": "tools/data-storage/r2_publish.py",
+      "destination": "tools/data-storage/r2_publish.py"
+    },
+    {
+      "source": "tools/ascension-db/atlas.py",
+      "destination": "tools/ascension-db/atlas.py"
+    },
+    {
+      "source": "tools/ascension-db/atlas_metadata.py",
+      "destination": "tools/ascension-db/atlas_metadata.py"
+    },
+    {
+      "source": "tools/ascension-db/attribution.py",
+      "destination": "tools/ascension-db/attribution.py"
+    },
+    {
+      "source": "tools/ascension-db/audit_attribution.py",
+      "destination": "tools/ascension-db/audit_attribution.py"
+    },
+    {
+      "source": "tools/ascension-db/build.py",
+      "destination": "tools/ascension-db/build.py"
+    },
+    {
+      "source": "tools/ascension-db/capture_instance_maps.py",
+      "destination": "tools/ascension-db/capture_instance_maps.py"
+    },
+    {
+      "source": "tools/ascension-db/datasets.py",
+      "destination": "tools/ascension-db/datasets.py"
+    },
+    {
+      "source": "tools/ascension-db/grouped_search.py",
+      "destination": "tools/ascension-db/grouped_search.py"
+    },
+    {
+      "source": "tools/ascension-db/instance_maps.py",
+      "destination": "tools/ascension-db/instance_maps.py"
+    },
+    {
+      "source": "tools/ascension-db/recover.py",
+      "destination": "tools/ascension-db/recover.py"
+    },
+    {
+      "source": "tools/ascension-db/validate.py",
+      "destination": "tools/ascension-db/validate.py"
+    },
+    {
+      "source": "tools/ascension-db/validate_atlas.py",
+      "destination": "tools/ascension-db/validate_atlas.py"
+    },
+    {
+      "source": "tools/ascension-db/validate_groups.py",
+      "destination": "tools/ascension-db/validate_groups.py"
+    },
+    {
+      "source": "tools/ascension-db/zone_filter.py",
+      "destination": "tools/ascension-db/zone_filter.py"
+    },
+    {
+      "source": "tools/data-storage/LIVE-ONLY.md",
+      "destination": "LIVE-ONLY.md"
+    }
+  ]
+}

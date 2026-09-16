@@ -1,5 +1,11 @@
 # Ascension public storage and downloads
 
+**Current policy (September 16, 2026):** WD-backed local publication replaces the
+legacy full-snapshot CI publisher. R2 retains only the current catalog's referenced
+content and images. See [LIVE-ONLY.md](LIVE-ONLY.md) for the active layout, limits,
+backup/restore and operation. The historical gateway/CI instructions below describe
+the original migration and must not be used to bypass the local controller.
+
 GitHub is the front door: source code, small versioned manifests, and links. Public
 bulk datasets belong in GitHub Releases. AscensionDB catalogs and preserved images
 belong in the separate `ascension-public-data` R2 bucket. Original donations and
