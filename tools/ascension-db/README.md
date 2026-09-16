@@ -93,6 +93,29 @@ Tracking markers use small inline SVG icons and screen-space proximity grouping.
 
 Atlas zone search, map location search, database search and the Name column recognize a shared, reviewed set of dungeon/raid/city shortcuts (BWL, MC, LBRS, SM lib, and others). Search includes literal matches and every recognized meaning of ambiguous aliases such as DM. IDs stay exact, wing queries stay specific, and alias unions retain each source record once before sorting/pagination. Names and map identities are never rewritten.
 
+## Zone filtering
+
+Quests, creatures, world-object/creature observations, loot observations and instance
+reference NPCs have a Zone combobox beside the collection filters. Type a name or
+area ID to narrow the list, scroll to browse, or use arrow keys and Enter to select.
+The choices reflect the selected collection. The exact zone selection is retained
+in the URL and combines with name, ID, source, mode, sorting and pagination.
+
+The index uses positive quest `ZoneOrSort` area IDs, explicit Exiles area/location
+claims, all catalogue `zone_list` entries (even without usable coordinates), loot
+observation zones and explicit instance reference floors. Recorded sub-zones also
+match their published parent areas. Negative quest categories
+and server map IDs are not interpreted as zone IDs. Unknown/custom area IDs stay
+searchable with an `Area <ID>` label if no name is known. Records without zone
+evidence remain under Unknown zone; locations are never copied between matching
+entity IDs in different sources or modes. These are recorded zones/locations, not
+a complete spawn census. Existing source records and atlas geometry are unchanged.
+
+Zone partitions use the existing content-addressed search format, so filtering
+applies before sorting/paging without loading all record details in the browser.
+Older manifests without `zoneFilter` continue to work with the control hidden.
+Run `python -m unittest test_zone_filter` and `node --test test_search_worker.cjs`.
+
 ## Search icons
 
 Search results show an icon beside the name when the build is given an icon host: `--icon-base`, the `ASCENSIONDB_ICON_BASE` environment variable, or the reusable workflow's optional `icon_base` input. Without one, the column is omitted.

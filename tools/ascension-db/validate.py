@@ -27,14 +27,26 @@ def validate(root,allow_sample=False):
         if count!=info['records']: raise ValueError(f'Records missing for {info["path"]}: {count} != {info["records"]}')
         total+=count
     if total!=m['records']: raise ValueError('Total detail count mismatch')
+    zone_counts={}
     for group,v in m['search'].items():
         count=0
+        facet_counts=collections.Counter()
         for path in v['parts']:
             for r in json.load(gzip.open(root/path,'rt',encoding='utf-8')):
                 fid,part,offset=r[0].split('/')
                 if fid not in m['files'] or (fid,part) not in part_counts or not 0 <= int(offset) < part_counts[(fid,part)]:raise ValueError('Search result points at a missing record')
                 count+=1
+                if group.startswith('zone:'): facet_counts[r[2]]+=1
         if count!=v['count']: raise ValueError('Search partition count mismatch')
+        if group.startswith('zone:'): zone_counts[group[5:]]=dict(facet_counts)
+    if 'zoneFilter' in m:
+        facets=m['zoneFilter']
+        if facets.get('schema')!='ascension-zones-1':raise ValueError('Invalid zone facet schema')
+        expected={z['key']:z['kinds'] for z in facets['zones']}
+        if len(expected)!=len(facets['zones']) or expected!=zone_counts:raise ValueError('Zone facet counts do not match search partitions')
+        for zone in facets['zones']:
+            if not zone['label'] or zone['count']!=sum(zone['kinds'].values()):raise ValueError('Invalid zone facet label/count')
+            if any(n>facets['kinds'].get(k,0) for k,n in zone['kinds'].items()):raise ValueError('Invalid zone collection count')
     atlas=validate_atlas(root,m,part_counts)
     print('ATLAS VALID:',atlas,flush=True)
     print(f'VALID: {total:,} source records; {len(coverage):,} published files; all detail and search partitions readable.',flush=True)

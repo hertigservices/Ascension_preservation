@@ -1,6 +1,7 @@
 import {collectionDirectory, collectionLabel} from './collections.js';
 import {renderCoverage} from "./coverage-controls.js";
 import {searchColumnState, searchTable, bindSearchColumns} from './search-controls.js';
+import {bindZoneFilter} from './zone-filter.js';
 import {showAtlas, atlasRecordLinks, closeAtlas} from './atlas.js';
 const $ = (s) => document.querySelector(s),
   esc = (s) =>
@@ -89,6 +90,7 @@ function home() {
 function table(rows) {
   return `<div class="table-wrap"><table><thead><tr><th>Name / ID</th><th>Collection</th><th>Source</th><th>Game mode</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="#record=${esc(r[0])}">${esc(r[1])}</a><small>ID ${esc(r[5])}</small></td><td>${esc(label(r[2]))}</td><td>${esc(r[4])}</td><td><span class="badge">${esc(r[3])}</span></td></tr>`).join("")}</tbody></table></div>`;
 }
+let zoneFilter;
 function startSearch() {
   const q = $("#query").value.trim(),
     kind = $("#kind").value,
@@ -100,7 +102,8 @@ function startSearch() {
   }
   const p = location.hash.startsWith("#search?") ? params() : new URLSearchParams();
   p.delete("page");
-  for (const [k, v] of Object.entries({ q, kind, source, mode }))
+  zoneFilter?.update(kind, kind && !manifest.zoneFilter?.kinds[kind] ? '' : zoneFilter.value);
+  for (const [k, v] of Object.entries({ q, kind, source, mode, zone: zoneFilter?.value || '' }))
     if (v) p.set(k, v); else p.delete(k);
   const next = "#search?" + p;
   if (location.hash === next) route();
@@ -111,6 +114,7 @@ function runSearch(p) {
   $("#kind").value = p.get("kind") || "";
   $("#source").value = p.get("source") || "";
   $("#mode").value = p.get("mode") || "";
+  zoneFilter?.update($("#kind").value, p.get('zone') || '');
   page = Number(p.get("page") || 0);
   if (!Number.isSafeInteger(page) || page < 0 || page > Math.floor(Number.MAX_SAFE_INTEGER / 50)) page = 0;
   notice("Searching the preserved collection…");
@@ -123,6 +127,7 @@ function runSearch(p) {
     kind: $("#kind").value,
     source: $("#source").value,
     mode: $("#mode").value,
+    zone: p.get('zone') || '',
     page,
     ...searchColumnState(p),
   });
@@ -307,6 +312,8 @@ try {
   if (!r.ok)
     throw Error("The catalog is unavailable. Please try again shortly.");
   manifest = await r.json();
+  zoneFilter = bindZoneFilter($('#zone-filter'), manifest.zoneFilter, startSearch);
+  zoneFilter.update('');
   for (const [key, entry] of Object.entries(manifest.kinds)) entry.label = collectionLabel(key, entry);
   manifest.modes = [...new Set(manifest.modes.flatMap(m=>m.split(/[,|]/).map(s=>s.trim()).filter(Boolean)))].sort();
   for (const [k, v] of Object.entries(manifest.kinds).sort((a, b) =>

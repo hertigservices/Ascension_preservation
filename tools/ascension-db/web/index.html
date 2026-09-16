@@ -82,7 +82,19 @@
             <select id="mode">
               <option value="">All / unspecified</option>
             </select></label
-          ><span>Names use word-prefix search · IDs match exactly</span>
+          ><div id="zone-filter" class="zone-filter" hidden>
+            <label for="zone-input">Zone</label>
+            <div class="zone-combobox">
+              <div class="zone-input-row">
+                <input id="zone-input" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="zone-options" aria-describedby="zone-help" placeholder="All zones · type to search" autocomplete="off" maxlength="200">
+                <button type="button" data-zone-clear aria-label="Clear zone filter" hidden>×</button>
+                <button type="button" data-zone-toggle aria-label="Browse zones" aria-controls="zone-options">▾</button>
+              </div>
+              <div id="zone-options" role="listbox" aria-label="Zones" hidden></div>
+              <span class="sr-only" data-zone-status role="status"></span>
+              <span class="sr-only" id="zone-help">Type to find a zone, or use the arrow keys to browse and Enter to select. Escape closes the list.</span>
+            </div>
+          </div><span>Names use word-prefix search · IDs match exactly</span>
         </div>
       </form>
       <div id="notice" role="status" aria-live="polite"></div>

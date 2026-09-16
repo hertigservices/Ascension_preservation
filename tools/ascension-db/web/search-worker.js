@@ -85,7 +85,8 @@ function candidates(d) {
   const nameVariants=AscensionSearchAliases.variants(d.name || '').map(ts=>ts.filter(t=>t.length>=2||/^\d+$/.test(t)));
   const alternatives=queryVariants.flatMap(query=>nameVariants.map(name=>[...query,...name]));
   let keys;
-  if(identifier)keys=['id:'+identifier.slice(0,2)];
+  if(d.zone)keys=['zone:'+d.zone];
+  else if(identifier)keys=['id:'+identifier.slice(0,2)];
   else if(numeric)keys=['id:'+q.slice(0,2)];
   else if(alternatives.some(ts=>ts.some(t=>t.length>=2)))keys=alternatives.filter(ts=>ts.some(t=>t.length>=2)).map(ts=>ts.filter(t=>t.length>=2).map(t=>'name:'+t.slice(0,2)).sort((a,b)=>(m.search[a]?.count||0)-(m.search[b]?.count||0))[0]);
   else keys=d.kind?['browse:'+d.kind]:Object.keys(m.search).filter(k=>k.startsWith('browse:'));
@@ -108,12 +109,13 @@ onmessage = async ({ data: d }) => {
   if (d.cancel) return;
   const controller = activeController = new AbortController();
   try {
+    if (d.zone && !Object.hasOwn(d.manifest.search, 'zone:' + d.zone)) throw Error('This zone is unavailable in this snapshot. Clear the zone filter or choose another zone.');
     const q = String(d.q || '').trim();
     if (q && !/^-?\d+$/.test(q) && !AscensionSearchAliases.variants(q).some(ts=>ts.some(t=>t.length>=2))) throw Error('Enter at least two letters, or an exact numeric ID.');
     if (String(d.name || '').trim() && !AscensionSearchAliases.variants(d.name).some(ts=>ts.some(t=>t.length>=2))) throw Error('Enter at least two letters in the Name column filter.');
     const sort = ['name', 'id', 'kind', 'source', 'mode'].includes(d.sort) ? d.sort : 'name';
     const dir = d.dir === 'desc' ? 'desc' : 'asc';
-    const key = JSON.stringify([d.dataBase, d.manifest.revision, d.manifest.built_at, q, d.name || '', d.recordId || '', d.kind || '', d.source || '', d.mode || '', sort, dir]);
+    const key = JSON.stringify([d.dataBase, d.manifest.revision, d.manifest.built_at, q, d.name || '', d.recordId || '', d.kind || '', d.source || '', d.mode || '', d.zone || '', sort, dir]);
     const page = Math.min(Number.isSafeInteger(d.page) && d.page >= 0 ? d.page : 0, Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE) - 1);
     const start = page * PAGE_SIZE;
     const end = start + PAGE_SIZE;
