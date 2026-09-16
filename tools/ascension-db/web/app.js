@@ -76,7 +76,7 @@ function home() {
     tree: ["Preserved class trees and talent references", "✦"],
   };
   $("#content").innerHTML =
-    `${manifest.sample ? '<div class="banner">Development preview: a small real-data sample. The full collection is being built.</div>' : ""}<div class="stats"><div class="stat"><strong>${num(manifest.records)}</strong><small>Searchable source records</small></div><div class="stat"><strong>${num(Object.keys(manifest.kinds).length)}</strong><small>Collections to explore</small></div><div class="stat"><strong>${num(manifest.total_files)}</strong><small>Published files accounted for</small></div><div class="stat"><strong>${num(manifest.recovery.pages)}</strong><small>Recovered historical pages</small></div></div>${heading("Browse the database")}<div class="collections">${Object.entries(
+    `${manifest.sample ? '<div class="banner">Development preview: a small real-data sample. The full collection is being built.</div>' : ""}<div class="stats"><div class="stat"><strong>${num(manifest.grouping?.groups ?? manifest.records)}</strong><small>${manifest.grouping ? "Distinct content results" : "Searchable source records"}</small></div><div class="stat"><strong>${num(Object.keys(manifest.kinds).length)}</strong><small>Collections to explore</small></div><div class="stat"><strong>${num(manifest.total_files)}</strong><small>Published files accounted for</small></div><div class="stat"><strong>${num(manifest.recovery.pages)}</strong><small>Recovered historical pages</small></div></div>${heading("Browse the database")}<div class="collections">${Object.entries(
       info,
     )
       .filter(([k]) => manifest.kinds[k])
@@ -86,7 +86,7 @@ function home() {
       )
       .join(
         "",
-      )}</div>${heading("All collections")}<div class="collection-directory" aria-label="All data collections">${collectionDirectory(manifest.kinds, esc)}</div>${heading("One archive. Distinct sources.")}<div class="source-grid"><article class="source-card"><h3>Captured from the client</h3><p>Published WDB records retain their game modes and capture metadata. Different versions remain separate.</p><a href="#search?source=Client%20captures&kind=item">Explore client captures →</a></article><article class="source-card"><h3>Recovered from the web</h3><p>Exiles DB, BisBeard and archived AscensionDB pages preserve additional descriptions and historical claims.</p><a href="#guides">View recovered pages →</a></article><article class="source-card"><h3>Every file accounted for</h3><p>Structured records are searchable. Binary captures, addon code and supporting files remain available as references.</p><a href="#coverage">Inspect sources & coverage →</a></article></div>`;
+      )}</div>${heading("All collections")}<div class="collection-directory" aria-label="All data collections">${collectionDirectory(manifest.kinds, esc, manifest.grouping)}</div>${heading("One archive. Distinct sources.")}<div class="source-grid"><article class="source-card"><h3>Captured from the client</h3><p>Published WDB records retain their game modes and capture metadata. Different versions remain separate.</p><a href="#search?source=Client%20captures&kind=item">Explore client captures →</a></article><article class="source-card"><h3>Recovered from the web</h3><p>Exiles DB, BisBeard and archived AscensionDB pages preserve additional descriptions and historical claims.</p><a href="#guides">View recovered pages →</a></article><article class="source-card"><h3>Every file accounted for</h3><p>Structured records are searchable. Binary captures, addon code and supporting files remain available as references.</p><a href="#coverage">Inspect sources & coverage →</a></article></div>`;
 }
 function table(rows) {
   return `<div class="table-wrap"><table><thead><tr><th>Name / ID</th><th>Collection</th><th>Source</th><th>Game mode</th></tr></thead><tbody>${rows.map((r) => `<tr><td><a href="#record=${esc(r[0])}">${esc(r[1])}</a><small>ID ${esc(r[5])}</small></td><td>${esc(label(r[2]))}</td><td>${esc(r[4])}</td><td><span class="badge">${esc(r[3])}</span></td></tr>`).join("")}</tbody></table></div>`;
@@ -128,9 +128,9 @@ function runSearch(p) {
     manifest,
     dataBase,
     q: $("#query").value,
-    kind: $("#kind").value,
-    source: $("#source").value,
-    mode: $("#mode").value,
+    kind: p.get("kind") || "",
+    source: p.get("source") || "",
+    mode: p.get("mode") || "",
     zone: p.get('zone') || '',
     locale: p.get('locale') || '',
     page,
@@ -354,7 +354,7 @@ if (manifest && modelContext?.registerTool) {
           name: "search_archive",
           title: "Search the Ascension archive",
           description:
-            "Search preserved source records by name prefix or exact numeric ID, update the visible results, and return the first page. Results are attributed historical evidence, not verified live-game facts.",
+            "Search preserved content by name prefix or exact numeric ID, update the visible results, and return the first page with matching original source links. Results are attributed historical evidence, not verified live-game facts.",
           inputSchema: {
             type: "object",
             properties: {
@@ -362,6 +362,7 @@ if (manifest && modelContext?.registerTool) {
               collection: { type: "string" },
               source: { type: "string" },
               mode: { type: "string" },
+              locale: { type: "string" },
             },
             required: ["query"],
             additionalProperties: false,
@@ -384,11 +385,13 @@ if (manifest && modelContext?.registerTool) {
               throw Error("Unknown source.");
             if (input.mode && !manifest.modes.includes(input.mode))
               throw Error("Unknown game mode.");
+            if (input.locale && !manifest.locales?.includes(input.locale)) throw Error("Unknown language.");
             const p = new URLSearchParams({ q: input.query.trim() });
             for (const [key, value] of [
               ["kind", input.collection],
               ["source", input.source],
               ["mode", input.mode],
+              ["locale", input.locale],
             ])
               if (value) p.set(key, value);
             history.replaceState(null, "", "#search?" + p);
@@ -406,6 +409,7 @@ if (manifest && modelContext?.registerTool) {
                 else
                   resolve({
                     total: data.total,
+                    sourceRecords: data.sourceTotal,
                     snapshot: manifest.revision,
                     records: data.rows.map((r) => ({
                       name: r[1],
@@ -414,6 +418,7 @@ if (manifest && modelContext?.registerTool) {
                       source: r[4],
                       id: r[5],
                       link: "#record=" + r[0],
+                      matchingSources: r[7]?.members.map(m => ({link: "#record=" + m[0], mode: m[1], source: m[2], locale: m[3]})),
                     })),
                   });
               };

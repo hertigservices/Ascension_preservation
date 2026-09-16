@@ -9,7 +9,29 @@ A static, searchable view of **all tracked files** in a published `hertigservice
 - Every other tracked file in Sources & coverage, linked to its exact source commit and original download: binary WDB/pack files, Lua code and observations, original supplemental databases, images, documentation and manifests.
 - A bounded Internet Archive recovery inventory, verified page captures and short excerpts linked to their originals. Recovered scripts are not executed; guide articles are not republished in full.
 
-**Searchable source-record counts are not unique game-entity counts.** A union view, a mode-specific capture, raw variant metadata and a website's claim can all describe the same ID. These remain separate. Selecting an ID across sources is a comparison aid, not proof that different entity types or planner IDs are interchangeable.
+Search results group records with identical preserved content across all collections.
+A group is keyed by collection, exact ID, title and complete typed payload. Only the
+four documented WDB-view bookkeeping fields (`_modes`, `_captured`, `_sources`,
+`_locales`) are excluded, and only for decoded cache-view paths. Unknown fields,
+translations, gameplay differences and other source claims remain distinct. This
+is exact content grouping, not a claim that grouped counts are unique game entities.
+
+Each result expands to the original source records and file paths. Mode, source,
+language and zone filters must match the **same member**, before sorting and paging;
+the main link opens a matching original. Zone partitions contain only the group's
+members actually assigned to that zone. Language comes from an explicit locale
+export or a singleton cache locale; aggregate mode/locale sets do not establish pairs.
+Unspecified language remains selectable. SQL export expands the filtered groups back
+to all matching original records, preserving its existing provenance and reward rules.
+
+Original records, source downloads, coverage counts and atlas observations are unchanged.
+`manifest.grouping` records content counts; `manifest.records` still counts source
+records. Search row field 8 contains `{id, members}`; each member is
+`[recordKey, mode, source, locale]`. Old ungrouped snapshots remain readable.
+SQLite bounds build memory; one group appears once per search bucket, so the browser
+keeps its bounded sorting windows. Groups over 24 MB fail publication explicitly.
+The validator verifies every member against the original content and facets and
+requires every original record exactly once across grouped collection buckets.
 
 ### Coverage boundaries
 
