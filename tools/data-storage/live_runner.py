@@ -1,7 +1,6 @@
 """Local scheduled catalog publisher. Credentials stay off the WD data volume."""
 import argparse
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
@@ -127,6 +126,9 @@ def run(config,*,force=False):
 
 
 def main():
+    # Filesystem mounting and the production process lock belong to the Linux entry point.
+    # Fingerprinting and archive rules remain importable for cross-platform verification.
+    import fcntl
     ap=argparse.ArgumentParser();ap.add_argument('--config',type=Path,required=True);ap.add_argument('--publish-now',action='store_true',help='Waive only the daily interval; all archive/storage/write limits still apply');args=ap.parse_args()
     config=json.loads(args.config.read_text())
     lock_path=args.config.with_suffix('.lock')
