@@ -83,3 +83,11 @@
   .filters .zone-filter label { flex: none; }
   .zone-combobox { width: 100%; }
 }
+
+.result-evidence { margin-top: .6rem; font-size: .82rem; }
+.result-evidence summary { cursor: pointer; color: var(--muted, #a6b7c3); }
+.result-evidence ol { margin: .6rem 0; padding-left: 1.2rem; }
+.result-evidence li { margin-bottom: .85rem; overflow-wrap: anywhere; }
+.result-evidence li small { display: block; margin-top: .25rem; }
+.result-languages { display: block; font-size: .78rem; color: var(--muted, #a6b7c3); margin-top: .3rem; }
+.result-evidence button { padding: .3rem .6rem; font-size: .8rem; }

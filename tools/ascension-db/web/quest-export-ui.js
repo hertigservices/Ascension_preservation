@@ -35,7 +35,7 @@ export function bindQuestExport(container, params, manifest, dataBase) {
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 60000);
       finish(`Downloaded ${data.result.records.toLocaleString()} quest source records, including ${data.result.item_rewards.toLocaleString()} item reward slots. SQL is gzip-compressed; details and any field issues are included.`);
     };
-    const scope = Object.fromEntries(['q', 'kind', 'source', 'mode', 'zone'].map(key => [key, selected.get(key) || '']));
+    const scope = Object.fromEntries(['q', 'kind', 'source', 'mode', 'zone', 'locale'].map(key => [key, selected.get(key) || '']));
     worker.postMessage({...scope, ...searchColumnState(selected),
       id: 1, manifest, dataBase, filters: Object.fromEntries(selected)});
   };

@@ -12,7 +12,7 @@ const labels = {
 export function collectionLabel(key, entry) {
   return labels[key] || entry.label || key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
 }
-export function collectionDirectory(kinds, escapeHtml) {
+export function collectionDirectory(kinds, escapeHtml, grouping) {
   return Object.entries(kinds).sort((a, b) => collectionLabel(a[0], a[1]).localeCompare(collectionLabel(b[0], b[1])))
-    .map(([key, entry]) => `<a href="#search?kind=${escapeHtml(encodeURIComponent(key))}"><span>${escapeHtml(collectionLabel(key, entry))}</span><small>${escapeHtml(Number(entry.records).toLocaleString())} source records</small></a>`).join('');
+    .map(([key, entry]) => `<a href="#search?kind=${escapeHtml(encodeURIComponent(key))}"><span>${escapeHtml(collectionLabel(key, entry))}</span><small>${escapeHtml(Number(grouping?.kinds[key] ?? entry.records).toLocaleString())} ${grouping ? "results" : "source records"}</small></a>`).join('');
 }

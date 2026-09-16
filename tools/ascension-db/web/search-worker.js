@@ -91,14 +91,14 @@ onmessage = async ({ data: d }) => {
     if (String(d.name || '').trim() && !AscensionSearchAliases.variants(d.name).some(ts=>ts.some(t=>t.length>=2))) throw Error('Enter at least two letters in the Name column filter.');
     const sort = ['name', 'id', 'kind', 'source', 'mode'].includes(d.sort) ? d.sort : 'name';
     const dir = d.dir === 'desc' ? 'desc' : 'asc';
-    const key = JSON.stringify([d.dataBase, d.manifest.revision, d.manifest.built_at, q, d.name || '', d.recordId || '', d.kind || '', d.source || '', d.mode || '', d.zone || '', sort, dir]);
+    const key = JSON.stringify([d.dataBase, d.manifest.revision, d.manifest.built_at, q, d.name || '', d.recordId || '', d.kind || '', d.source || '', d.mode || '', d.zone || '', d.locale || '', sort, dir]);
     const page = Math.min(Number.isSafeInteger(d.page) && d.page >= 0 ? d.page : 0, Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE) - 1);
     const start = page * PAGE_SIZE;
     const end = start + PAGE_SIZE;
     const compare = comparator(sort, dir, d.manifest);
     let saved = resultCache?.key === key ? resultCache : null;
     if (saved && (start >= saved.total || (start >= saved.offset && end <= saved.offset + saved.rows.length) || (start >= saved.offset && saved.offset + saved.rows.length === saved.total))) {
-      postMessage({ id: d.id, rows: saved.rows.slice(Math.max(0, start - saved.offset), end - saved.offset), total: saved.total }); return;
+      postMessage({ id: d.id, rows: saved.rows.slice(Math.max(0, start - saved.offset), end - saved.offset), total: saved.total, sourceTotal: saved.sourceTotal }); return;
     }
     const { parts, match } = AscensionSearchQuery.candidates(d);
     let offset = 0, anchor = null;
@@ -109,7 +109,7 @@ onmessage = async ({ data: d }) => {
     while (true) {
       const limit = Math.min(MAX_WINDOW, Math.max(WINDOW_SIZE, end - offset));
       const heap = new TopRows(limit, compare);
-      let total = 0;
+      let total = 0, sourceTotal = 0;
       for (let batch = 0; batch < parts.length; batch += 4) {
         const loaded = await Promise.all(parts.slice(batch, batch + 4).map(part => load((d.dataBase || '') + part, controller.signal)));
         for (let b = 0; b < loaded.length; b++) {
@@ -117,7 +117,8 @@ onmessage = async ({ data: d }) => {
         if (job !== latest) return;
         for (let j = 0; j < rows.length; j++) {
           const r = rows[j];
-          if (match(r,parts[i])) { total++; if (!anchor || compare(r, anchor) > 0) heap.add(r); }
+          const matched = match(r,parts[i]);
+          if (matched) { total++; sourceTotal += matched[7]?.members.length || 1; if (!anchor || compare(matched, anchor) > 0) heap.add(matched); }
           if (j && j % 4096 === 0) { await pause(); if (job !== latest) return; }
         }
         postMessage({ id: d.id, progress: i + 1, parts: parts.length, skipped: offset });
@@ -127,9 +128,9 @@ onmessage = async ({ data: d }) => {
       }
       const rows = heap.sorted();
       if (job !== latest) return;
-      resultCache = { key, offset, rows, total };
+      resultCache = { key, offset, rows, total, sourceTotal };
       if (end <= offset + rows.length || offset + rows.length >= total || start >= total || !rows.length) {
-        postMessage({ id: d.id, rows: start >= total ? [] : rows.slice(start - offset, end - offset), total }); return;
+        postMessage({ id: d.id, rows: start >= total ? [] : rows.slice(start - offset, end - offset), total, sourceTotal }); return;
       }
       offset += rows.length; anchor = rows.at(-1);
     }

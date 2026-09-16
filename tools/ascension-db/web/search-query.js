@@ -15,13 +15,27 @@ function candidates(d) {
   keys=[...new Set(keys)];
   const parts=[...new Set(keys.flatMap(k=>m.search[k]?.parts||[]))],partsByKey=new Map(keys.map(k=>[k,new Set(m.search[k]?.parts||[])]));
   const match=(r,part)=>{
-    if((d.kind&&r[2]!==d.kind)||(d.source&&r[4]!==d.source)||(d.mode&&!r[3].split(/[,|]/).map(s=>s.trim()).includes(d.mode))||(identifier&&r[5]!==identifier)||(numeric&&r[5]!==q))return false;
+    if((d.kind&&r[2]!==d.kind)||(identifier&&r[5]!==identifier)||(numeric&&r[5]!==q))return false;
     const tokens=words(r[1]);
     if(!alternatives.some(ts=>ts.every(t=>tokens.some(w=>/^\d+$/.test(t)?w===t:w.startsWith(t)))))return false;
     // An alias may read several name buckets. Assign each row one owning bucket,
     // preserving distinct record keys without an unbounded deduplication cache.
     if(keys.length>1){const owner=keys.find(k=>k.startsWith('browse:')?k==='browse:'+r[2]:k.startsWith('id:')?r[5].startsWith(k.slice(3)):tokens.some(t=>t.startsWith(k.slice(5))));if(!partsByKey.get(owner)?.has(part))return false;}
-    return true;
+    if (r[7]?.members) {
+      const members = r[7].members.filter(m => (!d.source || m[2] === d.source) &&
+        (!d.mode || m[1].split(/[,|]/).map(s => s.trim()).includes(d.mode)) &&
+        (!d.locale || m[3] === d.locale));
+      if (!members.length) return false;
+      // Keep correlated evidence together and open an exact matching record.
+      const result = r.slice();
+      result[0] = members[0][0];
+      result[3] = [...new Set(members.flatMap(m => m[1].split(/[,|]/).map(s => s.trim())))].sort().join(',');
+      result[4] = [...new Set(members.map(m => m[2]))].sort().join(', ');
+      result[7] = {...r[7], members, available: r[7].members.length};
+      return result;
+    }
+    if ((d.source && r[4] !== d.source) || (d.mode && !r[3].split(/[,|]/).map(s=>s.trim()).includes(d.mode)) || d.locale) return false;
+    return r;
   };
   return {parts,match};
 }

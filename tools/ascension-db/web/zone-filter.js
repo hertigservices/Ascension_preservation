@@ -49,7 +49,7 @@ export function bindZoneFilter(root, facets, onSelect) {
       option.textContent = zone.label;
       if (zone.key) {
         const count = document.createElement('small');
-        count.textContent = (kind ? zone.kinds[kind] : zone.count).toLocaleString();
+        count.textContent = (kind ? zone.kinds[kind] : zone.count).toLocaleString() + ' source records';
         option.append(count);
       }
       option.addEventListener('mousedown', event => event.preventDefault());

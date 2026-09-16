@@ -89,3 +89,20 @@ test('zone export uses the exact browse facet and composes with mode and later p
   assert.equal(single.records, 1);
   await assert.rejects(AscensionQuestExport.run({...request, zone: 'area:12', recordId: '130'}, {load: async p => assets.get(p), write: async () => {}}), /No quests/);
 });
+
+test('grouped quests export every matching original and never combine sibling filters',async()=>{
+  const records=[
+    ['1','Same quest','quest','CoA','Client captures',{RewardItem1:'375250',RewardAmount1:'3'}],
+    ['1','Same quest','quest','Draft','Client captures',{RewardItem1:'375250',RewardAmount1:'3'}],
+    ['1','Same quest','quest','CoA','Exiles DB',{RewardItem1:'375250',RewardAmount1:'3'}],
+  ];
+  const row=['a/0/0','Same quest','quest','CoA,Draft','Client captures, Exiles DB','1','',
+    {id:'group',members:[['a/0/0','CoA','Client captures','enUS'],['a/0/1','Draft','Client captures','frFR'],['a/0/2','CoA','Exiles DB','frFR']]}];
+  const manifest={revision:'test',files:{a:{path:'public/quests',blob:'test'}},search:{'browse:quest':{parts:['browse'],count:1}}};
+  const load=async p=>p==='browse'?[row]:records;
+  const run=async filter=>AscensionQuestExport.run({manifest,kind:'quest',...filter},{load,write:async()=>{}});
+  assert.equal((await run({})).records,3);
+  assert.equal((await run({locale:'frFR'})).records,2);
+  assert.equal((await run({locale:'frFR',mode:'Draft',source:'Client captures'})).records,1);
+  await assert.rejects(run({locale:'frFR',mode:'CoA',source:'Client captures'}),/No quests/);
+});

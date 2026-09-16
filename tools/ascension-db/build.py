@@ -4,7 +4,7 @@ Only changed source blobs are parsed again. No private inbox or runtime input is
 import argparse, collections, csv, gzip, hashlib, html, json, os, re, shutil, subprocess, sys, tempfile, time, unicodedata
 from pathlib import Path
 from atlas import build_atlas
-from zone_filter import build_zone_filter
+from grouped_search import build_grouped_search
 from datasets import resolve as resolve_datasets
 import attribution
 BASE=Path(__file__).resolve().parent
@@ -147,11 +147,11 @@ class Buckets:
     def __init__(self,root): self.root=root;self.handles=collections.OrderedDict();self.keys={}
     def add(self,key,row,line=None):
         filename=self.keys.get(key)
-        if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16];self.keys[key]=filename
+        if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16]+'.jsonl.gz';self.keys[key]=filename
         if key in self.handles: f=self.handles.pop(key)
         else:
             if len(self.handles)>=4096: self.handles.popitem(last=False)[1].close()
-            f=(self.root/filename).open('a',encoding='utf-8',buffering=65536)
+            f=gzip.open(self.root/filename,'at',encoding='utf-8',compresslevel=1)
         self.handles[key]=f;f.write(line if line is not None else dump(row)+'\n')
     def close(self):
         for f in self.handles.values(): f.close()
@@ -230,11 +230,7 @@ def main():
                     if icon: row.append(icon);line=dump(row)+'\n';icon_rows+=1
                     kinds[kind]+=1;modes.update(x.strip() for x in mode.split(',') if x.strip())
                     manifest['sources'][source]=manifest['sources'].get(source,0)+1
-                    if len(browsing[kind])<100: browsing[kind].append(row)
-                    # Exact IDs and word prefixes use separate namespaces. IDs stay strings.
-                    prefixes={'id:'+eid[:2], 'browse:'+kind}
-                    prefixes.update('name:'+t[:2] for t in tokens(title) if len(t)>=2)
-                    for prefix in prefixes: buckets.add(prefix,row,line)
+
             coverage.append(info)
             print(f'Indexed {path}: {fm["records"]:,}',flush=True)
         # Recovered historical pages are extracted as inert text, not executable archived HTML.
@@ -245,11 +241,9 @@ def main():
             kind=r.get('type','recovered-page');packed=[str(i),r['name'],kind,'Unspecified','Wayback recovery',r]
             zipped(a.out/'records'/fid/'0.json.gz',[packed]);manifest['files'][fid]={'path':'recovered/report.json','archive_url':r.get('archive_url'),'records':1}
             row=[f'{fid}/0/0',r['name'],kind,'Unspecified','Wayback recovery',str(i)]
-            kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1;browsing[kind].append(row)
-            buckets.add('browse:'+kind,row);buckets.add('id:'+str(i)[:2],row)
-            for t in {t[:2] for t in tokens(r['name']) if len(t)>=2}: buckets.add('name:'+t,row)
+            kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1
         atlas = build_atlas(a.out,manifest,data_view)
-        build_zone_filter(a.out,manifest,atlas,buckets,icons)
+        build_grouped_search(a.out,manifest,atlas,buckets,icons,stage)
         buckets.close()
         # Fold exact-ID buckets into first-two-digit buckets to keep the asset count bounded.
         # Prefix keys remain available for selecting candidate chunks; exact match is checked in browser.
@@ -264,7 +258,7 @@ def main():
                 if not chunk:return
                 content=dump(chunk).encode();h=hashlib.sha256(content).hexdigest()[:20];rel=f'search/{h}.json.gz';zipped(a.out/rel,chunk);parts.append(rel);chunk=[];size=0
             for name in files:
-                with (stage/name).open(encoding='utf-8') as f:
+                with textopen(stage/name) as f:
                     for line in f:
                         if len(chunk)>=12000 or size+len(line)>4000000: flush()
                         row=json.loads(line);chunk.append(row);count+=1;size+=len(line)
@@ -272,7 +266,6 @@ def main():
         if icons:
             manifest['icons']={'base':a.icon_base,'extension':'.png','available':len(icons.available),'rows':icon_rows}
             print(f'Search icons: {icon_rows:,} rows reference one of {len(icons.available):,} published icons',flush=True)
-        for k,r in browsing.items(): manifest['browse'][k]=r
         manifest['kinds']={k:{'label':LABELS.get(k,k.replace('-',' ').title()),'records':n} for k,n in kinds.items()};manifest['modes']=sorted(modes)
         manifest['recovery']={'pages':len(recovery.get('records',[])),'attempted':len(recovery.get('results',[])),'inventory':len(recovery.get('inventory',[])),'complete_mirror':False}
         zipped(a.out/'coverage.json.gz',coverage);zipped(a.out/'recovery.json.gz',recovery)
