@@ -63,7 +63,7 @@
 }
 
 .search-column-tools { flex-wrap: wrap; }
-.search-column-tools p { flex: 1 1 320px; }
+.search-column-tools p { flex: 1 1 auto; }
 .sql-export-status { overflow-wrap: anywhere; }
 .zone-filter { display: flex; align-items: center; gap: 8px; }
 .zone-filter[hidden], .zone-filter [hidden] { display: none; }
