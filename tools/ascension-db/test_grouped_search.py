@@ -65,4 +65,19 @@ class GroupTests(unittest.TestCase):
             subset=search_row('group',rows[1:])
             self.assertEqual(subset[0],'b');self.assertEqual(subset[3],'Draft');self.assertEqual(subset[7]['members'],[rows[1][7]])
 
+    def test_validation_rejects_lost_or_repeated_originals(self):
+        path='cachedata/union/itemcache.tsv.gz'
+        record=self.record()
+        gid=content_id(path,record)
+        rows=[['a/0/0','Rune','item','free-pick','Client captures','375250','',['a/0/0','free-pick','Client captures','Unspecified']],
+              ['b/0/0','Rune','item','free-pick','Client captures','375250','',['b/0/0','free-pick','Client captures','Unspecified']]]
+        manifest={'records':2,'grouping':{'schema':'ascension-content-groups-1','groups':1,'records':2,'kinds':{'item':1}}}
+        validator=GroupValidator(manifest)
+        try:
+            validator.record(path,'a/0/0',record);validator.record(path,'b/0/0',record)
+            validator.row('browse:item',search_row(gid,rows[:1]))
+            with self.assertRaisesRegex(ValueError,'every source'):validator.finish()
+            with self.assertRaisesRegex(ValueError,'more than one'):validator.row('browse:item',search_row(gid,rows[:1]))
+        finally:validator.close()
+
 if __name__=='__main__':unittest.main()
