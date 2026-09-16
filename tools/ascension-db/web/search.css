@@ -91,3 +91,7 @@
 .result-evidence li small { display: block; margin-top: .25rem; }
 .result-languages { display: block; font-size: .78rem; color: var(--muted, #a6b7c3); margin-top: .3rem; }
 .result-evidence button { padding: .3rem .6rem; font-size: .8rem; }
+@media (max-width: 580px) {
+  .filters label { flex: 1 1 calc(50% - 10px); min-width: 0; }
+  .filters select { max-width: none; }
+}
