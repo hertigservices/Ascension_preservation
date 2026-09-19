@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from atlas import write_gz
-from zone_filter import ZoneIndex, build_zone_filter
+from zone_filter import ZoneIndex, build_zone_filter, npc_zone_claims
 
 
 def record(kind, payload, eid='1', mode='Unspecified'):
@@ -49,6 +49,24 @@ class ZoneFilterTests(unittest.TestCase):
     def test_exiles_quest_uses_explicit_area_references_only(self):
         payload = {'references': [{'type': 'area', 'key': '12'}, {'type': 'map', 'key': '0'}, {'type': 'npc', 'key': '1'}]}
         self.assertEqual(self.index.memberships('supplemental/exiles-db/hash/quests.jsonl.gz', record('quest', payload)), {'area:12'})
+
+    def test_companion_npc_claims_join_only_to_exiles_npc_pages(self):
+        index = ZoneIndex(self.atlas, {'161700': {'10138'}})
+        exiles = 'supplemental/exiles-db/hash/npcs.jsonl.gz'
+        self.assertEqual(index.memberships(exiles, record('npc', {}, eid='161700')), {'area:10138'})
+        self.assertEqual(index.memberships('cachedata/union/creaturecache.tsv.gz', record('npc', {}, eid='161700')), set())
+        self.assertEqual(index.memberships(exiles, record('quest', {}, eid='161700')), set())
+
+    def test_claim_sidecars_are_validated_and_combined(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = root / 'supplemental/export/npc-zone-claims.tsv'
+            second = root / 'supplemental/reviewed/npc-zone-claims.tsv'
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text('npc_id\tarea_id\tevidence\n94\t10138\tdirect-spawn-area\n', encoding='utf-8')
+            second.write_text('npc_id\tarea_id\tevidence\n161700\t10138\treviewed-report\n', encoding='utf-8')
+            self.assertEqual(dict(npc_zone_claims(root)), {'94': {'10138'}, '161700': {'10138'}})
 
     def test_facets_keep_records_modes_and_unknowns_separate(self):
         with tempfile.TemporaryDirectory() as temp:

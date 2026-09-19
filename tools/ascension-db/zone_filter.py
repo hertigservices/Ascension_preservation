@@ -4,6 +4,7 @@ Never propagate locations across entity IDs, modes or sources. Quest ZoneOrSort
 is an area ID only when positive; negative values are quest categories.
 """
 import collections
+import csv
 import gzip
 import hashlib
 import json
@@ -16,6 +17,28 @@ KINDS = {'quest', 'npc', 'gameobject', 'world-creature', 'world-object',
          'loot-pin', 'route-npc', 'route-landmark'}
 STEMS = {'questcache', 'creaturecache', 'gameobjectcache', 'quests', 'npcs',
          'creatures', 'gameobjects', 'pins', 'entities', 'npcs-by-floor'}
+NPC_ZONE_CLAIMS = 'npc-zone-claims.tsv'
+
+
+def npc_zone_claims(root):
+    """Load separately attributed NPC-to-area claims without indexing them as pages."""
+    claims = collections.defaultdict(set)
+    if root is None:
+        return claims
+    for path in sorted(Path(root).glob('supplemental/**/' + NPC_ZONE_CLAIMS + '*')):
+        opener = gzip.open if path.suffix == '.gz' else open
+        with opener(path, 'rt', encoding='utf-8', newline='') as stream:
+            reader = csv.DictReader(stream, delimiter='\t')
+            if not reader.fieldnames or not {'npc_id', 'area_id'} <= set(reader.fieldnames):
+                raise ValueError('Malformed NPC zone claims: ' + str(path))
+            for row in reader:
+                npc = str(row.get('npc_id', '')).strip()
+                area = str(row.get('area_id', '')).strip()
+                if (not re.fullmatch(r'[0-9]+', npc) or not re.fullmatch(r'[0-9]+', area)
+                        or int(npc) <= 0 or int(area) <= 0):
+                    raise ValueError('Invalid NPC zone claim: ' + str(path))
+                claims[str(int(npc))].add(str(int(area)))
+    return claims
 
 
 def records(root, manifest):
@@ -31,7 +54,7 @@ def records(root, manifest):
 
 
 class ZoneIndex:
-    def __init__(self, atlas):
+    def __init__(self, atlas, npc_claims=None):
         self.labels = {}
         self.names = collections.defaultdict(set)
         self.reviewed = collections.defaultdict(set)
@@ -56,6 +79,7 @@ class ZoneIndex:
                     self.names[compact(alias)].add(key)
                     self.reviewed[compact(alias)].add((str(world), key))
         self.atlas = {z['key']: z for z in atlas.get('zones', [])}
+        self.npc_claims = npc_claims or {}
 
     def area(self, value):
         value = str(value).strip()
@@ -125,15 +149,21 @@ class ZoneIndex:
                 for ref in structure.get('references', []):
                     if ref.get('type') == 'area':
                         found.add(self.area(ref.get('key', '')))
+            # The companion database export uses the same NPC ID namespace as
+            # these pages. Keep this join inside one provider: client captures,
+            # modes and unrelated sources never inherit the claim.
+            if kind == 'npc':
+                for area_id in self.npc_claims.get(str(row[0]), set()):
+                    found.add(self.area(area_id))
         found.discard(None)
         # A recorded sub-zone also belongs to its explicitly published ancestors.
         # Walk with a visited set because untrusted source hierarchies may cycle.
         return self.ancestors(found)
 
 
-def build_zone_filter(root, manifest, atlas, buckets, icons=None):
+def build_zone_filter(root, manifest, atlas, buckets, icons=None, data=None):
     root = Path(root)
-    index = ZoneIndex(atlas)
+    index = ZoneIndex(atlas, npc_zone_claims(data))
     with gzip.open(root / manifest['atlas']['links'], 'rt', encoding='utf-8') as stream:
         links = json.load(stream)
     counts = collections.defaultdict(collections.Counter)

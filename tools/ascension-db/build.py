@@ -31,6 +31,7 @@ def source_type(name):
     return 'Client captures'
 def adapter(name):
     if '/assets/' in name: return 'reference','Preserved website asset'
+    if Path(name).name.startswith('npc-zone-claims.tsv'): return 'reference','Attributed NPC-to-area claims consumed by the zone index'
     if name.endswith(('.tsv','.tsv.gz')): return 'tsv','Every row searchable; all original fields retained'
     if name.endswith('.jsonl.gz'): return 'jsonl','Every record searchable; source claims remain separate'
     if name.endswith('.json') and '/lua/' in name: return 'json','Structured addon reference; all top-level entries retained'
@@ -144,13 +145,16 @@ class IconIndex:
         return icon if icon and icon in self.available else ''
 
 class Buckets:
+    # Stay comfortably below common service-level file descriptor limits. Closed
+    # gzip streams are reopened in append mode, so this changes only resource use.
+    MAX_OPEN = 256
     def __init__(self,root): self.root=root;self.handles=collections.OrderedDict();self.keys={}
     def add(self,key,row,line=None):
         filename=self.keys.get(key)
         if filename is None:filename=hashlib.sha256(key.encode()).hexdigest()[:16]+'.jsonl.gz';self.keys[key]=filename
         if key in self.handles: f=self.handles.pop(key)
         else:
-            if len(self.handles)>=4096: self.handles.popitem(last=False)[1].close()
+            if len(self.handles)>=self.MAX_OPEN: self.handles.popitem(last=False)[1].close()
             f=gzip.open(self.root/filename,'at',encoding='utf-8',compresslevel=1)
         self.handles[key]=f;f.write(line if line is not None else dump(row)+'\n')
     def close(self):
@@ -243,7 +247,7 @@ def main():
             row=[f'{fid}/0/0',r['name'],kind,'Unspecified','Wayback recovery',str(i)]
             kinds[kind]+=1;manifest['records']+=1;manifest['sources']['Wayback recovery']=manifest['sources'].get('Wayback recovery',0)+1
         atlas = build_atlas(a.out,manifest,data_view)
-        build_grouped_search(a.out,manifest,atlas,buckets,icons,stage)
+        build_grouped_search(a.out,manifest,atlas,buckets,icons,stage,data_view)
         buckets.close()
         # Fold exact-ID buckets into first-two-digit buckets to keep the asset count bounded.
         # Prefix keys remain available for selecting candidate chunks; exact match is checked in browser.

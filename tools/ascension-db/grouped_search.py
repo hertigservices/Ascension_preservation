@@ -13,7 +13,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from zone_filter import ZoneIndex, KINDS, STEMS
+from zone_filter import ZoneIndex, KINDS, STEMS, npc_zone_claims
 
 SCHEMA = 'ascension-content-groups-1'
 BOOKKEEPING = {'_modes', '_captured', '_sources', '_locales'}
@@ -57,7 +57,7 @@ def search_row(gid, rows):
             {'id': gid, 'members': members}]
 
 
-def build_grouped_search(root, manifest, atlas, buckets, icons, stage):
+def build_grouped_search(root, manifest, atlas, buckets, icons, stage, data=None):
     root = Path(root)
     db = sqlite3.connect(str(Path(stage) / 'groups.sqlite'))
     db.execute('PRAGMA journal_mode=OFF')
@@ -65,7 +65,7 @@ def build_grouped_search(root, manifest, atlas, buckets, icons, stage):
     db.execute('PRAGMA cache_size=-32768')
     db.execute('PRAGMA temp_store=FILE')
     db.execute('CREATE TABLE records (gid TEXT, key TEXT, row TEXT, zones TEXT)')
-    zones = ZoneIndex(atlas)
+    zones = ZoneIndex(atlas, npc_zone_claims(data))
     with gzip.open(root / manifest['atlas']['links'], 'rt', encoding='utf-8') as stream:
         links = json.load(stream)
     counts = collections.defaultdict(collections.Counter)

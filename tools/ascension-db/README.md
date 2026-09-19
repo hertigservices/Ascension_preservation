@@ -124,13 +124,15 @@ The choices reflect the selected collection. The exact zone selection is retaine
 in the URL and combines with name, ID, source, mode, sorting and pagination.
 
 The index uses positive quest `ZoneOrSort` area IDs, explicit Exiles area/location
-claims, all catalogue `zone_list` entries (even without usable coordinates), loot
+claims, exact NPC-area claims derived from the companion Exiles database export,
+all catalogue `zone_list` entries (even without usable coordinates), loot
 observation zones and explicit instance reference floors. Recorded sub-zones also
 match their published parent areas. Negative quest categories
 and server map IDs are not interpreted as zone IDs. Unknown/custom area IDs stay
 searchable with an `Area <ID>` label if no name is known. Records without zone
-evidence remain under Unknown zone; locations are never copied between matching
-entity IDs in different sources or modes. These are recorded zones/locations, not
+evidence remain under Unknown zone. Companion export claims join only to Exiles NPC
+pages in the same provider ID namespace; locations are never copied to client captures,
+other sources or modes. These are recorded zones/locations, not
 a complete spawn census. Existing source records and atlas geometry are unchanged.
 
 Zone partitions use the existing content-addressed search format, so filtering

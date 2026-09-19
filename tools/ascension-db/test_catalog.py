@@ -13,8 +13,15 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(build.identify('cachedata/by-mode/conquest-of-azeroth/itemcache.tsv.gz',{'entry':'1','name':'One'},0)[3],'conquest-of-azeroth')
         self.assertEqual(build.identify('cachedata/union/itemcache.tsv.gz',{'entry':'1','name':'One','_modes':'a,b'},0)[3],'a,b')
     def test_unknown_and_binary_are_references(self):
-        for p in ['cachedata/raw/itemcache.pack.gz','cachedata/lua/MobSpells.lua','future/new-format.xyz']:
+        for p in ['cachedata/raw/itemcache.pack.gz','cachedata/lua/MobSpells.lua','future/new-format.xyz',
+                  'supplemental/npc-zone-claims/npc-zone-claims.tsv.gz']:
             self.assertEqual(build.adapter(p)[0],'reference')
+    def test_search_bucket_handles_are_bounded_for_services(self):
+        with tempfile.TemporaryDirectory() as d:
+            buckets=build.Buckets(Path(d))
+            for i in range(build.Buckets.MAX_OPEN+20):buckets.add('bucket:'+str(i),[str(i)])
+            self.assertEqual(len(buckets.handles),build.Buckets.MAX_OPEN)
+            buckets.close()
     def test_unicode_search(self):
         self.assertEqual(build.tokens('Épée de Straße'),['epee','de','strasse']);self.assertEqual(build.tokens('Меч'),['меч'])
     def test_malformed_tsv_is_not_silently_dropped(self):
