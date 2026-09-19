@@ -57,6 +57,19 @@ class ZoneFilterTests(unittest.TestCase):
         self.assertEqual(index.memberships('cachedata/union/creaturecache.tsv.gz', record('npc', {}, eid='161700')), set())
         self.assertEqual(index.memberships(exiles, record('quest', {}, eid='161700')), set())
 
+    def test_reviewed_northshire_ids_inherit_broad_zone_without_name_propagation(self):
+        atlas = {'areas': [
+            {'id': '9', 'name': 'Northshire Valley', 'parents': ['10138']},
+            {'id': '10138', 'name': 'Northshire Valley'},
+        ]}
+        index = ZoneIndex(atlas, {'161705': {'9'}, '161713': {'9'}})
+        exiles = 'supplemental/exiles-db/hash/npcs.jsonl.gz'
+        expected = {'area:9', 'area:10138'}
+        self.assertEqual(index.memberships(exiles, record('npc', {}, eid='161705')), expected)
+        self.assertEqual(index.memberships(exiles, record('npc', {}, eid='161713')), expected)
+        # A different entity with the same display name never inherits an ID claim.
+        self.assertEqual(index.memberships(exiles, record('npc', {}, eid='161904')), set())
+
     def test_claim_sidecars_are_validated_and_combined(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

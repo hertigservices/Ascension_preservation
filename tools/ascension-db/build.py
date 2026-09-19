@@ -32,6 +32,7 @@ def source_type(name):
 def adapter(name):
     if '/assets/' in name: return 'reference','Preserved website asset'
     if Path(name).name.startswith('npc-zone-claims.tsv'): return 'reference','Attributed NPC-to-area claims consumed by the zone index'
+    if Path(name).name.startswith('npc-zone-relation-audit.tsv'): return 'reference','Fail-closed NPC-to-area relationship review queue'
     if name.endswith(('.tsv','.tsv.gz')): return 'tsv','Every row searchable; all original fields retained'
     if name.endswith('.jsonl.gz'): return 'jsonl','Every record searchable; source claims remain separate'
     if name.endswith('.json') and '/lua/' in name: return 'json','Structured addon reference; all top-level entries retained'

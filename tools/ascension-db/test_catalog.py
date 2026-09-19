@@ -14,7 +14,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(build.identify('cachedata/union/itemcache.tsv.gz',{'entry':'1','name':'One','_modes':'a,b'},0)[3],'a,b')
     def test_unknown_and_binary_are_references(self):
         for p in ['cachedata/raw/itemcache.pack.gz','cachedata/lua/MobSpells.lua','future/new-format.xyz',
-                  'supplemental/npc-zone-claims/npc-zone-claims.tsv.gz']:
+                  'supplemental/npc-zone-claims/npc-zone-claims.tsv.gz',
+                  'supplemental/npc-zone-claims/npc-zone-relation-audit.tsv.gz']:
             self.assertEqual(build.adapter(p)[0],'reference')
     def test_search_bucket_handles_are_bounded_for_services(self):
         with tempfile.TemporaryDirectory() as d:

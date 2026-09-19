@@ -58,3 +58,31 @@ largest audited additions occur in Dun Morogh, Exodar, Silvermoon City, Thunder 
 Valley of Trials, Mulgore, Red Cloud Mesa, Crystalsong Forest, Caverns of Time, and
 Orgrimmar. This is a zone-facet repair, not a claim that the export is a complete live
 spawn census.
+
+## Quest-relationship follow-up
+
+Injured Northshire Guard (161705) and Wayward Theologian (161713) exposed two gaps
+that the spawn-only sweep could not detect. Both have empty rendered location data and
+no positive spawn-area row. Wayward Theologian is the exact numeric third objective
+target of quest 1660004, whose positive `ZoneOrSort` is area 9. Injured Northshire
+Guard is not a numeric target or an exported starter/ender; quest 1660005 instead says
+to return to the injured guard, and its area is Northshire Valley. Name-only matching
+would be unsafe because other records use the same Wayward Theologian name.
+
+The follow-up auditor therefore emits a review queue rather than propagating quest
+zones automatically. It covers exact `RequiredNpcOrGo1..4` IDs, exported quest
+starter/ender IDs, and a narrow prose rule that removes the quest area's distinctive
+word from an otherwise multi-word NPC name. Every row retains quest, relation, mode,
+locale, current locations, and evidence. Exact IDs prevent the other Wayward
+Theologian entries from inheriting 161713's claim; existing conflicting locations are
+flagged instead of overwritten.
+
+The complete run produced 7,212 relationship rows for 2,848 unique missing NPC/area
+pairs. Of these, 857 concern NPCs with no current zone and 1,975 have another current
+area. Cross-zone quests make those relationships candidates, not facts. Sixteen pairs
+were accepted after quest-by-quest review: six in Northshire (including the two
+reports), and ten across Dun Morogh, Tirisfal Glades, Coldridge Valley, Teldrassil,
+Deathknell, and Road to De Other Side. The other pairs remain non-indexed review data.
+
+Area 9 is an explicit child of broad Northshire area 10138, so the six accepted area-9
+NPCs also appear in the public Northshire filter through the existing ancestor rule.
