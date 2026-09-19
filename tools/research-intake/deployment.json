@@ -35,6 +35,10 @@
       "destination": "tools/policy.example.json"
     },
     {
+      "source": "tools/research-intake/normalize_jeff_fro.py",
+      "destination": "tools/normalize_jeff_fro.py"
+    },
+    {
       "source": "tools/research-intake/README.md",
       "destination": "tools/README.md"
     },

@@ -287,7 +287,7 @@ class Intake:
 
 
 PRIVATE_KEYS = re.compile(r'(?:password|secret|token|email|account|username|avatar|author|comment|player|character|source_guid|target_guid|source_name|target_name|session|cookie|authorization)',re.I)
-PRIVATE_TEXT = re.compile(r'[\w.+-]+@[\w-]+\.[A-Za-z]{2,}|(?:[A-Z]:[\\/]|/(?:home|Users)/)|WTF[\\/]Account[\\/]|0x[0-9a-f]{16}|discord(?:app)?\.com/avatars/',re.I)
+PRIVATE_TEXT = re.compile(r'[\w.+-]+@[\w-]+\.[A-Za-z]{2,}|(?:(?<![A-Za-z])[A-Z]:[\\/]|/(?:home|Users)/)|WTF[\\/]Account[\\/]|0x[0-9a-f]{16}|discord(?:app)?\.com/avatars/',re.I)
 
 
 def screen(value):

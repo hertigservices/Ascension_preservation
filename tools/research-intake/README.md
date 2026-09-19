@@ -124,6 +124,21 @@ record/artefact hashes, exact record ordinals, reader version, hold accounting a
 omitted-field counts. Default public limits are one million records / 128 MiB
 compressed per snapshot; exceeding them holds the export without losing originals.
 
+Jeff-Fro's sanitized class-spellbook snapshot is one nested JSON object. Normalize
+it into one reviewed observation per class/category/spell before registering its
+public source; the receipt binds the derived rows to both original input hashes.
+The original JSON remains privately preserved, and character level, race, skills,
+glyphs and talent state are deliberately not copied into the normalized records.
+
+```powershell
+python -B normalize_jeff_fro.py spellbooks --spellbooks D:/Donations/by-class.json --class-map D:/Donations/class-name-map.md --out D:/AscensionResearchDerived/jeff-fro-class-spellbooks.ndjson --receipt D:/AscensionResearchDerived/jeff-fro-class-spellbooks.receipt.json
+```
+
+The same tool has `changelog` and `tooltips` commands for the two free-text
+collections. They select the approved fields and apply the generic privacy screen
+plus the installation's private identity patterns before the derived records enter
+a public source. Receipts expose only redaction counts, never matched identities.
+
 Use a **dedicated secondary `ascension-data` Git worktree** for delivery. The active
 cache publisher checkout is never an export staging directory. `publish.py` stages
 only a small verified dataset manifest, refuses unrelated changes, commits locally, and

@@ -139,6 +139,10 @@ class IntakeTests(unittest.TestCase):
             with self.assertRaises(ValueError):intake.export(e,'test',self.policy(publication='private'),self.base/'public')
             with self.assertRaises(ValueError):intake.export(e,'test',self.policy(),self.base/'public')
             self.assertEqual(list((self.root/'exports').iterdir()),[])
+    def test_privacy_screen_distinguishes_urls_and_tooltip_escapes_from_drive_paths(self):
+        intake.screen('https://ascension.gg/status')
+        intake.screen(r'Instant:\n')
+        with self.assertRaises(readers.Held):intake.screen(r'C:\Users\Player\file.txt')
     def test_lock_and_corruption(self):
         p=self.file('data.json','{}')
         with self.engine() as e:
